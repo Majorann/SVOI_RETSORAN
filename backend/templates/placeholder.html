@@ -1,0 +1,29 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section class="placeholder">
+  <a class="back" href="{{ url_for('index') }}">← На главную</a>
+  <div class="placeholder__card">
+    <h1>{{ title }}</h1>
+    <p>Раздел в разработке. Мы подключим его на следующем этапе.</p>
+    <a class="primary-action" href="{{ url_for('reserve') }}">Заказать столик</a>
+  </div>
+</section>
+
+<nav class="bottom-nav">
+  <a class="bottom-nav__item" href="{{ url_for('notifications') }}">
+    <span>🔔</span>
+    <span>Уведомления</span>
+    {% if notifications_count %}
+      <span class="nav-badge">{{ notifications_count }}</span>
+    {% endif %}
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('index') }}">
+    <span>🏠</span>
+    <span>Главная</span>
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('profile') }}">
+    <span>👤</span>
+    <span>Профиль</span>
+  </a>
+</nav>
+{% endblock %}

@@ -1,0 +1,57 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<header class="top">
+  <div class="brand">
+    <div class="brand__mark">С</div>
+    <div>
+      <p class="brand__name">Уведомления</p>
+      <p class="brand__tag">Ваши брони</p>
+    </div>
+  </div>
+  <a class="icon-button" href="{{ url_for('index') }}" aria-label="На главную">🏠</a>
+</header>
+
+<section class="section">
+  {% if bookings %}
+    {% for booking in bookings %}
+      <div class="notice">
+        <div class="notice__title">Бронь подтверждена</div>
+        <div class="notice__meta">
+          Стол №{{ booking.table_id }} · {{ booking.date }} · {{ booking.time }}
+        </div>
+        <div class="notice__text">Ждём вас!</div>
+      </div>
+    {% endfor %}
+    <div class="notice notice--ad">
+      <div class="notice__title">Реклама</div>
+      <div class="notice__meta">Место для будущих акций и партнёров.</div>
+    </div>
+  {% else %}
+    <div class="notice notice--empty">
+      Пока нет уведомлений о бронировании.
+    </div>
+    <div class="notice notice--ad">
+      <div class="notice__title">Реклама</div>
+      <div class="notice__meta">Место для будущих акций и партнёров.</div>
+    </div>
+  {% endif %}
+</section>
+
+<nav class="bottom-nav">
+  <a class="bottom-nav__item bottom-nav__item--active" href="{{ url_for('notifications') }}">
+    <span>🔔</span>
+    <span>Уведомления</span>
+    {% if notifications_count %}
+      <span class="nav-badge">{{ notifications_count }}</span>
+    {% endif %}
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('index') }}">
+    <span>🏠</span>
+    <span>Главная</span>
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('profile') }}">
+    <span>👤</span>
+    <span>Профиль</span>
+  </a>
+</nav>
+{% endblock %}

@@ -1,0 +1,128 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<header class="top">
+  <div class="brand">
+    <div class="brand__mark">С</div>
+    <div>
+      <p class="brand__name">Свои</p>
+      <p class="brand__tag">Домашний ресторан</p>
+    </div>
+  </div>
+  <button class="icon-button" aria-label="Уведомления">
+    <span>🔔</span>
+  </button>
+</header>
+
+{% if bookings %}
+<section class="section bookings">
+  <div class="section__title">
+    <h2>Ваши брони</h2>
+    <span class="pill">Активно</span>
+  </div>
+  <div class="bookings__list">
+    {% for booking in bookings %}
+      <div class="booking-card">
+        <div>
+          <p class="booking-card__title">Стол №{{ booking.table_id }}</p>
+          <p class="booking-card__meta">{{ booking.date }} · {{ booking.time }}</p>
+        </div>
+        <div class="booking-card__actions">
+          <a class="booking-card__action" href="{{ url_for('menu') }}">Меню</a>
+          <form method="post" action="{{ url_for('cancel_booking') }}">
+            <input type="hidden" name="table_id" value="{{ booking.table_id }}" />
+            <input type="hidden" name="date" value="{{ booking.date }}" />
+            <input type="hidden" name="time" value="{{ booking.time }}" />
+            <button class="booking-card__action booking-card__action--danger" type="submit">Отменить</button>
+          </form>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="section{% if bookings %} section--shifted{% endif %}">
+  <div class="section__title">
+    <h1>Что нового сегодня</h1>
+    <span class="pill">Новости</span>
+  </div>
+  <div class="news" role="list">
+    {% for card in news %}
+      <article class="news-card" role="listitem">
+        <div class="news-card__image">
+          <span class="news-card__accent">{{ card.accent }}</span>
+        </div>
+        <div class="news-card__body">
+          <h3>{{ card.title }}</h3>
+          <p>{{ card.text }}</p>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="section">
+  <a class="primary-action" href="{{ url_for('reserve') }}">
+    Заказать столик
+  </a>
+  <div class="secondary-actions">
+    <a class="secondary-card" href="{{ url_for('points') }}">
+      <div class="secondary-card__icon secondary-card__icon--image">
+        <img src="{{ url_for('static', filename='img/P_RU.png') }}" alt="Баллы" />
+      </div>
+      <div>
+        <p class="secondary-card__title">Мои баллы</p>
+        <p class="secondary-card__text">Бонусы и уровни</p>
+      </div>
+    </a>
+    <a class="secondary-card" href="{{ url_for('delivery') }}">
+      <div class="secondary-card__icon">🚚</div>
+      <div>
+        <p class="secondary-card__title">Доставка</p>
+        <p class="secondary-card__text">Привезем быстро</p>
+      </div>
+    </a>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section__title section__title--menu">
+    <h2>Меню → Популярное</h2>
+    <a class="link" href="{{ url_for('delivery') }}">Смотреть все</a>
+  </div>
+  <div class="menu">
+    {% for dish in menu %}
+      <a class="menu-card" href="{{ url_for('menu_item', item_id=dish.id) }}">
+        <div class="menu-card__media menu-card__media--{{ dish.photo }}">
+          <span class="badge">{{ dish.type }}</span>
+        </div>
+        <div class="menu-card__content">
+          <h3>{{ dish.name }}</h3>
+          <p>{{ dish.lore }}</p>
+          <div class="menu-card__meta">
+            <span class="price">{{ dish.price }} ₽</span>
+          </div>
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+</section>
+
+<nav class="bottom-nav">
+  <a class="bottom-nav__item" href="{{ url_for('notifications') }}">
+    <span>🔔</span>
+    <span>Уведомления</span>
+    {% if notifications_count %}
+      <span class="nav-badge">{{ notifications_count }}</span>
+    {% endif %}
+  </a>
+  <a class="bottom-nav__item bottom-nav__item--active" href="{{ url_for('index') }}">
+    <span>🏠</span>
+    <span>Главная</span>
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('profile') }}">
+    <span>👤</span>
+    <span>Профиль</span>
+  </a>
+</nav>
+{% endblock %}

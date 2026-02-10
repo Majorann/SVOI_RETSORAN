@@ -1,0 +1,50 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<header class="top">
+  <div class="brand">
+    <div class="brand__mark">С</div>
+    <div>
+      <p class="brand__name">Войдите в аккаунт</p>
+      <p class="brand__tag">Добро пожаловать</p>
+    </div>
+  </div>
+</header>
+
+<section class="section auth">
+  <form class="auth__card" method="post">
+    {% if error %}
+      <div class="auth__error">{{ error }}</div>
+    {% endif %}
+    <label class="field">
+      <span>Номер телефона</span>
+      <input type="tel" name="phone" placeholder="+7 (999) 000-00-00" required />
+    </label>
+    <label class="field">
+      <span>Пароль</span>
+      <input type="password" name="password" placeholder="Введите пароль" required />
+    </label>
+    <button class="primary-action" type="submit">Войти</button>
+    <p class="auth__hint">
+      Нет аккаунта? <a class="link" href="{{ url_for('register') }}">Зарегистрироваться</a>
+    </p>
+  </form>
+</section>
+
+<nav class="bottom-nav">
+  <a class="bottom-nav__item" href="{{ url_for('notifications') }}">
+    <span>🔔</span>
+    <span>Уведомления</span>
+    {% if notifications_count %}
+      <span class="nav-badge">{{ notifications_count }}</span>
+    {% endif %}
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('index') }}">
+    <span>🏠</span>
+    <span>Главная</span>
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('profile') }}">
+    <span>👤</span>
+    <span>Профиль</span>
+  </a>
+</nav>
+{% endblock %}

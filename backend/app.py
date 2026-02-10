@@ -1,0 +1,640 @@
+"""
+Restaurant demo app (Flask).
+- Landing, hall reservation, menu, notifications, auth
+- Bookings/users stored in JSON files
+"""
+
+from flask import Flask, render_template, url_for, request, jsonify, session, redirect
+from datetime import datetime, date, timedelta
+from pathlib import Path
+import json
+import hashlib
+
+app = Flask(__name__)
+# Хранилища JSON
+BOOKINGS_PATH = Path(__file__).with_name("bookings.json")
+USERS_PATH = Path(__file__).with_name("users.json")
+# Длительность брони в минутах (для проверки пересечений)
+BOOKING_DURATION_MINUTES = 60
+# Секрет для сессий (в проде заменить)
+app.secret_key = "replace-me-in-production"
+# Карусель на главной
+NEWS_CARDS = [
+    {
+        "title": "Новое сезонное меню",
+        "text": "Теплые блюда и авторские напитки — только в феврале.",
+        "accent": "Сезон",
+    },
+    {
+        "title": "Живой вечер",
+        "text": "Акустический сет по пятницам. Бронируйте заранее.",
+        "accent": "Музыка",
+    },
+    {
+        "title": "Сет для двоих",
+        "text": "Специальная цена до 20:00 каждый день.",
+        "accent": "Акция",
+    },
+]
+
+# Популярные позиции на главной (заглушки)
+POPULAR_MENU = [
+    {
+        "id": 1,
+        "name": "name",
+        "photo": "photo",
+        "lore": "lore",
+        "type": "type",
+        "price": "price",
+    },
+    {
+        "id": 2,
+        "name": "name",
+        "photo": "photo",
+        "lore": "lore",
+        "type": "type",
+        "price": "price",
+    },
+    {
+        "id": 3,
+        "name": "name",
+        "photo": "photo",
+        "lore": "lore",
+        "type": "type",
+        "price": "price",
+    },
+]
+
+MENU_ITEMS = [
+    {**POPULAR_MENU[0], "id": 101, "type": "Закуски"},
+    {**POPULAR_MENU[1], "id": 102, "type": "Салаты"},
+    {**POPULAR_MENU[2], "id": 103, "type": "Супы"},
+    {**POPULAR_MENU[0], "id": 104, "type": "Горячие блюда"},
+    {**POPULAR_MENU[1], "id": 105, "type": "Десерты"},
+    {**POPULAR_MENU[2], "id": 106, "type": "Напитки"},
+    {**POPULAR_MENU[0], "id": 107, "type": "Алкогольные напитки"},
+]
+
+# Схема зала: координаты и расстановка стульев (в процентах)
+TABLES = [
+    {
+        "id": 1,
+        "label": "Стол 1",
+        "seats": 5,
+        "window": True,
+        "status": "free",
+        "x": 12,
+        "y": 12,
+        "shape": "rect",
+        "chairs": {"top": "Sofa", "bottom": 2, "left": 0, "right": 0},
+    },
+    {
+        "id": 2,
+        "label": "Стол 2",
+        "seats": 4,
+        "window": True,
+        "status": "free",
+        "x": 12,
+        "y": 32,
+        "shape": "rect",
+        "chairs": {"top": 2, "bottom": 2, "left": 0, "right": 0},
+    },
+    {
+        "id": 3,
+        "label": "Стол 3",
+        "seats": 4,
+        "window": True,
+        "status": "free",
+        "x": 12,
+        "y": 69,
+        "shape": "rect",
+        "chairs": {"top": 2, "bottom": 2, "left": 0, "right": 0},
+    },
+    {
+        "id": 4,
+        "label": "Стол 4",
+        "seats": 2,
+        "window": False,
+        "status": "free",
+        "x": 36,
+        "y": 32,
+        "shape": "square",
+        "chairs": {"top": 1, "bottom": 1, "left": 0, "right": 0},
+    },
+    {
+        "id": 5,
+        "label": "Стол 5",
+        "seats": 2,
+        "window": False,
+        "status": "free",
+        "x": 50,
+        "y": 32,
+        "shape": "square",
+        "chairs": {"top": 1, "bottom": 1, "left": 0, "right": 0},
+    },
+    {
+        "id": 6,
+        "label": "Стол 6",
+        "seats": 3,
+        "window": False,
+        "status": "free",
+        "x": 90,
+        "y": 28,
+        "shape": "square",
+        "chairs": {"top": 1, "bottom": 0, "left": 1, "right": 1},
+    },
+    {
+        "id": 7,
+        "label": "Стол 7",
+        "seats": 5,
+        "window": False,
+        "status": "free",
+        "x": 72,
+        "y": 69,
+        "shape": "rect",
+        "chairs": {"top": 2, "bottom": 2, "left": 1, "right": 0},
+    },
+    {
+        "id": 8,
+        "label": "Стол 8",
+        "seats": 4,
+        "window": False,
+        "status": "free",
+        "x": 90,
+        "y": 69,
+        "shape": "rect",
+        "chairs": {"top": 2, "bottom": 2, "left": 0, "right": 0},
+    },
+    {
+        "id": 9,
+        "label": "Стол 9",
+        "seats": 8,
+        "window": False,
+        "status": "free",
+        "x": 36,
+        "y": 69,
+        "shape": "rect",
+        "chairs": {"top": 2, "bottom": "Sofa", "left": 0, "right": "Sofa"},
+    },
+    {
+        "id": 10,
+        "label": "Стол 10",
+        "seats": 15,
+        "window": False,
+        "status": "free",
+        "x": 80,
+        "y": 89,
+        "shape": "long",
+        "chairs": {"top": 5, "bottom": "Sofa", "left": 1, "right": "Sofa"},
+    },
+    {
+        "id": 11,
+        "label": "Стол 11",
+        "seats": 5,
+        "window": True,
+        "status": "free",
+        "x": 12,
+        "y": 89,
+        "shape": "rect",
+        "chairs": {"top": 2, "bottom": "Sofa", "left": 0, "right": 0},
+    },
+    {
+        "id": 12,
+        "label": "Стол 12",
+        "seats": 9,
+        "window": False,
+        "status": "free",
+        "x": 36,
+        "y": 89,
+        "shape": "rect",
+        "chairs": {"top": "Sofa", "bottom": "Sofa", "left": 0, "right": "Sofa"},
+    },
+    {
+        "id": 13,
+        "label": "Стол 13",
+        "seats": 6,
+        "window": False,
+        "status": "free",
+        "x": 80,
+        "y": 46,
+        "shape": "long",
+        "chairs": {"top": "Sofa", "bottom": "Sofa", "left": 1, "right": 1},
+    }
+]
+
+# Стены задаются CSS-классами
+WALLS = [
+    {"class": "wall--wc-left"},
+    {"class": "wall--wc-top"},
+    {"class": "wall--left-upper"},
+    {"class": "wall--left-lower"},
+    {"class": "wall--mid-l"},
+    {"class": "wall--mid-down"},
+]
+
+
+@app.route("/")
+def index():
+    # На главной показываем брони только текущего пользователя
+    user_id = session.get("user_id")
+    bookings = load_bookings()
+    if user_id:
+        bookings = [b for b in bookings if b.get("user_id") == user_id]
+    else:
+        bookings = []
+    return render_template("index.html", news=NEWS_CARDS, menu=POPULAR_MENU, bookings=bookings)
+
+
+@app.route("/reserve")
+def reserve():
+    # Определяем занятость столов на выбранные дату/время
+    selected_date = request.args.get("date")
+    if selected_date is None:
+        selected_date = date.today().isoformat()
+    selected_time = request.args.get("time")
+    if selected_time is None:
+        selected_time = datetime.now().strftime("%H:%M")
+
+    bookings = load_bookings()
+    selected_dt = parse_datetime(selected_date, selected_time)
+    reserved_ids = {
+        item["table_id"]
+        for item in bookings
+        if selected_dt and overlaps_booking(item, selected_dt)
+    }
+
+    tables = []
+    for table in TABLES:
+        updated = dict(table)
+        if updated["id"] in reserved_ids:
+            updated["status"] = "reserved"
+        tables.append(updated)
+
+    return render_template("reserve.html", tables=tables, walls=WALLS)
+
+
+@app.get("/availability")
+def availability():
+    # API: список занятых столов на дату/время (окно 1 час)
+    selected_date = request.args.get("date")
+    selected_time = request.args.get("time")
+    if not selected_date or not selected_time:
+        return jsonify({"ok": False, "error": "date/time required"}), 400
+    bookings = load_bookings()
+    selected_dt = parse_datetime(selected_date, selected_time)
+    if selected_dt is None:
+        return jsonify({"ok": False, "error": "Invalid date/time"}), 400
+    reserved_ids = [
+        item["table_id"]
+        for item in bookings
+        if overlaps_booking(item, selected_dt)
+    ]
+    return jsonify({"ok": True, "reserved": reserved_ids})
+
+
+@app.route("/points")
+def points():
+    return render_template("placeholder.html", title="Мои баллы")
+
+
+@app.route("/profile")
+def profile():
+    # Профиль показывает имя, баланс, карты и свои брони
+    user_name = session.get("user_name")
+    user_id = session.get("user_id")
+    error = request.args.get("error")
+    user_record = None
+    if user_id:
+        user_record = next((u for u in load_users() if u.get("id") == user_id), None)
+    user = {
+        "name": user_name or "Имя пользователя",
+        "avatar": None,
+        "balance": (user_record or {}).get("balance", 0),
+        "cards": (user_record or {}).get("cards", []),
+    }
+    bookings = load_bookings()
+    if user_id:
+        bookings = [b for b in bookings if b.get("user_id") == user_id]
+    else:
+        bookings = []
+    return render_template(
+        "profile.html",
+        user=user,
+        cards=user["cards"],
+        bookings=bookings,
+        is_authenticated=bool(user_id),
+        payment_error=error,
+    )
+
+
+@app.route("/delivery")
+def delivery():
+    return render_template("placeholder.html", title="Доставка")
+
+
+@app.route("/notifications")
+def notifications():
+    # Уведомления — это брони текущего пользователя
+    user_id = session.get("user_id")
+    bookings = load_bookings()
+    if user_id:
+        bookings = [b for b in bookings if b.get("user_id") == user_id]
+    else:
+        bookings = []
+    bookings_sorted = sorted(
+        bookings,
+        key=lambda b: (b.get("date", ""), b.get("time", ""), b.get("created_at", "")),
+        reverse=True,
+    )
+    return render_template("notifications.html", bookings=bookings_sorted)
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    # Вход через users.json
+    if request.method == "POST":
+        phone = (request.form.get("phone") or "").strip()
+        password = request.form.get("password") or ""
+        users = load_users()
+        user = next((u for u in users if u.get("phone") == phone), None)
+        if not user or user.get("password_hash") != hash_password(password):
+            return render_template("login.html", error="Неверный телефон или пароль.")
+        session["user_id"] = user.get("id")
+        session["user_name"] = user.get("name")
+        return redirect(url_for("index"))
+    return render_template("login.html", error=None)
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    # Регистрация нового пользователя в users.json
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        phone = (request.form.get("phone") or "").strip()
+        password = request.form.get("password") or ""
+        if not name or not phone or not password:
+            return render_template("register.html", error="Заполните все поля.")
+        users = load_users()
+        if any(u.get("phone") == phone for u in users):
+            return render_template("register.html", error="Этот номер уже зарегистрирован.")
+        new_user = {
+            "id": next_user_id(users),
+            "name": name,
+            "phone": phone,
+            "password_hash": hash_password(password),
+            "balance": 0,
+            "cards": [
+                {"brand": "Visa", "last4": "4821", "active": True},
+                {"brand": "Mastercard", "last4": "1044", "active": False},
+            ],
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        users.append(new_user)
+        save_users(users)
+        session["user_id"] = new_user["id"]
+        session["user_name"] = new_user["name"]
+        return redirect(url_for("index"))
+    return render_template("register.html", error=None)
+@app.route("/logout")
+def logout():
+    # Очищаем сессию и уходим на логин
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.context_processor
+def inject_notifications_count():
+    # Бейдж уведомлений в нижнем меню
+    user_id = session.get("user_id")
+    bookings = load_bookings()
+    if user_id:
+        bookings = [b for b in bookings if b.get("user_id") == user_id]
+    else:
+        bookings = []
+    return {"notifications_count": len(bookings), "current_user_name": session.get("user_name")}
+
+
+@app.route("/orders")
+def orders():
+    return render_template("placeholder.html", title="История заказов")
+
+
+@app.route("/reviews")
+def reviews():
+    return render_template("placeholder.html", title="Мои отзывы")
+
+
+@app.route("/menu/<int:item_id>")
+def menu_item(item_id: int):
+    item = next((dish for dish in POPULAR_MENU if dish["id"] == item_id), None)
+    if item is None:
+        return render_template("placeholder.html", title="Блюдо не найдено"), 404
+    return render_template("menu-item.html", item=item)
+
+
+@app.route("/menu")
+def menu():
+    return render_template("menu.html", items=MENU_ITEMS)
+
+@app.post("/book")
+def book_table():
+    # Создать бронь (нужен вход)
+    data = request.get_json(silent=True) or {}
+    user_id = session.get("user_id")
+    table_id = data.get("table_id")
+    date_str = data.get("date")
+    time_str = data.get("time")
+    name = (data.get("name") or "").strip()
+
+    if not user_id:
+        return jsonify({"ok": False, "error": "Требуется вход в аккаунт."}), 401
+    if not all([table_id, date_str, time_str, name]):
+        return jsonify({"ok": False, "error": "Заполните все поля."}), 400
+
+    try:
+        booking_dt = datetime.fromisoformat(f"{date_str}T{time_str}")
+    except ValueError:
+        return jsonify({"ok": False, "error": "Неверные дата/время."}), 400
+
+    if booking_dt < datetime.now():
+        return jsonify({"ok": False, "error": "Время не может быть в прошлом."}), 400
+
+    bookings = load_bookings()
+    if any(
+        b.get("table_id") == table_id and overlaps_booking(b, booking_dt)
+        for b in bookings
+    ):
+        return jsonify({"ok": False, "error": "Столик уже занят на это время."}), 409
+
+    bookings.append(
+        {
+            "table_id": table_id,
+            "date": date_str,
+            "time": time_str,
+            "name": name,
+            "user_id": user_id,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+    save_bookings(bookings)
+    return jsonify({"ok": True})
+
+
+def load_bookings():
+    # Безопасное чтение bookings.json
+    if not BOOKINGS_PATH.exists():
+        return []
+    try:
+        bookings = json.loads(BOOKINGS_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    now = datetime.now()
+    active = []
+    for booking in bookings:
+        booking_dt = parse_datetime(booking.get("date"), booking.get("time"))
+        if booking_dt is None:
+            continue
+        if booking_dt + timedelta(minutes=BOOKING_DURATION_MINUTES) <= now:
+            continue
+        active.append(booking)
+    if len(active) != len(bookings):
+        save_bookings(active)
+    return active
+
+
+def save_bookings(bookings):
+    # Сохранение bookings.json
+    BOOKINGS_PATH.write_text(json.dumps(bookings, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_users():
+    # Безопасное чтение users.json
+    if not USERS_PATH.exists():
+        return []
+    try:
+        return json.loads(USERS_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+
+
+def save_users(users):
+    # Сохранение users.json
+    USERS_PATH.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def next_user_id(users):
+    # Авто‑инкремент id в users.json
+    if not users:
+        return 1
+    return max(u.get("id", 0) for u in users) + 1
+
+
+def hash_password(password):
+    # Простой хеш для демо (без соли)
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def parse_datetime(date_str, time_str):
+    # Помощник для парсинга ISO даты/времени
+    try:
+        return datetime.fromisoformat(f"{date_str}T{time_str}")
+    except (TypeError, ValueError):
+        return None
+
+
+def overlaps_booking(booking, selected_dt):
+    # Проверяем, попадает ли время в окно брони
+    booking_dt = parse_datetime(booking.get("date"), booking.get("time"))
+    if booking_dt is None:
+        return False
+    end_dt = booking_dt + timedelta(minutes=BOOKING_DURATION_MINUTES)
+    return booking_dt <= selected_dt < end_dt
+
+
+@app.post("/release")
+def release_table():
+    # Заглушка (будущий сценарий для персонала)
+    return jsonify({"ok": False, "error": "Освобождение столиков будет добавлено позже."}), 501
+
+@app.post("/bookings/cancel")
+def cancel_booking():
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login"))
+
+    table_id = request.form.get("table_id", type=int)
+    date_str = request.form.get("date")
+    time_str = request.form.get("time")
+    if not table_id or not date_str or not time_str:
+        return redirect(url_for("index"))
+
+    bookings = load_bookings()
+    remaining = []
+    removed = False
+    for booking in bookings:
+        if (
+            not removed
+            and booking.get("user_id") == user_id
+            and booking.get("table_id") == table_id
+            and booking.get("date") == date_str
+            and booking.get("time") == time_str
+        ):
+            removed = True
+            continue
+        remaining.append(booking)
+    if removed:
+        save_bookings(remaining)
+    return redirect(url_for("index"))
+
+
+@app.post("/cards/add")
+def add_card():
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login"))
+
+    number = (request.form.get("card_number") or "").strip()
+    expiry = (request.form.get("expiry") or "").strip()
+    holder = (request.form.get("holder") or "").strip()
+
+    digits = "".join(ch for ch in number if ch.isdigit())
+    if len(digits) < 12:
+        return redirect(url_for("profile", error="Введите корректный номер карты."))
+
+    if expiry and "/" not in expiry:
+        return redirect(url_for("profile", error="Введите срок в формате ММ/ГГ."))
+
+    if digits.startswith("4"):
+        brand = "Visa"
+    elif digits.startswith("5"):
+        brand = "Mastercard"
+    elif digits.startswith("2"):
+        brand = "Мир"
+    else:
+        brand = "Карта"
+
+    users = load_users()
+    user_record = next((u for u in users if u.get("id") == user_id), None)
+    if not user_record:
+        return redirect(url_for("profile", error="Пользователь не найден."))
+
+    cards = user_record.get("cards", [])
+    for card in cards:
+        card["active"] = False
+    cards.append(
+        {
+            "brand": brand,
+            "last4": digits[-4:],
+            "active": True,
+            "holder": holder or None,
+            "expiry": expiry or None,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+    user_record["cards"] = cards
+    save_users(users)
+    return redirect(url_for("profile"))
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
