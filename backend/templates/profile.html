@@ -1,0 +1,131 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<header class="top">
+  <div class="brand">
+    <div class="brand__mark">С</div>
+    <div>
+      <p class="brand__name">Профиль</p>
+      <p class="brand__tag">Учетные данные</p>
+    </div>
+  </div>
+  <a class="icon-button icon-button--danger" href="{{ url_for('logout') }}" aria-label="Выйти">Выйти</a>
+</header>
+
+<section class="section">
+  <div class="profile-card">
+    <div class="profile-avatar">{{ user.name[:1] }}</div>
+    <div>
+      <p class="profile-name">{{ user.name }}</p>
+      {% if is_authenticated %}
+        <p class="profile-sub">Баланс: {{ user.balance }} баллов</p>
+      {% else %}
+        <p class="profile-sub">Войдите, чтобы увидеть брони</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+
+<section class="section">
+  <div class="section__title">
+    <h2>Способы оплаты</h2>
+    <span class="pill">Карты</span>
+  </div>
+  <div class="payments">
+    {% if is_authenticated %}
+      {% if payment_error %}
+        <div class="notice notice--error">{{ payment_error }}</div>
+      {% endif %}
+      {% for card in cards %}
+        <button class="payment-card{% if card.active %} payment-card--active{% endif %}" type="button">
+          <div class="payment-card__brand">{{ card.brand }}</div>
+          <div class="payment-card__number">•••• {{ card.last4 }}</div>
+          <div class="payment-card__status">{% if card.active %}Активна{% else %}Не активна{% endif %}</div>
+        </button>
+      {% endfor %}
+      <details class="payment-add">
+        <summary class="payment-card payment-card--add">+ Привязать новую карту</summary>
+        <form class="payment-form" method="post" action="{{ url_for('add_card') }}">
+          <label class="payment-form__field">
+            <span>Номер карты</span>
+            <input type="text" name="card_number" placeholder="0000 0000 0000 0000" inputmode="numeric" autocomplete="cc-number" required />
+          </label>
+          <div class="payment-form__row">
+            <label class="payment-form__field">
+              <span>Срок</span>
+              <input type="text" name="expiry" placeholder="MM/YY" inputmode="numeric" autocomplete="cc-exp" />
+            </label>
+            <label class="payment-form__field">
+              <span>Имя</span>
+              <input type="text" name="holder" placeholder="Имя на карте" autocomplete="cc-name" maxlength="26" />
+            </label>
+          </div>
+          <button class="primary-action" type="submit">Сохранить</button>
+        </form>
+      </details>
+    {% else %}
+      <div class="notice notice--empty">Войдите, чтобы управлять картами.</div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="section">
+  <div class="section__title">
+    <h2>Мои брони</h2>
+  </div>
+  {% if is_authenticated and bookings %}
+    <div class="bookings__list">
+      {% for booking in bookings %}
+        <div class="booking-card">
+          <div>
+            <p class="booking-card__title">Стол №{{ booking.table_id }}</p>
+            <p class="booking-card__meta">{{ booking.date }} · {{ booking.time }}</p>
+          </div>
+          <span class="booking-card__action">Ждём вас!</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% elif is_authenticated %}
+    <div class="notice notice--empty">Пока нет активных броней.</div>
+  {% else %}
+    <div class="notice notice--empty">Войдите, чтобы увидеть свои брони.</div>
+  {% endif %}
+</section>
+
+<section class="section">
+  <div class="list-card">
+    <a class="list-card__row" href="{{ url_for('orders') }}">
+      <div>
+        <p class="list-card__title">История заказов</p>
+        <p class="list-card__text">Состав, даты и суммы</p>
+      </div>
+      <span>→</span>
+    </a>
+    <a class="list-card__row list-card__row--disabled" href="{{ url_for('reviews') }}">
+      <div>
+        <p class="list-card__title">Мои отзывы</p>
+        <p class="list-card__text">Раздел появится позже</p>
+      </div>
+      <span>⏳</span>
+    </a>
+  </div>
+</section>
+
+<nav class="bottom-nav">
+  <a class="bottom-nav__item" href="{{ url_for('notifications') }}">
+    <span>🔔</span>
+    <span>Уведомления</span>
+    {% if notifications_count %}
+      <span class="nav-badge">{{ notifications_count }}</span>
+    {% endif %}
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('index') }}">
+    <span>🏠</span>
+    <span>Главная</span>
+  </a>
+  <a class="bottom-nav__item bottom-nav__item--active" href="{{ url_for('profile') }}">
+    <span>👤</span>
+    <span>Профиль</span>
+  </a>
+</nav>
+{% endblock %}

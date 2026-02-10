@@ -1,0 +1,35 @@
+[
+  {
+    "id": 1,
+    "name": "Андрей",
+    "phone": "+79637371588",
+    "password_hash": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
+    "created_at": "2026-02-03T16:57:29",
+    "cards": [
+      {
+        "brand": "Карта",
+        "last4": "4124",
+        "active": false,
+        "holder": "ANDREY YAROSHCUK",
+        "expiry": "12/34",
+        "created_at": "2026-02-03T19:15:15"
+      },
+      {
+        "brand": "Карта",
+        "last4": "5123",
+        "active": false,
+        "holder": "ANDREY YAROSHCUK",
+        "expiry": "12/33",
+        "created_at": "2026-02-04T00:21:54"
+      },
+      {
+        "brand": "Карта",
+        "last4": "3512",
+        "active": true,
+        "holder": "ANDREY YAROSHCUK",
+        "expiry": "12/31",
+        "created_at": "2026-02-04T00:23:15"
+      }
+    ]
+  }
+]

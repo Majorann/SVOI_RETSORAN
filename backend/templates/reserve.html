@@ -1,0 +1,162 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<header class="top">
+  <div class="brand">
+    <div class="brand__mark">С</div>
+    <div>
+      <p class="brand__name">Заказать столик</p>
+      <p class="brand__tag">Выберите место на карте</p>
+    </div>
+  </div>
+  <a class="icon-button" href="{{ url_for('index') }}" aria-label="На главную">🏠</a>
+</header>
+
+<section class="section">
+  <div class="section__title">
+    <h2>Схема зала</h2>
+    <span class="pill">Интерактивно</span>
+  </div>
+  <div class="hall hall--with-timeline">
+    <div class="hall__neon" id="hallNeon" aria-hidden="true"></div>
+    <div class="hall__map">
+      <div class="hall__blur" aria-hidden="true"></div>
+      {% for wall in walls %}
+        <div class="hall__wall {{ wall.class }}"></div>
+      {% endfor %}
+      <div class="hall__bar">Бар</div>
+      <div class="hall__restroom hall__restroom--female">Ж</div>
+      <div class="hall__restroom hall__restroom--male">М</div>
+
+      {% for table in tables %}
+        <div
+          class="table table--{{ table.status }} table--{{ table.shape }}"
+          style="left: {{ table.x }}%; top: {{ table.y }}%;"
+          data-id="{{ table.id }}"
+          data-label="{{ table.label }}"
+          data-seats="{{ table.seats }}"
+          data-window="{% if table.window %}Да{% else %}Нет{% endif %}"
+        >
+          <div class="table__top">{{ table.id }}</div>
+          <div class="table__chairs">
+            {% if table.chairs.top == "Sofa" %}
+              <span class="sofa sofa--top"></span>
+            {% else %}
+              {% if table.chairs.top > 0 %}
+                <span class="chairs chairs--top">
+                  {% for _ in range(table.chairs.top) %}
+                    <span class="chair"></span>
+                  {% endfor %}
+                </span>
+              {% endif %}
+            {% endif %}
+            {% if table.chairs.bottom == "Sofa" %}
+              <span class="sofa sofa--bottom"></span>
+            {% else %}
+              {% if table.chairs.bottom > 0 %}
+                <span class="chairs chairs--bottom">
+                  {% for _ in range(table.chairs.bottom) %}
+                    <span class="chair"></span>
+                  {% endfor %}
+                </span>
+              {% endif %}
+            {% endif %}
+            {% if table.chairs.left == "Sofa" %}
+              <span class="sofa sofa--left"></span>
+            {% else %}
+              {% if table.chairs.left > 0 %}
+                <span class="chairs chairs--left">
+                  {% for _ in range(table.chairs.left) %}
+                    <span class="chair"></span>
+                  {% endfor %}
+                </span>
+              {% endif %}
+            {% endif %}
+            {% if table.chairs.right == "Sofa" %}
+              <span class="sofa sofa--right"></span>
+            {% else %}
+              {% if table.chairs.right > 0 %}
+                <span class="chairs chairs--right">
+                  {% for _ in range(table.chairs.right) %}
+                    <span class="chair"></span>
+                  {% endfor %}
+                </span>
+              {% endif %}
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+
+      <div class="booking" id="bookingPanel" aria-hidden="true">
+        <div class="booking__stage">
+          <div class="booking__table">
+            <div class="booking__table-top" id="bookingTableId">1</div>
+            <div class="booking__table-seats" id="bookingTableSeats">2 места</div>
+          </div>
+          <div class="booking__details">
+            <h3>Бронирование</h3>
+            <label class="field">
+              <span>Дата</span>
+              <input type="date" id="bookingDate" />
+            </label>
+            <label class="field">
+              <span>Время</span>
+              <input type="time" id="bookingTime" />
+            </label>
+            <label class="field">
+              <span>Имя</span>
+              <input type="text" id="bookingName" placeholder="Ваше имя" value="{{ current_user_name or '' }}" />
+            </label>
+            <div class="booking__actions">
+              <button class="secondary" id="bookingCancel" type="button">Отмена</button>
+              <button class="primary" id="bookingSubmit" type="button">Забронировать</button>
+            </div>
+          </div>
+        </div>
+        <div class="booking__info" id="bookingInfo">Столик у окна: да</div>
+      </div>
+    </div>
+    <aside class="timeline" aria-label="Время">
+      <div class="timeline__title">Дата</div>
+      <input class="timeline__date" type="date" id="bookingDateTop" />
+      <div class="timeline__title">Время</div>
+      <div class="timeline__list" id="timeScale">
+        {% for h in range(9, 23) %}
+          <div class="timeline__slot" data-time="{{ "%02d"|format(h) }}:00">{{ "%02d"|format(h) }}:00</div>
+          {% if h < 22 %}
+            <div class="timeline__slot timeline__slot--half" data-time="{{ "%02d"|format(h) }}:30">{{ "%02d"|format(h) }}:30</div>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </aside>
+    <div class="hall__legend">
+      <div><span class="dot dot--orange"></span> Столы</div>
+      <div><span class="dot dot--yellow"></span> Стулья</div>
+      <div><span class="dot dot--yellow-outline"></span> Диваны</div>
+      <div><span class="dot dot--red"></span> Занято</div>
+      <div><span class="dot dot--pink"></span> WC Ж</div>
+      <div><span class="dot dot--navy"></span> WC М</div>
+    </div>
+  </div>
+  <div class="hall__hint">Наведите на стол, чтобы увидеть детали.</div>
+</section>
+
+<div class="tooltip" id="tableTooltip" aria-hidden="true"></div>
+
+<nav class="bottom-nav">
+  <a class="bottom-nav__item" href="{{ url_for('notifications') }}">
+    <span>🔔</span>
+    <span>Уведомления</span>
+    {% if notifications_count %}
+      <span class="nav-badge">{{ notifications_count }}</span>
+    {% endif %}
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('index') }}">
+    <span>🏠</span>
+    <span>Главная</span>
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('profile') }}">
+    <span>👤</span>
+    <span>Профиль</span>
+  </a>
+</nav>
+{% endblock %}

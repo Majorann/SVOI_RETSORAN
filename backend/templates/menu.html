@@ -1,0 +1,90 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<header class="top menu-top">
+  <div class="brand">
+    <div class="brand__mark">С</div>
+    <div>
+      <p class="brand__name">Меню</p>
+      <p class="brand__tag">Выберите блюда</p>
+    </div>
+  </div>
+  <div class="menu-top__actions">
+    <a class="icon-button" href="{{ url_for('index') }}" aria-label="Назад">←</a>
+    <button class="cart-button" id="cartButton" type="button" aria-label="Корзина">
+      🧺
+      <span class="cart-badge" id="cartBadge">0</span>
+    </button>
+  </div>
+</header>
+
+<section class="section">
+  <div class="filter-group">
+    <button class="filter-button" id="filterToggle" type="button">
+      Раздел
+      <span>▾</span>
+    </button>
+    <div class="filter-menu" id="filterMenu" aria-hidden="true">
+      <button class="filter-item filter-item--all" data-type="all">Все</button>
+      <button class="filter-item filter-item--закуски" data-type="Закуски">Закуски</button>
+      <button class="filter-item filter-item--салаты" data-type="Салаты">Салаты</button>
+      <button class="filter-item filter-item--супы" data-type="Супы">Супы</button>
+      <button class="filter-item filter-item--горячие-блюда" data-type="Горячие блюда">Горячие блюда</button>
+      <button class="filter-item filter-item--десерты" data-type="Десерты">Десерты</button>
+      <button class="filter-item filter-item--напитки" data-type="Напитки">Напитки</button>
+      <button class="filter-item filter-item--алкогольные-напитки" data-type="Алкогольные напитки">Алкогольные напитки</button>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="menu">
+    {% for item in items %}
+      <article class="menu-card menu-card--menu" data-type="{{ item.type }}">
+        <div class="menu-card__media menu-card__media--{{ item.photo }}">
+        </div>
+        <div class="menu-card__content">
+          <h3>{{ item.name }}</h3>
+          <p>{{ item.lore }}</p>
+          <div class="menu-card__meta">
+            <button class="add-button" type="button" data-id="{{ item.id }}" data-name="{{ item.name }}" data-price="{{ item.price }}">В корзину</button>
+            <div class="menu-card__meta-info">
+              <span class="price">{{ item.price }} ₽</span>
+              <span class="menu-type menu-type--{{ item.type|replace(' ', '-')|lower }}">{{ item.type }}</span>
+            </div>
+          </div>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+<div class="cart-drawer" id="cartDrawer" aria-hidden="true">
+  <div class="cart-drawer__header">
+    <h3>Корзина</h3>
+    <button class="icon-button" id="cartClose" type="button">✕</button>
+  </div>
+  <div class="cart-drawer__list" id="cartList"></div>
+  <div class="cart-drawer__footer">
+    <div class="cart-drawer__total">Итого: <span id="cartTotal">0</span> ₽</div>
+    <button class="primary-action" id="cartCheckout" type="button">Оформить</button>
+  </div>
+</div>
+
+<nav class="bottom-nav">
+  <a class="bottom-nav__item" href="{{ url_for('notifications') }}">
+    <span>🔔</span>
+    <span>Уведомления</span>
+    {% if notifications_count %}
+      <span class="nav-badge">{{ notifications_count }}</span>
+    {% endif %}
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('index') }}">
+    <span>🏠</span>
+    <span>Главная</span>
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('profile') }}">
+    <span>👤</span>
+    <span>Профиль</span>
+  </a>
+</nav>
+{% endblock %}
