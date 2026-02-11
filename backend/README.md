@@ -116,6 +116,48 @@ featured=true
 - `lore` — описание
 - `featured` — `true/false`, попадание в блок "Популярное" на главной
 
+## Формат промо-блоков (promo_items)
+
+Папка:
+- `static/promo_items/<slug>/item.txt`
+- `static/promo_items/<slug>/photo.png` (если используете изображение)
+
+Созданы заготовки:
+- `static/promo_items/reklama/item.txt`
+- `static/promo_items/akciya/item.txt`
+
+Пример `reklama/item.txt`:
+
+```txt
+id=1
+class=reklama
+text=Текст рекламного блока.
+link=https://example.com
+priority=10
+active=true
+```
+
+Пример `akciya/item.txt`:
+
+```txt
+id=2
+class=akciya
+name=Название акции
+lore=Описание акции и условия.
+priority=20
+active=true
+```
+
+Поля:
+- `id` — уникальный целый ID блока
+- `class` — класс блока (`reklama` или `akciya`)
+- `text` — текст (для `reklama`)
+- `link` — ссылка (для `reklama`)
+- `name` — название (для `akciya`)
+- `lore` — описание (для `akciya`)
+- `priority` — порядок сортировки
+- `active` — `true/false`, активность блока
+
 ## Примечания
 
 - Это учебный проект без полноценной безопасности.
@@ -126,4 +168,4 @@ featured=true
 -Доработать взаимодействие с картами
 -Организовать оформление заказа
 -Добавить не контрастые рисунки людей
--формат рекламы и акций (как menu_items)
+

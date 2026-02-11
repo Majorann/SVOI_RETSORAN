@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block body_class %}page-index{% endblock %}
 {% block content %}
 <header class="top">
   <div class="brand">
@@ -9,6 +10,10 @@
     </div>
   </div>
 </header>
+
+<div class="index-side-human" aria-hidden="true">
+  <img src="{{ url_for('static', filename='img/human1_general.png') }}" alt="" />
+</div>
 
 <section class="section hero">
   <p class="hero__eyebrow">Сервис бронирования</p>
@@ -75,15 +80,23 @@
   </div>
   <div class="news" role="list">
     {% for card in news %}
+      {% if card.link %}
+      <a class="news-card" role="listitem" href="{{ card.link }}" target="_blank" rel="noopener noreferrer">
+      {% else %}
       <article class="news-card" role="listitem">
-        <div class="news-card__image">
+      {% endif %}
+        <div class="news-card__image"{% if card.photo %} style="background-image: url('{{ url_for('static', filename=card.photo) }}');"{% endif %}>
           <span class="news-card__accent">{{ card.accent }}</span>
         </div>
         <div class="news-card__body">
           <h3>{{ card.title }}</h3>
           <p>{{ card.text }}</p>
         </div>
+      {% if card.link %}
+      </a>
+      {% else %}
       </article>
+      {% endif %}
     {% endfor %}
   </div>
 </section>
@@ -96,11 +109,12 @@
   <div class="menu">
     {% for dish in menu %}
       <a class="menu-card" href="{{ url_for('menu_item', item_id=dish.id) }}">
-        <div class="menu-card__media" style="background-image: url('{{ url_for('static', filename=dish.photo) }}');">
-          <span class="badge">{{ dish.type }}</span>
-        </div>
+        <div class="menu-card__media" style="background-image: url('{{ url_for('static', filename=dish.photo) }}');"></div>
         <div class="menu-card__content">
-          <h3>{{ dish.name }}</h3>
+          <div class="menu-card__title-row">
+            <h3>{{ dish.name }}</h3>
+            <span class="menu-card__type">{{ dish.type }}</span>
+          </div>
           <p>{{ dish.lore }}</p>
           <div class="menu-card__meta">
             <span class="price">{{ dish.price }} ₽</span>

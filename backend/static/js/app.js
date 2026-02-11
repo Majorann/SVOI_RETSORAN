@@ -366,10 +366,10 @@ const setupTableTooltip = () => {
     table.addEventListener("mouseenter", () => {
       const isFree = isFreeNow();
       if (neon && hallMap) {
-        const neonRect = neon.getBoundingClientRect();
+        const mapRect = hallMap.getBoundingClientRect();
         const rect = table.getBoundingClientRect();
-        const x = ((rect.left + rect.width / 2 - neonRect.left) / neonRect.width) * 100;
-        const y = ((rect.top + rect.height / 2 - neonRect.top) / neonRect.height) * 100;
+        const x = ((rect.left + rect.width / 2 - mapRect.left) / mapRect.width) * 100;
+        const y = ((rect.top + rect.height / 2 - mapRect.top) / mapRect.height) * 100;
         neon.style.setProperty("--neon-x", `${x}%`);
         neon.style.setProperty("--neon-y", `${y}%`);
         neon.classList.toggle("is-red", !isFree);
@@ -537,37 +537,131 @@ window.addEventListener("DOMContentLoaded", () => {
   setupTableTooltip();
   setupMenuHoverMood();
 
-  const filterToggle = document.getElementById("filterToggle");
-  const filterMenu = document.getElementById("filterMenu");
-  const menuCards = document.querySelectorAll(".menu-card--menu");
+  const menuList = document.querySelector(".menu");
+  const menuCards = Array.from(document.querySelectorAll(".menu-card--menu"));
+  const categoryChips = Array.from(document.querySelectorAll(".menu-chip"));
+  const sortToggle = document.getElementById("sortToggle");
+  const sortMenu = document.getElementById("sortMenu");
+  const sortOptions = Array.from(document.querySelectorAll(".sort-option"));
+  const sortValue = document.getElementById("sortValue");
   const cartButton = document.getElementById("cartButton");
   const cartBadge = document.getElementById("cartBadge");
   const cartDrawer = document.getElementById("cartDrawer");
   const cartClose = document.getElementById("cartClose");
   const cartList = document.getElementById("cartList");
   const cartTotal = document.getElementById("cartTotal");
-  const filterGroup = document.querySelector(".filter-group");
   const cardNumberInput = document.querySelector('input[name="card_number"]');
   const expiryInput = document.querySelector('input[name="expiry"]');
   const holderInput = document.querySelector('input[name="holder"]');
-  if (filterToggle && filterMenu) {
-    filterToggle.addEventListener("click", () => {
-      filterMenu.classList.toggle("is-open");
-      filterToggle.classList.toggle("is-open");
-      if (filterGroup) filterGroup.classList.toggle("is-open");
-    });
-    filterMenu.querySelectorAll(".filter-item").forEach((item) => {
-      item.addEventListener("click", () => {
-        const type = item.dataset.type;
+  if (menuList && menuCards.length) {
+    const sortLabels = {
+      popular: "По популярности",
+      "price-asc": "Цена ↑",
+      "price-desc": "Цена ↓",
+    };
+    let activeCategory = "all";
+    let activeSort = "popular";
+
+    const getNumber = (value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const compareCards = (a, b) => {
+      const priceA = getNumber(a.dataset.price);
+      const priceB = getNumber(b.dataset.price);
+      const popularityA = getNumber(a.dataset.popularity);
+      const popularityB = getNumber(b.dataset.popularity);
+      if (activeSort === "price-asc") {
+        if (priceA !== priceB) return priceA - priceB;
+      } else if (activeSort === "price-desc") {
+        if (priceA !== priceB) return priceB - priceA;
+      } else if (popularityA !== popularityB) {
+        return popularityB - popularityA;
+      }
+      return (a.dataset.name || a.querySelector("h3")?.textContent || "")
+        .localeCompare(b.dataset.name || b.querySelector("h3")?.textContent || "", "ru");
+    };
+
+    const closeSortMenu = () => {
+      sortMenu?.classList.remove("is-open");
+      sortToggle?.setAttribute("aria-expanded", "false");
+      sortMenu?.setAttribute("aria-hidden", "true");
+    };
+
+    const openSortMenu = () => {
+      sortMenu?.classList.add("is-open");
+      sortToggle?.setAttribute("aria-expanded", "true");
+      sortMenu?.setAttribute("aria-hidden", "false");
+    };
+
+    const applyMenuControls = (animate = true) => {
+      menuList.classList.toggle("menu--updating", animate);
+      const run = () => {
+        const filtered = menuCards
+          .filter((card) => activeCategory === "all" || card.dataset.type === activeCategory)
+          .sort(compareCards);
+
         menuCards.forEach((card) => {
-          const matches = type === "all" || card.dataset.type === type;
-          card.style.display = matches ? "" : "none";
+          card.hidden = true;
+          card.classList.remove("menu-card--reveal");
         });
-        filterMenu.classList.remove("is-open");
-        filterToggle.classList.remove("is-open");
-        if (filterGroup) filterGroup.classList.remove("is-open");
+        filtered.forEach((card, index) => {
+          card.hidden = false;
+          menuList.appendChild(card);
+          if (animate) {
+            card.style.animationDelay = `${index * 28}ms`;
+            card.classList.add("menu-card--reveal");
+          }
+        });
+
+        if (sortValue) {
+          sortValue.textContent = sortLabels[activeSort] || sortLabels.popular;
+        }
+        categoryChips.forEach((chip) => {
+          chip.classList.toggle("is-active", chip.dataset.type === activeCategory);
+        });
+        sortOptions.forEach((option) => {
+          option.classList.toggle("is-active", option.dataset.sort === activeSort);
+        });
+        if (animate) {
+          window.setTimeout(() => menuList.classList.remove("menu--updating"), 190);
+        }
+      };
+      if (animate) {
+        window.setTimeout(run, 70);
+      } else {
+        run();
+      }
+    };
+
+    categoryChips.forEach((chip) => {
+      chip.addEventListener("click", () => {
+        activeCategory = chip.dataset.type || "all";
+        applyMenuControls(true);
       });
     });
+
+    sortToggle?.addEventListener("click", () => {
+      if (!sortMenu?.classList.contains("is-open")) openSortMenu();
+      else closeSortMenu();
+    });
+
+    sortOptions.forEach((option) => {
+      option.addEventListener("click", () => {
+        activeSort = option.dataset.sort || "popular";
+        closeSortMenu();
+        applyMenuControls(true);
+      });
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!sortMenu || !sortToggle) return;
+      if (sortMenu.contains(event.target) || sortToggle.contains(event.target)) return;
+      closeSortMenu();
+    });
+
+    applyMenuControls(false);
   }
 
   if (cardNumberInput) {
