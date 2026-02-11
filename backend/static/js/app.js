@@ -124,6 +124,59 @@ const setupMenuHoverMood = () => {
   });
 };
 
+// Bottom navigation: animated focus fill between tabs
+const setupBottomNavMotion = () => {
+  const nav = document.querySelector(".bottom-nav");
+  if (!nav) return;
+  const items = Array.from(nav.querySelectorAll(".bottom-nav__item"));
+  if (!items.length) return;
+
+  const indicator = document.createElement("span");
+  indicator.className = "bottom-nav__indicator";
+  nav.prepend(indicator);
+
+  const moveIndicator = (target, instant = false) => {
+    const navRect = nav.getBoundingClientRect();
+    const itemRect = target.getBoundingClientRect();
+    const left = itemRect.left - navRect.left;
+    indicator.classList.toggle("is-no-anim", instant);
+    indicator.style.width = `${itemRect.width}px`;
+    indicator.style.transform = `translateX(${left}px)`;
+    indicator.style.opacity = "1";
+    if (instant) {
+      window.requestAnimationFrame(() => indicator.classList.remove("is-no-anim"));
+    }
+  };
+
+  const setActive = (target, instant = false) => {
+    items.forEach((item) => item.classList.remove("bottom-nav__item--active"));
+    target.classList.add("bottom-nav__item--active");
+    moveIndicator(target, instant);
+  };
+
+  const active = items.find((item) => item.classList.contains("bottom-nav__item--active")) || items[0];
+  setActive(active, true);
+
+  items.forEach((item) => {
+    item.addEventListener("click", (event) => {
+      const isMainClick = event.button === 0;
+      const hasModifier = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+      const href = item.getAttribute("href");
+      if (!isMainClick || hasModifier || !href) return;
+      event.preventDefault();
+      setActive(item);
+      window.setTimeout(() => {
+        window.location.href = href;
+      }, 170);
+    });
+  });
+
+  window.addEventListener("resize", () => {
+    const current = items.find((item) => item.classList.contains("bottom-nav__item--active")) || items[0];
+    moveIndicator(current, true);
+  });
+};
+
 // Hall map interactions: hover/tooltip, booking panel, time scale
 const setupTableTooltip = () => {
   const tooltip = document.getElementById("tableTooltip");
@@ -141,6 +194,11 @@ const setupTableTooltip = () => {
   const neon = document.getElementById("hallNeon");
   const timeScale = document.getElementById("timeScale");
   const bookingDateTop = document.getElementById("bookingDateTop");
+  const timelineIndicator = timeScale ? document.createElement("div") : null;
+  if (timeScale && timelineIndicator) {
+    timelineIndicator.className = "timeline__active-indicator";
+    timeScale.prepend(timelineIndicator);
+  }
   let selectedTableId = null;
 
   const pad = (value) => String(value).padStart(2, "0");
@@ -219,25 +277,54 @@ const setupTableTooltip = () => {
   const markActiveTime = () => {
     if (!timeScale || !bookingTime?.value) return;
     const value = bookingTime.value;
-    timeScale.querySelectorAll(".timeline__slot").forEach((slot) => {
+    const slots = timeScale.querySelectorAll(".timeline__slot");
+    slots.forEach((slot) => {
       slot.classList.toggle("is-active", slot.dataset.time === value);
     });
+
+    if (!timelineIndicator) return;
+    const activeSlot = Array.from(slots).find((slot) => slot.dataset.time === value);
+    if (!activeSlot) return;
+    const move = () => {
+      timelineIndicator.style.height = `${activeSlot.offsetHeight}px`;
+      timelineIndicator.style.transform = `translateY(${activeSlot.offsetTop}px)`;
+      timelineIndicator.style.opacity = "1";
+    };
+    move();
   };
 
   // Change page tint based on time of day
   const setTimeMood = () => {
     if (!bookingTime?.value) return;
     const hour = Number(bookingTime.value.split(":")[0]);
-    document.body.classList.remove("mood-morning", "mood-noon", "mood-evening", "mood-night");
-    if (hour < 12) {
-      document.body.classList.add("mood-morning");
-    } else if (hour < 17) {
-      document.body.classList.add("mood-noon");
-    } else if (hour < 21) {
-      document.body.classList.add("mood-evening");
-    } else {
-      document.body.classList.add("mood-night");
-    }
+    const hourColors = {
+      9: "#5C2A27",
+      10: "#63302B",
+      11: "#6A362F",
+      12: "#7A4033",
+      13: "#874836",
+      14: "#92503A",
+      15: "#9B583E",
+      16: "#8F4A36",
+      17: "#824132",
+      18: "#76382E",
+      19: "#6A312A",
+      20: "#5E2A24",
+      21: "#51231E",
+      22: "#441C18",
+    };
+    const clampedHour = Math.max(9, Math.min(22, hour));
+    const tone = hourColors[clampedHour] || hourColors[9];
+    const hexToRgb = (hex) => {
+      const normalized = hex.replace("#", "");
+      const value = Number.parseInt(normalized, 16);
+      const r = (value >> 16) & 255;
+      const g = (value >> 8) & 255;
+      const b = value & 255;
+      return `${r}, ${g}, ${b}`;
+    };
+    document.body.style.setProperty("--time-bg-color", tone);
+    document.body.style.setProperty("--time-bg-rgb", hexToRgb(tone));
   };
 
   // Snap timeline scroll to closest slot
@@ -279,10 +366,10 @@ const setupTableTooltip = () => {
     table.addEventListener("mouseenter", () => {
       const isFree = isFreeNow();
       if (neon && hallMap) {
-        const hallRect = hallMap.parentElement?.getBoundingClientRect() || hallMap.getBoundingClientRect();
+        const neonRect = neon.getBoundingClientRect();
         const rect = table.getBoundingClientRect();
-        const x = ((rect.left + rect.width / 2 - hallRect.left) / hallRect.width) * 100;
-        const y = ((rect.top + rect.height / 2 - hallRect.top) / hallRect.height) * 100;
+        const x = ((rect.left + rect.width / 2 - neonRect.left) / neonRect.width) * 100;
+        const y = ((rect.top + rect.height / 2 - neonRect.top) / neonRect.height) * 100;
         neon.style.setProperty("--neon-x", `${x}%`);
         neon.style.setProperty("--neon-y", `${y}%`);
         neon.classList.toggle("is-red", !isFree);
@@ -446,6 +533,7 @@ const setupTableTooltip = () => {
 window.addEventListener("DOMContentLoaded", () => {
   stagger(".news-card", 140);
   stagger(".menu-card", 120);
+  setupBottomNavMotion();
   setupTableTooltip();
   setupMenuHoverMood();
 
