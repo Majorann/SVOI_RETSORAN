@@ -37,11 +37,20 @@
         <div class="notice notice--error">{{ payment_error }}</div>
       {% endif %}
       {% for card in cards %}
-        <button class="payment-card{% if card.active %} payment-card--active{% endif %}" type="button">
-          <div class="payment-card__brand">{{ card.brand }}</div>
-          <div class="payment-card__number">•••• {{ card.last4 }}</div>
-          <div class="payment-card__status">{% if card.active %}Активна{% else %}Не активна{% endif %}</div>
-        </button>
+        <div class="payment-card{% if card.active %} payment-card--active{% endif %}">
+          <div class="payment-card__content">
+            <div class="payment-card__brand">{{ card.brand }}</div>
+            <div class="payment-card__number">•••• {{ card.last4 }}</div>
+            <div class="payment-card__status">{% if card.active %}Активна{% else %}Не активна{% endif %}</div>
+          </div>
+          <form class="payment-card__delete-form" method="post" action="{{ url_for('delete_card') }}">
+            <input type="hidden" name="created_at" value="{{ card.created_at or '' }}" />
+            <input type="hidden" name="last4" value="{{ card.last4 or '' }}" />
+            <button class="payment-card__delete" type="submit" aria-label="Удалить карту">
+              <img src="{{ url_for('static', filename='img/trash.png') }}" alt="" />
+            </button>
+          </form>
+        </div>
       {% endfor %}
       <details class="payment-add">
         <summary class="payment-card payment-card--add">+ Привязать новую карту</summary>

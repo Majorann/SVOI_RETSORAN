@@ -18,20 +18,37 @@
 </header>
 
 <section class="section">
-  <div class="filter-group">
-    <button class="filter-button" id="filterToggle" type="button">
-      Раздел
-      <span>▾</span>
-    </button>
-    <div class="filter-menu" id="filterMenu" aria-hidden="true">
-      <button class="filter-item filter-item--all" data-type="all">Все</button>
-      <button class="filter-item filter-item--закуски" data-type="Закуски">Закуски</button>
-      <button class="filter-item filter-item--салаты" data-type="Салаты">Салаты</button>
-      <button class="filter-item filter-item--супы" data-type="Супы">Супы</button>
-      <button class="filter-item filter-item--горячие-блюда" data-type="Горячие блюда">Горячие блюда</button>
-      <button class="filter-item filter-item--десерты" data-type="Десерты">Десерты</button>
-      <button class="filter-item filter-item--напитки" data-type="Напитки">Напитки</button>
-      <button class="filter-item filter-item--алкогольные-напитки" data-type="Алкогольные напитки">Алкогольные напитки</button>
+  <div class="menu-controls">
+    <div class="menu-categories" id="menuCategoryChips" role="tablist" aria-label="Категории">
+      <button class="menu-chip is-active" type="button" data-type="all">Все</button>
+      <button class="menu-chip" type="button" data-type="Закуски">Закуски</button>
+      <button class="menu-chip" type="button" data-type="Салаты">Салаты</button>
+      <button class="menu-chip" type="button" data-type="Супы">Супы</button>
+      <button class="menu-chip" type="button" data-type="Горячие блюда">Горячие</button>
+      <button class="menu-chip" type="button" data-type="Десерты">Десерты</button>
+      <button class="menu-chip" type="button" data-type="Напитки">Напитки</button>
+      <button class="menu-chip" type="button" data-type="Алкогольные напитки">Алкоголь</button>
+    </div>
+    <div class="sort-control">
+      <button class="sort-toggle" id="sortToggle" type="button" aria-haspopup="listbox" aria-expanded="false">
+        Сортировать
+        <span class="sort-toggle__value" id="sortValue">По популярности</span>
+        <span class="sort-toggle__arrow">▾</span>
+      </button>
+      <div class="sort-menu" id="sortMenu" role="listbox" aria-hidden="true">
+        <button class="sort-option is-active" type="button" data-sort="popular">
+          <span>По популярности</span>
+          <span class="sort-option__check">✓</span>
+        </button>
+        <button class="sort-option" type="button" data-sort="price-asc">
+          <span>Цена ↑</span>
+          <span class="sort-option__check">✓</span>
+        </button>
+        <button class="sort-option" type="button" data-sort="price-desc">
+          <span>Цена ↓</span>
+          <span class="sort-option__check">✓</span>
+        </button>
+      </div>
     </div>
   </div>
 </section>
@@ -39,7 +56,7 @@
 <section class="section">
   <div class="menu">
     {% for item in items %}
-      <article class="menu-card menu-card--menu" data-type="{{ item.type }}" style="--dish-photo: url('{{ url_for('static', filename=item.photo) }}');">
+      <article class="menu-card menu-card--menu" data-type="{{ item.type }}" data-price="{{ item.price }}" data-popularity="{{ item.popularity or item.orders_count or 0 }}" style="--dish-photo: url('{{ url_for('static', filename=item.photo) }}');">
         <div class="menu-card__media" style="background-image: var(--dish-photo);">
         </div>
         <div class="menu-card__content">

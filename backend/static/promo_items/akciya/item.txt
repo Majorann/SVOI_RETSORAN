@@ -1,0 +1,6 @@
+﻿id=2
+class=akciya
+name=Название акции
+lore=Описание акции и условия.
+priority=20
+active=true

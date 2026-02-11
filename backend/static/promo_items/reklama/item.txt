@@ -1,0 +1,6 @@
+﻿id=1
+class=reklama
+text=Текст рекламного блока.
+link=https://example.com
+priority=10
+active=true

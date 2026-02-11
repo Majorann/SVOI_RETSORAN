@@ -17,31 +17,18 @@ app.permanent_session_lifetime = timedelta(days=30)
 BOOKINGS_PATH = Path(__file__).with_name("bookings.json")
 USERS_PATH = Path(__file__).with_name("users.json")
 MENU_ITEMS_PATH = Path(__file__).with_name("static") / "menu_items"
+PROMO_ITEMS_PATH = Path(__file__).with_name("static") / "promo_items"
 # Длительность брони в минутах (для проверки пересечений)
 BOOKING_DURATION_MINUTES = 60
 # Секрет для сессий (в проде заменить)
 app.secret_key = "replace-me-in-production"
 # Карусель на главной
-NEWS_CARDS = [
-    {
-        "title": "Новое сезонное меню",
-        "text": "Теплые блюда и авторские напитки — только в феврале.",
-        "accent": "Сезон",
-    },
-    {
-        "title": "Живой вечер",
-        "text": "Акустический сет по пятницам. Бронируйте заранее.",
-        "accent": "Музыка",
-    },
-    {
-        "title": "Сет для двоих",
-        "text": "Специальная цена до 20:00 каждый день.",
-        "accent": "Акция",
-    },
-]
+NEWS_CARDS = []
 
 MENU_PHOTO_NAME = "photo.png"
 MENU_META_NAME = "item.txt"
+PROMO_PHOTO_NAME = "photo.png"
+PROMO_META_NAME = "item.txt"
 
 
 @dataclass
@@ -52,6 +39,7 @@ class MenuItem:
     type: str
     price: int
     photo: str
+    popularity: int = 0
     featured: bool = False
 
 
@@ -141,7 +129,7 @@ TABLES = [
         "seats": 5,
         "window": False,
         "status": "free",
-        "x": 72,
+        "x": 60,
         "y": 69,
         "shape": "rect",
         "chairs": {"top": 2, "bottom": 2, "left": 1, "right": 0},
@@ -227,9 +215,11 @@ WALLS = [
 
 @app.route("/")
 def index():
-    # На главной показываем брони только текущего пользователя
     user_id = session.get("user_id")
     bookings = load_bookings()
+    promo_items = load_promo_items()
+    promo_news = promo_items_to_news_cards(promo_items)
+    news_cards = promo_news or NEWS_CARDS
     all_menu_items = load_menu_items()
     popular_menu = [item for item in all_menu_items if item.get("featured")][:3]
     if not popular_menu:
@@ -238,7 +228,7 @@ def index():
         bookings = [b for b in bookings if b.get("user_id") == user_id]
     else:
         bookings = []
-    return render_template("index.html", news=NEWS_CARDS, menu=popular_menu, bookings=bookings)
+    return render_template("index.html", news=news_cards, menu=popular_menu, bookings=bookings)
 
 
 @app.route("/reserve")
@@ -499,6 +489,32 @@ def load_menu_items():
     return items
 
 
+def load_promo_items():
+    # Загружаем promo из static/promo_items/<slug>/item.txt (+ optional photo.png)
+    items = []
+    if not PROMO_ITEMS_PATH.exists():
+        return items
+
+    for item_dir in sorted(PROMO_ITEMS_PATH.iterdir()):
+        if not item_dir.is_dir():
+            continue
+        meta_path = item_dir / PROMO_META_NAME
+        photo_path = item_dir / PROMO_PHOTO_NAME
+        if not meta_path.exists():
+            continue
+
+        meta = parse_menu_meta(meta_path)
+        promo_item = parse_promo_item(meta, item_dir.name, photo_path.exists())
+        if promo_item is None:
+            continue
+        if not promo_item.get("active", True):
+            continue
+        items.append(promo_item)
+
+    items.sort(key=lambda item: (item.get("priority", 100), item["id"]))
+    return items
+
+
 def parse_menu_meta(meta_path: Path):
     # Формат item.txt: key=value, пустые строки и # комментарии игнорируются
     data = {}
@@ -507,7 +523,8 @@ def parse_menu_meta(meta_path: Path):
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        data[key.strip().lower()] = value.strip()
+        normalized_key = key.strip().lower().lstrip("\ufeff")
+        data[normalized_key] = value.strip()
     return data
 
 
@@ -517,6 +534,10 @@ def parse_menu_item(meta: dict, slug: str):
         price = int(meta.get("price", ""))
     except ValueError:
         return None
+    try:
+        popularity = int(meta.get("popularity", meta.get("orders_count", "0")))
+    except ValueError:
+        popularity = 0
 
     name = meta.get("name", "")
     lore = meta.get("lore", "")
@@ -533,9 +554,86 @@ def parse_menu_item(meta: dict, slug: str):
         type=dish_type,
         price=price,
         photo=f"menu_items/{slug}/{MENU_PHOTO_NAME}",
+        popularity=popularity,
         featured=featured,
     )
     return item.__dict__
+
+
+def parse_promo_item(meta: dict, slug: str, has_photo: bool):
+    try:
+        item_id = int(meta.get("id", ""))
+    except ValueError:
+        return None
+
+    item_class = (meta.get("class", "") or "").strip().lower()
+    if item_class not in {"reklama", "akciya"}:
+        return None
+
+    try:
+        priority = int(meta.get("priority", "100"))
+    except ValueError:
+        priority = 100
+
+    active_value = (meta.get("active", "true") or "").lower()
+    active = active_value in {"1", "true", "yes", "y", "on"}
+    photo = f"promo_items/{slug}/{PROMO_PHOTO_NAME}" if has_photo else None
+
+    if item_class == "reklama":
+        text = (meta.get("text", "") or "").strip()
+        link = (meta.get("link", "") or "").strip()
+        if not text:
+            return None
+        return {
+            "id": item_id,
+            "class": item_class,
+            "text": text,
+            "link": link,
+            "priority": priority,
+            "active": active,
+            "photo": photo,
+        }
+
+    name = (meta.get("name", "") or "").strip()
+    lore = (meta.get("lore", "") or "").strip()
+    if not name or not lore:
+        return None
+    return {
+        "id": item_id,
+        "class": item_class,
+        "name": name,
+        "lore": lore,
+        "priority": priority,
+        "active": active,
+        "photo": photo,
+    }
+
+
+def promo_items_to_news_cards(items):
+    # Приводим promo-элементы к формату карточек главной страницы
+    cards = []
+    for item in items:
+        if item.get("class") == "reklama":
+            cards.append(
+                {
+                    "title": "Реклама",
+                    "text": item.get("text", ""),
+                    "accent": "Реклама",
+                    "photo": item.get("photo"),
+                    "link": item.get("link"),
+                }
+            )
+            continue
+        cards.append(
+            {
+                "title": item.get("name", ""),
+                "text": item.get("lore", ""),
+                "accent": "Акция",
+                "photo": item.get("photo"),
+                "link": "",
+            }
+        )
+    return cards[:3]
 
 
 def load_bookings():
@@ -687,5 +785,46 @@ def add_card():
     return redirect(url_for("profile"))
 
 
+@app.post("/cards/delete")
+def delete_card():
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login"))
+
+    created_at = (request.form.get("created_at") or "").strip()
+    last4 = (request.form.get("last4") or "").strip()
+    if not created_at and not last4:
+        return redirect(url_for("profile", error="Не удалось определить карту для удаления."))
+
+    users = load_users()
+    user_record = next((u for u in users if u.get("id") == user_id), None)
+    if not user_record:
+        return redirect(url_for("profile", error="Пользователь не найден."))
+
+    cards = list(user_record.get("cards", []))
+    removed_index = None
+    for idx, card in enumerate(cards):
+        if created_at and card.get("created_at") == created_at:
+            removed_index = idx
+            break
+    if removed_index is None and last4:
+        for idx, card in enumerate(cards):
+            if card.get("last4") == last4:
+                removed_index = idx
+                break
+
+    if removed_index is None:
+        return redirect(url_for("profile", error="Карта не найдена."))
+
+    removed_card = cards.pop(removed_index)
+    if removed_card.get("active") and cards and not any(card.get("active") for card in cards):
+        cards[-1]["active"] = True
+
+    user_record["cards"] = cards
+    save_users(users)
+    return redirect(url_for("profile"))
+
+
 if __name__ == "__main__":
     app.run(debug=True)
+
