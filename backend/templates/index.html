@@ -8,9 +8,6 @@
       <p class="brand__tag">Домашний ресторан</p>
     </div>
   </div>
-  <button class="icon-button" aria-label="Уведомления">
-    <span>🔔</span>
-  </button>
 </header>
 
 {% if bookings %}
@@ -93,7 +90,7 @@
   <div class="menu">
     {% for dish in menu %}
       <a class="menu-card" href="{{ url_for('menu_item', item_id=dish.id) }}">
-        <div class="menu-card__media menu-card__media--{{ dish.photo }}">
+        <div class="menu-card__media" style="background-image: url('{{ url_for('static', filename=dish.photo) }}');">
           <span class="badge">{{ dish.type }}</span>
         </div>
         <div class="menu-card__content">

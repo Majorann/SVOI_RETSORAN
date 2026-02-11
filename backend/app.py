@@ -7,13 +7,16 @@ Restaurant demo app (Flask).
 from flask import Flask, render_template, url_for, request, jsonify, session, redirect
 from datetime import datetime, date, timedelta
 from pathlib import Path
+from dataclasses import dataclass
 import json
 import hashlib
 
 app = Flask(__name__)
+app.permanent_session_lifetime = timedelta(days=30)
 # Хранилища JSON
 BOOKINGS_PATH = Path(__file__).with_name("bookings.json")
 USERS_PATH = Path(__file__).with_name("users.json")
+MENU_ITEMS_PATH = Path(__file__).with_name("static") / "menu_items"
 # Длительность брони в минутах (для проверки пересечений)
 BOOKING_DURATION_MINUTES = 60
 # Секрет для сессий (в проде заменить)
@@ -37,43 +40,32 @@ NEWS_CARDS = [
     },
 ]
 
-# Популярные позиции на главной (заглушки)
-POPULAR_MENU = [
-    {
-        "id": 1,
-        "name": "name",
-        "photo": "photo",
-        "lore": "lore",
-        "type": "type",
-        "price": "price",
-    },
-    {
-        "id": 2,
-        "name": "name",
-        "photo": "photo",
-        "lore": "lore",
-        "type": "type",
-        "price": "price",
-    },
-    {
-        "id": 3,
-        "name": "name",
-        "photo": "photo",
-        "lore": "lore",
-        "type": "type",
-        "price": "price",
-    },
-]
+MENU_PHOTO_NAME = "photo.png"
+MENU_META_NAME = "item.txt"
 
-MENU_ITEMS = [
-    {**POPULAR_MENU[0], "id": 101, "type": "Закуски"},
-    {**POPULAR_MENU[1], "id": 102, "type": "Салаты"},
-    {**POPULAR_MENU[2], "id": 103, "type": "Супы"},
-    {**POPULAR_MENU[0], "id": 104, "type": "Горячие блюда"},
-    {**POPULAR_MENU[1], "id": 105, "type": "Десерты"},
-    {**POPULAR_MENU[2], "id": 106, "type": "Напитки"},
-    {**POPULAR_MENU[0], "id": 107, "type": "Алкогольные напитки"},
-]
+
+@dataclass
+class MenuItem:
+    id: int
+    name: str
+    lore: str
+    type: str
+    price: int
+    photo: str
+    featured: bool = False
+
+
+@app.before_request
+def keep_user_session():
+    user_id = session.get("user_id")
+    if not user_id:
+        return
+    session.permanent = True
+    if session.get("user_name"):
+        return
+    user = next((u for u in load_users() if u.get("id") == user_id), None)
+    if user:
+        session["user_name"] = user.get("name")
 
 # Схема зала: координаты и расстановка стульев (в процентах)
 TABLES = [
@@ -238,11 +230,15 @@ def index():
     # На главной показываем брони только текущего пользователя
     user_id = session.get("user_id")
     bookings = load_bookings()
+    all_menu_items = load_menu_items()
+    popular_menu = [item for item in all_menu_items if item.get("featured")][:3]
+    if not popular_menu:
+        popular_menu = all_menu_items[:3]
     if user_id:
         bookings = [b for b in bookings if b.get("user_id") == user_id]
     else:
         bookings = []
-    return render_template("index.html", news=NEWS_CARDS, menu=POPULAR_MENU, bookings=bookings)
+    return render_template("index.html", news=NEWS_CARDS, menu=popular_menu, bookings=bookings)
 
 
 @app.route("/reserve")
@@ -300,23 +296,22 @@ def points():
 @app.route("/profile")
 def profile():
     # Профиль показывает имя, баланс, карты и свои брони
-    user_name = session.get("user_name")
     user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login", error="Войдите в аккаунт, чтобы открыть профиль."))
+
+    user_name = session.get("user_name")
     error = request.args.get("error")
     user_record = None
-    if user_id:
-        user_record = next((u for u in load_users() if u.get("id") == user_id), None)
+    user_record = next((u for u in load_users() if u.get("id") == user_id), None)
     user = {
-        "name": user_name or "Имя пользователя",
+        "name": user_name or (user_record or {}).get("name") or "Имя пользователя",
         "avatar": None,
         "balance": (user_record or {}).get("balance", 0),
         "cards": (user_record or {}).get("cards", []),
     }
     bookings = load_bookings()
-    if user_id:
-        bookings = [b for b in bookings if b.get("user_id") == user_id]
-    else:
-        bookings = []
+    bookings = [b for b in bookings if b.get("user_id") == user_id]
     return render_template(
         "profile.html",
         user=user,
@@ -352,6 +347,7 @@ def notifications():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     # Вход через users.json
+    initial_error = request.args.get("error")
     if request.method == "POST":
         phone = (request.form.get("phone") or "").strip()
         password = request.form.get("password") or ""
@@ -361,8 +357,9 @@ def login():
             return render_template("login.html", error="Неверный телефон или пароль.")
         session["user_id"] = user.get("id")
         session["user_name"] = user.get("name")
+        session.permanent = True
         return redirect(url_for("index"))
-    return render_template("login.html", error=None)
+    return render_template("login.html", error=initial_error)
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -383,16 +380,14 @@ def register():
             "phone": phone,
             "password_hash": hash_password(password),
             "balance": 0,
-            "cards": [
-                {"brand": "Visa", "last4": "4821", "active": True},
-                {"brand": "Mastercard", "last4": "1044", "active": False},
-            ],
+            "cards": [],
             "created_at": datetime.now().isoformat(timespec="seconds"),
         }
         users.append(new_user)
         save_users(users)
         session["user_id"] = new_user["id"]
         session["user_name"] = new_user["name"]
+        session.permanent = True
         return redirect(url_for("index"))
     return render_template("register.html", error=None)
 @app.route("/logout")
@@ -426,7 +421,7 @@ def reviews():
 
 @app.route("/menu/<int:item_id>")
 def menu_item(item_id: int):
-    item = next((dish for dish in POPULAR_MENU if dish["id"] == item_id), None)
+    item = next((dish for dish in load_menu_items() if dish["id"] == item_id), None)
     if item is None:
         return render_template("placeholder.html", title="Блюдо не найдено"), 404
     return render_template("menu-item.html", item=item)
@@ -434,7 +429,7 @@ def menu_item(item_id: int):
 
 @app.route("/menu")
 def menu():
-    return render_template("menu.html", items=MENU_ITEMS)
+    return render_template("menu.html", items=load_menu_items())
 
 @app.post("/book")
 def book_table():
@@ -478,6 +473,69 @@ def book_table():
     )
     save_bookings(bookings)
     return jsonify({"ok": True})
+
+
+def load_menu_items():
+    # Загружаем блюда из static/menu_items/<slug>/item.txt + photo.png
+    items = []
+    if not MENU_ITEMS_PATH.exists():
+        return items
+
+    for item_dir in sorted(MENU_ITEMS_PATH.iterdir()):
+        if not item_dir.is_dir():
+            continue
+        meta_path = item_dir / MENU_META_NAME
+        photo_path = item_dir / MENU_PHOTO_NAME
+        if not meta_path.exists() or not photo_path.exists():
+            continue
+
+        meta = parse_menu_meta(meta_path)
+        menu_item = parse_menu_item(meta, item_dir.name)
+        if menu_item is None:
+            continue
+        items.append(menu_item)
+
+    items.sort(key=lambda item: item["id"])
+    return items
+
+
+def parse_menu_meta(meta_path: Path):
+    # Формат item.txt: key=value, пустые строки и # комментарии игнорируются
+    data = {}
+    for raw_line in meta_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        data[key.strip().lower()] = value.strip()
+    return data
+
+
+def parse_menu_item(meta: dict, slug: str):
+    try:
+        item_id = int(meta.get("id", ""))
+        price = int(meta.get("price", ""))
+    except ValueError:
+        return None
+
+    name = meta.get("name", "")
+    lore = meta.get("lore", "")
+    dish_type = meta.get("type", "")
+    if not all([name, lore, dish_type]):
+        return None
+
+    featured_value = meta.get("featured", "false").lower()
+    featured = featured_value in {"1", "true", "yes", "y", "on"}
+    item = MenuItem(
+        id=item_id,
+        name=name,
+        lore=lore,
+        type=dish_type,
+        price=price,
+        photo=f"menu_items/{slug}/{MENU_PHOTO_NAME}",
+        featured=featured,
+    )
+    return item.__dict__
 
 
 def load_bookings():
@@ -604,14 +662,7 @@ def add_card():
     if expiry and "/" not in expiry:
         return redirect(url_for("profile", error="Введите срок в формате ММ/ГГ."))
 
-    if digits.startswith("4"):
-        brand = "Visa"
-    elif digits.startswith("5"):
-        brand = "Mastercard"
-    elif digits.startswith("2"):
-        brand = "Мир"
-    else:
-        brand = "Карта"
+    brand = "МИР"
 
     users = load_users()
     user_record = next((u for u in users if u.get("id") == user_id), None)
