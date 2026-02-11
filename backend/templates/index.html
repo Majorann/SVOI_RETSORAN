@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <header class="top">
   <div class="brand">
@@ -9,6 +9,36 @@
     </div>
   </div>
 </header>
+
+<section class="section hero">
+  <p class="hero__eyebrow">Сервис бронирования</p>
+  <h1 class="hero__title">Уютный столик в пару касаний</h1>
+  <p class="hero__text">Выберите время, место в зале и подтвердите бронь онлайн без звонка.</p>
+  <a class="primary-action hero__cta" href="{{ url_for('reserve') }}">
+    Заказать столик
+  </a>
+</section>
+
+<section class="section">
+  <div class="secondary-actions">
+    <a class="secondary-card" href="{{ url_for('points') }}">
+      <div class="secondary-card__icon secondary-card__icon--image">
+        <img src="{{ url_for('static', filename='img/P_RU.png') }}" alt="Баллы" />
+      </div>
+      <div>
+        <p class="secondary-card__title">Мои баллы</p>
+        <p class="secondary-card__text">Бонусы и уровни</p>
+      </div>
+    </a>
+    <a class="secondary-card" href="{{ url_for('delivery') }}">
+      <div class="secondary-card__icon">🚚</div>
+      <div>
+        <p class="secondary-card__title">Доставка</p>
+        <p class="secondary-card__text">Привезем быстро</p>
+      </div>
+    </a>
+  </div>
+</section>
 
 {% if bookings %}
 <section class="section bookings">
@@ -38,9 +68,9 @@
 </section>
 {% endif %}
 
-<section class="section{% if bookings %} section--shifted{% endif %}">
+<section class="section">
   <div class="section__title">
-    <h1>Что нового сегодня</h1>
+    <h2>Что нового</h2>
     <span class="pill">Новости</span>
   </div>
   <div class="news" role="list">
@@ -59,33 +89,9 @@
 </section>
 
 <section class="section">
-  <a class="primary-action" href="{{ url_for('reserve') }}">
-    Заказать столик
-  </a>
-  <div class="secondary-actions">
-    <a class="secondary-card" href="{{ url_for('points') }}">
-      <div class="secondary-card__icon secondary-card__icon--image">
-        <img src="{{ url_for('static', filename='img/P_RU.png') }}" alt="Баллы" />
-      </div>
-      <div>
-        <p class="secondary-card__title">Мои баллы</p>
-        <p class="secondary-card__text">Бонусы и уровни</p>
-      </div>
-    </a>
-    <a class="secondary-card" href="{{ url_for('delivery') }}">
-      <div class="secondary-card__icon">🚚</div>
-      <div>
-        <p class="secondary-card__title">Доставка</p>
-        <p class="secondary-card__text">Привезем быстро</p>
-      </div>
-    </a>
-  </div>
-</section>
-
-<section class="section">
   <div class="section__title section__title--menu">
     <h2>Меню → Популярное</h2>
-    <a class="link" href="{{ url_for('delivery') }}">Смотреть все</a>
+    <a class="link" href="{{ url_for('menu') }}">Смотреть все</a>
   </div>
   <div class="menu">
     {% for dish in menu %}
