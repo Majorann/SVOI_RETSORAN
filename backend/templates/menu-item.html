@@ -2,7 +2,7 @@
 {% block content %}
 <section class="detail">
   <a class="back" href="{{ url_for('index') }}">← Назад</a>
-  <div class="detail__media detail__media--{{ item.photo }}">
+  <div class="detail__media" style="background-image: url('{{ url_for('static', filename=item.photo) }}');">
     <span class="badge">{{ item.type }}</span>
   </div>
   <div class="detail__content">

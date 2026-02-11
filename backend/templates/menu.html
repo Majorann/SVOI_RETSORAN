@@ -39,17 +39,19 @@
 <section class="section">
   <div class="menu">
     {% for item in items %}
-      <article class="menu-card menu-card--menu" data-type="{{ item.type }}">
-        <div class="menu-card__media menu-card__media--{{ item.photo }}">
+      <article class="menu-card menu-card--menu" data-type="{{ item.type }}" style="--dish-photo: url('{{ url_for('static', filename=item.photo) }}');">
+        <div class="menu-card__media" style="background-image: var(--dish-photo);">
         </div>
         <div class="menu-card__content">
-          <h3>{{ item.name }}</h3>
-          <p>{{ item.lore }}</p>
-          <div class="menu-card__meta">
-            <button class="add-button" type="button" data-id="{{ item.id }}" data-name="{{ item.name }}" data-price="{{ item.price }}">В корзину</button>
-            <div class="menu-card__meta-info">
-              <span class="price">{{ item.price }} ₽</span>
+          <div class="menu-card__text">
+            <div class="menu-card__title-row">
+              <h3>{{ item.name }}</h3>
               <span class="menu-type menu-type--{{ item.type|replace(' ', '-')|lower }}">{{ item.type }}</span>
+            </div>
+            <p class="menu-card__lore">{{ item.lore }}</p>
+            <div class="menu-card__bottom">
+              <span class="price">{{ item.price }} ₽</span>
+              <button class="add-button" type="button" data-id="{{ item.id }}" data-name="{{ item.name }}" data-price="{{ item.price }}">В корзину</button>
             </div>
           </div>
         </div>
