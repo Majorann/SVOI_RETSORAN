@@ -544,12 +544,25 @@ window.addEventListener("DOMContentLoaded", () => {
   const sortMenu = document.getElementById("sortMenu");
   const sortOptions = Array.from(document.querySelectorAll(".sort-option"));
   const sortValue = document.getElementById("sortValue");
-  const cartButton = document.getElementById("cartButton");
-  const cartBadge = document.getElementById("cartBadge");
   const cartDrawer = document.getElementById("cartDrawer");
-  const cartClose = document.getElementById("cartClose");
   const cartList = document.getElementById("cartList");
   const cartTotal = document.getElementById("cartTotal");
+  const cartCheckout = document.getElementById("cartCheckout");
+  const checkoutForm = document.getElementById("checkoutForm");
+  const checkoutItemsNode = document.getElementById("checkoutItems");
+  const checkoutItemsTotal = document.getElementById("checkoutItemsTotal");
+  const checkoutTotal = document.getElementById("checkoutTotal");
+  const checkoutItemsJson = document.getElementById("checkoutItemsJson");
+  const checkoutEmpty = document.getElementById("checkoutEmpty");
+  const checkoutSummaryList = document.getElementById("checkoutSummaryList");
+  const checkoutComment = document.getElementById("checkoutComment");
+  const checkoutCommentCount = document.getElementById("checkoutCommentCount");
+  const usePoints = document.getElementById("usePoints");
+  const availablePoints = document.getElementById("availablePoints");
+  const checkoutPointsApplied = document.getElementById("checkoutPointsApplied");
+  const checkoutPayable = document.getElementById("checkoutPayable");
+  const goToPayment = document.getElementById("goToPayment");
+  const serveCustomTime = document.getElementById("serveCustomTime");
   const cardNumberInput = document.querySelector('input[name="card_number"]');
   const expiryInput = document.querySelector('input[name="expiry"]');
   const holderInput = document.querySelector('input[name="holder"]');
@@ -561,6 +574,11 @@ window.addEventListener("DOMContentLoaded", () => {
     };
     let activeCategory = "all";
     let activeSort = "popular";
+    const normalizeType = (value) =>
+      String(value || "")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
 
     const getNumber = (value) => {
       const parsed = Number(value);
@@ -598,16 +616,22 @@ window.addEventListener("DOMContentLoaded", () => {
     const applyMenuControls = (animate = true) => {
       menuList.classList.toggle("menu--updating", animate);
       const run = () => {
+        const selectedType = normalizeType(activeCategory);
         const filtered = menuCards
-          .filter((card) => activeCategory === "all" || card.dataset.type === activeCategory)
+          .filter((card) => {
+            if (selectedType === "all") return true;
+            return normalizeType(card.dataset.type) === selectedType;
+          })
           .sort(compareCards);
 
         menuCards.forEach((card) => {
           card.hidden = true;
+          card.style.display = "none";
           card.classList.remove("menu-card--reveal");
         });
         filtered.forEach((card, index) => {
           card.hidden = false;
+          card.style.display = "";
           menuList.appendChild(card);
           if (animate) {
             card.style.animationDelay = `${index * 28}ms`;
@@ -713,100 +737,193 @@ window.addEventListener("DOMContentLoaded", () => {
     localStorage.setItem("cart", JSON.stringify(cart));
   };
 
-  const updateCartUI = () => {
-    if (!cartBadge || !cartList || !cartTotal) return;
-    const cart = loadCart();
-    const totalQty = cart.reduce((sum, item) => sum + item.qty, 0);
+  const normalizeCart = (cart) =>
+    cart
+      .map((item) => ({
+        ...item,
+        id: Number(item.id),
+        qty: Number(item.qty) || 0,
+        price: Number(item.price) || 0,
+      }))
+      .filter((item) => item.qty > 0);
+
+  const setDrawerState = (hasItems) => {
+    if (!cartDrawer || !menuList) return;
+    if (hasItems) {
+      if (cartDrawer._hideTimer) {
+        window.clearTimeout(cartDrawer._hideTimer);
+        cartDrawer._hideTimer = null;
+      }
+      cartDrawer.hidden = false;
+      cartDrawer.setAttribute("aria-hidden", "false");
+      cartDrawer.classList.remove("is-closing");
+      if (!cartDrawer.classList.contains("is-open")) {
+        cartDrawer.classList.add("is-open", "is-settle");
+        window.setTimeout(() => cartDrawer.classList.remove("is-settle"), 140);
+      }
+      document.body.classList.add("menu-cart-open");
+      return;
+    }
+    if (!cartDrawer.classList.contains("is-open")) {
+      cartDrawer.hidden = true;
+      cartDrawer.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("menu-cart-open");
+      return;
+    }
+    cartDrawer.classList.remove("is-open", "is-settle");
+    cartDrawer.classList.add("is-closing");
+    document.body.classList.remove("menu-cart-open");
+    cartDrawer._hideTimer = window.setTimeout(() => {
+      cartDrawer.hidden = true;
+      cartDrawer.setAttribute("aria-hidden", "true");
+      cartDrawer.classList.remove("is-closing");
+      cartDrawer._hideTimer = null;
+    }, 230);
+  };
+
+  const updateCartUI = (options = {}) => {
+    if (!cartList || !cartTotal) return;
+    const previousRows = Array.from(cartList.querySelectorAll(".cart-item"));
+    const previousQtyById = new Map(
+      previousRows.map((row) => [Number(row.dataset.id), Number(row.dataset.qty)])
+    );
+    const previousTotal = Number(cartTotal.textContent || 0);
+    const cart = normalizeCart(loadCart());
     const totalPrice = cart.reduce((sum, item) => sum + item.qty * item.price, 0);
-    cartBadge.textContent = totalQty;
+
     cartList.innerHTML = "";
-    cart.forEach((item) => {
+    cart.forEach((item, index) => {
+      const prevQty = previousQtyById.get(item.id) || 0;
       const row = document.createElement("div");
       row.className = "cart-item";
+      row.dataset.id = String(item.id);
+      row.dataset.qty = String(item.qty);
+      row.style.setProperty("--cart-stagger-delay", `${index * 60}ms`);
+      if (!prevQty) row.classList.add("cart-item--new");
       row.innerHTML = `
         <div>
           <div class="cart-item__name">${item.name}</div>
-          <div class="cart-item__meta">${item.qty} × ${item.price} ₽</div>
+          <div class="cart-item__meta">${item.price} ₽</div>
         </div>
         <div class="cart-item__actions">
           <button class="cart-item__btn" data-action="dec" data-id="${item.id}">−</button>
+          <span
+            class="cart-item__qty${
+              prevQty && prevQty !== item.qty
+                ? item.qty > prevQty
+                  ? " is-updated-up"
+                  : " is-updated-down"
+                : ""
+            }"
+            data-prev="${prevQty || item.qty}"
+            data-next="${item.qty}"
+          >${item.qty}</span>
           <button class="cart-item__btn" data-action="inc" data-id="${item.id}">+</button>
         </div>
       `;
       cartList.appendChild(row);
     });
-    cartTotal.textContent = totalPrice;
+
+    cartTotal.textContent = String(totalPrice);
+    if (previousTotal !== totalPrice) {
+      cartTotal.closest(".cart-drawer__total")?.classList.add("is-pulse");
+      window.setTimeout(() => {
+        cartTotal.closest(".cart-drawer__total")?.classList.remove("is-pulse");
+      }, 280);
+    }
+    setDrawerState(cart.length > 0);
     updateMenuButtons(cart);
   };
 
-  const updateMenuButtons = (cart) => {
+  const animateQtyChange = (qtyNode, prev, next) => {
+    if (!qtyNode || prev === next) return;
+    qtyNode.classList.remove("is-updated-up", "is-updated-down");
+    // Restart animation when user clicks quickly several times.
+    void qtyNode.offsetWidth;
+    qtyNode.dataset.prev = String(prev);
+    qtyNode.dataset.next = String(next);
+    qtyNode.textContent = String(next);
+    qtyNode.classList.add(next > prev ? "is-updated-up" : "is-updated-down");
+    window.setTimeout(() => {
+      qtyNode.classList.remove("is-updated-up", "is-updated-down");
+    }, 190);
+  };
+
+  const pulseCartTotal = (nextTotal) => {
+    if (!cartTotal) return;
+    cartTotal.textContent = String(nextTotal);
+    const totalBlock = cartTotal.closest(".cart-drawer__total");
+    totalBlock?.classList.add("is-pulse");
+    window.setTimeout(() => {
+      totalBlock?.classList.remove("is-pulse");
+    }, 280);
+  };
+
+  const updateMenuButtons = (currentCart = null) => {
+    const cart = currentCart || normalizeCart(loadCart());
+    const idsInCart = new Set(cart.map((item) => Number(item.id)));
     document.querySelectorAll(".add-button").forEach((btn) => {
-      const id = Number(btn.dataset.id);
-      const item = cart.find((row) => row.id === id);
-      if (!item) {
-        btn.classList.remove("is-active");
-        btn.innerHTML = "В корзину";
-        return;
+      if (!btn.dataset.defaultLabel) {
+        btn.dataset.defaultLabel = btn.textContent.trim() || "В корзину";
       }
-      btn.classList.add("is-active");
-      btn.innerHTML = `
-        <span class="add-button__btn" data-action="dec">−</span>
-        <span class="add-button__qty">${item.qty}</span>
-        <span class="add-button__btn" data-action="inc">+</span>
-      `;
+      const id = Number(btn.dataset.id);
+      const inCart = idsInCart.has(id);
+      if (inCart) {
+        btn.classList.remove("is-added");
+        btn.classList.add("is-remove");
+        btn.textContent = "Убрать";
+      } else {
+        btn.classList.remove("is-remove", "is-added");
+        btn.textContent = btn.dataset.defaultLabel;
+      }
     });
   };
 
   const addToCart = (id, name, price) => {
+    const button = document.querySelector(`.add-button[data-id="${id}"]`);
+    const photo = button?.dataset.photo || "";
     const cart = loadCart();
-    const existing = cart.find((item) => item.id === id);
+    const existing = cart.find((item) => Number(item.id) === id);
     if (existing) {
       existing.qty += 1;
+      if (!existing.photo && photo) existing.photo = photo;
     } else {
-      cart.push({ id, name, price, qty: 1 });
+      cart.push({ id, name, price, qty: 1, photo });
     }
     saveCart(cart);
+    updateCartUI({ addedId: id });
+  };
+
+  const removeFromCart = (id) => {
+    const cart = normalizeCart(loadCart());
+    const next = cart.filter((item) => Number(item.id) !== id);
+    saveCart(next);
     updateCartUI();
   };
 
   document.querySelectorAll(".add-button").forEach((btn) => {
-    btn.addEventListener("click", (event) => {
-      const action = event.target.dataset.action;
+    if (!btn.dataset.defaultLabel) {
+      btn.dataset.defaultLabel = btn.textContent.trim() || "В корзину";
+    }
+    btn.addEventListener("click", () => {
       const id = Number(btn.dataset.id);
+      if (btn.classList.contains("is-remove")) {
+        removeFromCart(id);
+        return;
+      }
       const name = btn.dataset.name || "Позиция";
       const price = Number(btn.dataset.price) || 0;
-      const cart = loadCart();
-      const item = cart.find((row) => row.id === id);
-      if (action === "inc") {
-        if (item) item.qty += 1;
-        else cart.push({ id, name, price, qty: 1 });
-        saveCart(cart);
-        updateCartUI();
-        return;
-      }
-      if (action === "dec") {
-        if (item) item.qty -= 1;
-        const next = cart.filter((row) => row.qty > 0);
-        saveCart(next);
-        updateCartUI();
-        return;
-      }
       addToCart(id, name, price);
     });
   });
 
-  cartButton?.addEventListener("click", () => {
-    cartDrawer?.classList.toggle("is-open");
-    cartDrawer?.setAttribute(
-      "aria-hidden",
-      cartDrawer?.classList.contains("is-open") ? "false" : "true"
-    );
-    updateCartUI();
-  });
-
-  cartClose?.addEventListener("click", () => {
-    cartDrawer?.classList.remove("is-open");
-    cartDrawer?.setAttribute("aria-hidden", "true");
+  cartCheckout?.addEventListener("click", () => {
+    const cart = loadCart();
+    if (!cart.length) {
+      if (cartTotal) cartTotal.textContent = "0";
+      return;
+    }
+    window.location.href = "/checkout";
   });
 
   cartList?.addEventListener("click", (event) => {
@@ -814,14 +931,303 @@ window.addEventListener("DOMContentLoaded", () => {
     if (!button) return;
     const id = Number(button.dataset.id);
     const cart = loadCart();
-    const item = cart.find((row) => row.id === id);
+    const item = cart.find((row) => Number(row.id) === id);
     if (!item) return;
-    if (button.dataset.action === "inc") item.qty += 1;
-    if (button.dataset.action === "dec") item.qty -= 1;
-    const next = cart.filter((row) => row.qty > 0);
+    const rowNode = button.closest(".cart-item");
+    const qtyNode = rowNode?.querySelector(".cart-item__qty");
+    const prevQty = Number(item.qty) || 0;
+    if (button.dataset.action === "inc") {
+      item.qty += 1;
+      saveCart(cart);
+      const normalized = normalizeCart(cart);
+      const totalPrice = normalized.reduce((sum, row) => sum + row.qty * row.price, 0);
+      if (rowNode) rowNode.dataset.qty = String(item.qty);
+      animateQtyChange(qtyNode, prevQty, item.qty);
+      pulseCartTotal(totalPrice);
+      updateMenuButtons(normalized);
+      return;
+    }
+    if (button.dataset.action === "dec" && item.qty <= 1) {
+      const row = cartList.querySelector(`.cart-item[data-id="${id}"]`);
+      if (row) {
+        row.classList.add("cart-item--removing");
+        window.setTimeout(() => {
+          const next = cart.filter((rowItem) => rowItem.id !== id);
+          saveCart(next);
+          updateCartUI();
+        }, 250);
+        return;
+      }
+    }
+    if (button.dataset.action === "dec") {
+      item.qty -= 1;
+    }
+    const next = normalizeCart(cart);
     saveCart(next);
-    updateCartUI();
+    const totalPrice = next.reduce((sum, row) => sum + row.qty * row.price, 0);
+    if (rowNode) rowNode.dataset.qty = String(item.qty);
+    animateQtyChange(qtyNode, prevQty, item.qty);
+    pulseCartTotal(totalPrice);
+    updateMenuButtons(next);
   });
+
+  // Checkout page: items list + comment + serving settings
+  if (checkoutForm && checkoutItemsNode) {
+    const commentStorageKey = "checkout_comment";
+    const menuCatalogNode = document.getElementById("menuCatalogJson");
+    const menuCatalog = (() => {
+      try {
+        const parsed = JSON.parse(menuCatalogNode?.textContent || "[]");
+        if (!Array.isArray(parsed)) return [];
+        return parsed;
+      } catch {
+        return [];
+      }
+    })();
+    const menuById = new Map(menuCatalog.map((item) => [Number(item.id), item]));
+    const normalizeCheckoutItem = (item) => {
+      const id = Number(item.id);
+      const fromCatalog = menuById.get(id) || {};
+      return {
+        ...item,
+        id,
+        name: item.name || fromCatalog.name || "Позиция",
+        price: Number(item.price) || Number(fromCatalog.price) || 0,
+        qty: Number(item.qty) || 0,
+        photo: item.photo || fromCatalog.photo || "",
+      };
+    };
+    const getCheckoutCart = () =>
+      loadCart()
+        .map(normalizeCheckoutItem)
+        .filter((item) => Number(item.qty) > 0);
+
+    const updateCommentCounter = () => {
+      if (!checkoutComment || !checkoutCommentCount) return;
+      checkoutCommentCount.textContent = String(checkoutComment.value.length);
+    };
+
+    const renderCheckout = () => {
+      const cart = getCheckoutCart();
+      const total = cart.reduce((sum, item) => sum + Number(item.qty) * Number(item.price), 0);
+      const balance = Number(availablePoints?.textContent || 0);
+      const pointsApplied = usePoints?.checked ? Math.min(balance, total) : 0;
+      const payableTotal = Math.max(0, total - pointsApplied);
+      if (checkoutItemsJson) {
+        checkoutItemsJson.value = JSON.stringify(
+          cart.map((item) => ({ id: Number(item.id), qty: Number(item.qty) }))
+        );
+      }
+
+      if (checkoutItemsTotal) checkoutItemsTotal.textContent = String(total);
+      if (checkoutTotal) checkoutTotal.textContent = String(total);
+      if (checkoutPointsApplied) checkoutPointsApplied.textContent = String(pointsApplied);
+      if (checkoutPayable) checkoutPayable.textContent = String(payableTotal);
+      if (checkoutEmpty) {
+        checkoutEmpty.hidden = cart.length > 0;
+        checkoutEmpty.style.display = cart.length > 0 ? "none" : "";
+      }
+      if (goToPayment) goToPayment.disabled = cart.length === 0;
+
+      checkoutItemsNode.innerHTML = "";
+      cart.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "checkout-item";
+        row.innerHTML = `
+          <div class="checkout-item__left">
+            ${
+              item.photo
+                ? `<img class="checkout-item__photo" src="/static/${item.photo}" alt="${item.name}" />`
+                : `<div class="checkout-item__photo checkout-item__photo--fallback"></div>`
+            }
+            <div class="checkout-item__meta">
+              <p class="checkout-item__name">${item.name}</p>
+              <p class="checkout-item__sub">${item.price} ₽</p>
+            </div>
+          </div>
+          <div class="checkout-item__controls">
+            <span class="checkout-item__qty">${item.qty}</span>
+            <span class="checkout-item__sub">× ${item.price} ₽</span>
+            <strong>${item.qty * item.price} ₽</strong>
+          </div>
+        `;
+        checkoutItemsNode.appendChild(row);
+      });
+
+      if (checkoutSummaryList) {
+        checkoutSummaryList.innerHTML = "";
+        cart.forEach((item) => {
+          const brief = document.createElement("div");
+          brief.className = "checkout-brief";
+          brief.innerHTML = `<span>${item.name}</span><span>× ${item.qty}</span>`;
+          checkoutSummaryList.appendChild(brief);
+        });
+      }
+    };
+
+    const storedComment = sessionStorage.getItem(commentStorageKey) || "";
+    if (checkoutComment) {
+      checkoutComment.value = storedComment.slice(0, 300);
+      updateCommentCounter();
+      checkoutComment.addEventListener("input", () => {
+        if (checkoutComment.value.length > 300) {
+          checkoutComment.value = checkoutComment.value.slice(0, 300);
+        }
+        sessionStorage.setItem(commentStorageKey, checkoutComment.value);
+        updateCommentCounter();
+      });
+    }
+
+    const updateServingCustom = () => {
+      if (!serveCustomTime) return;
+      const customChecked = Boolean(
+        checkoutForm.querySelector('input[name="serve_mode"][value="custom"]')?.checked
+      );
+      serveCustomTime.disabled = !customChecked;
+      serveCustomTime.required = customChecked;
+      if (customChecked && !serveCustomTime.value && serveCustomTime.min) {
+        serveCustomTime.value = serveCustomTime.min;
+      }
+    };
+
+    checkoutForm.querySelectorAll('input[name="serve_mode"]').forEach((radio) => {
+      radio.addEventListener("change", updateServingCustom);
+    });
+    usePoints?.addEventListener("change", renderCheckout);
+    updateServingCustom();
+
+    checkoutForm.addEventListener("submit", (event) => {
+      const cart = getCheckoutCart();
+      if (!cart.length) {
+        event.preventDefault();
+        return;
+      }
+      const customChecked = Boolean(
+        checkoutForm.querySelector('input[name="serve_mode"][value="custom"]')?.checked
+      );
+      if (customChecked && serveCustomTime && !serveCustomTime.value) {
+        event.preventDefault();
+      }
+      if (checkoutComment) {
+        sessionStorage.setItem(commentStorageKey, checkoutComment.value);
+      }
+      if (goToPayment) {
+        goToPayment.classList.add("is-loading");
+        goToPayment.disabled = true;
+        goToPayment.textContent = "Переходим...";
+      }
+    });
+
+    const cards = Array.from(document.querySelectorAll(".checkout-main .checkout-card"));
+    cards.forEach((card, index) => {
+      card.classList.add("checkout-card--stagger");
+      card.style.animationDelay = `${index * 60}ms`;
+    });
+    document.getElementById("checkoutHead")?.classList.add("checkout-head--show");
+    document.getElementById("checkoutTotalPanel")?.classList.add("checkout-total--show");
+
+    renderCheckout();
+  }
+
+  // Payment page: loading + success/error states
+  const paymentConfirmForm = document.getElementById("paymentConfirmForm");
+  const payNowButton = document.getElementById("payNowButton");
+  const paymentCardMain = document.getElementById("paymentCardMain");
+  const paymentSuccess = document.getElementById("paymentSuccess");
+  const paymentError = document.getElementById("paymentError");
+  const retryPaymentButton = document.getElementById("retryPaymentButton");
+  const paymentHead = document.getElementById("paymentHead");
+  const paymentTotalBlock = document.getElementById("paymentTotalBlock");
+  paymentHead?.classList.add("payment-head--show");
+  paymentCardMain?.classList.add("payment-card--show");
+  paymentTotalBlock?.classList.add("payment-total--show");
+  Array.from(paymentCardMain?.querySelectorAll(".payment-block") || []).forEach((block, index) => {
+    if (block.id === "paymentTotalBlock") return;
+    block.classList.add("payment-block--stagger");
+    block.style.animationDelay = `${index * 70}ms`;
+  });
+
+  if (paymentConfirmForm && payNowButton) {
+    const setLoading = (loading) => {
+      payNowButton.disabled = loading || payNowButton.hasAttribute("data-lock");
+      payNowButton.classList.toggle("is-loading", loading);
+      paymentCardMain?.classList.toggle("is-processing", loading);
+      const label = payNowButton.querySelector(".pay-btn__label");
+      if (label) label.textContent = loading ? "Обработка..." : "Оплатить";
+    };
+
+    const hideAllPaymentStates = () => {
+      paymentCardMain?.setAttribute("hidden", "true");
+      paymentSuccess?.setAttribute("hidden", "true");
+      paymentError?.setAttribute("hidden", "true");
+    };
+
+    const showMainState = () => {
+      hideAllPaymentStates();
+      paymentCardMain?.removeAttribute("hidden");
+      paymentCardMain?.classList.remove("payment-card--show");
+      void paymentCardMain?.offsetWidth;
+      paymentCardMain?.classList.add("payment-card--show");
+    };
+
+    const showErrorState = async () => {
+      paymentCardMain?.classList.remove("is-shake");
+      void paymentCardMain?.offsetWidth;
+      paymentCardMain?.classList.add("is-shake");
+      await new Promise((resolve) => window.setTimeout(resolve, 220));
+      hideAllPaymentStates();
+      paymentError?.removeAttribute("hidden");
+      paymentError?.classList.remove("is-shake");
+      void paymentError?.offsetWidth;
+      paymentError?.classList.add("is-shake");
+      setLoading(false);
+    };
+
+    const showSuccessState = () => {
+      hideAllPaymentStates();
+      paymentSuccess?.removeAttribute("hidden");
+      paymentSuccess?.classList.add("payment-result--show");
+      localStorage.removeItem("cart");
+      sessionStorage.removeItem("checkout_comment");
+      payNowButton.setAttribute("data-lock", "1");
+      setLoading(false);
+    };
+
+    paymentConfirmForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (payNowButton.disabled) return;
+      setLoading(true);
+      const delayMs = 1200 + Math.floor(Math.random() * 700);
+      await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+
+      const response = await fetch(paymentConfirmForm.action, {
+        method: "POST",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      }).catch(() => null);
+      if (!response || !response.ok) {
+        await showErrorState();
+        return;
+      }
+      const result = await response.json().catch(() => ({}));
+      if (!result.ok) {
+        await showErrorState();
+        return;
+      }
+      showSuccessState();
+    });
+
+    retryPaymentButton?.addEventListener("click", () => {
+      showMainState();
+      payNowButton.removeAttribute("data-lock");
+      setLoading(false);
+    });
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("paid") === "1") {
+    localStorage.removeItem("cart");
+    sessionStorage.removeItem("checkout_comment");
+  }
 
   updateCartUI();
 });

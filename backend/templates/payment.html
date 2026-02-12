@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block body_class %}page-payment-center{% endblock %}
+{% block content %}
+<section class="payment-shell">
+  <header class="payment-head" id="paymentHead">
+    <h1>Оплата заказа</h1>
+    <p>Подтвердите оплату вашего заказа</p>
+  </header>
+
+  {% set blocking_state = payment_error_code in ["no_booking", "expired_booking", "empty_cart"] %}
+  {% set has_card_issue = payment_error_code == "no_card" %}
+
+  {% if blocking_state %}
+  <article class="payment-card-main payment-card-main--blocked" id="paymentCardMain">
+    <section class="payment-block">
+      <h2>Оплата недоступна</h2>
+      <p>{{ payment_error_text }}</p>
+      {% if payment_error_code in ["no_booking", "expired_booking"] %}
+        <a class="primary-action" href="{{ url_for('reserve') }}">К бронированию</a>
+      {% elif payment_error_code == "empty_cart" %}
+        <a class="primary-action" href="{{ url_for('menu') }}">В меню</a>
+      {% endif %}
+    </section>
+  </article>
+  {% else %}
+  <article class="payment-card-main" id="paymentCardMain">
+    <section class="payment-block payment-block--order">
+      <h2>Информация о заказе</h2>
+      <p>Столик №{{ preview.booking.table_id or "—" }}</p>
+      <p>{{ preview.booking.date or "—" }} • {{ preview.booking.time or "—" }}</p>
+      <div class="payment-items-brief">
+        {% for item in preview.get("items", []) %}
+          <div class="payment-items-brief__row">
+            <span>{{ item.name }} ×{{ item.qty }}</span>
+            <span>{{ item.qty * item.price }} ₽</span>
+          </div>
+        {% endfor %}
+      </div>
+      {% if preview.get("comment") %}
+        <div class="payment-comment">
+          <p class="payment-comment__title">Комментарий:</p>
+          <p class="payment-comment__text">“{{ preview.get("comment") }}”</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="payment-block payment-block--card">
+      <h2>Привязанная карта</h2>
+      {% if not has_card_issue %}
+        <div class="payment-card-inline">
+          <span>{{ preview.get("payment_card", {}).get("brand") }} •••• {{ preview.get("payment_card", {}).get("last4") }}</span>
+          <span class="pill">Активна</span>
+        </div>
+        {% if preview.get("payment_card", {}).get("expiry") %}
+          <p>Срок: {{ preview.get("payment_card", {}).get("expiry") }}</p>
+        {% endif %}
+      {% else %}
+        <div class="notice notice--error">{{ payment_error_text }}</div>
+        <a class="booking-card__action" href="{{ url_for('profile') }}">Перейти в профиль</a>
+      {% endif %}
+    </section>
+
+    <section class="payment-block payment-block--total" id="paymentTotalBlock">
+      <p class="payment-total">К оплате: <strong>{{ preview.get("payable_total", 0) }} ₽</strong></p>
+    </section>
+
+    <section class="payment-block payment-block--actions">
+      <form method="post" action="{{ url_for('payment_confirm') }}" id="paymentConfirmForm">
+        {% if not has_card_issue %}
+          <button class="primary-action" id="payNowButton" type="submit" {% if not can_pay %}disabled{% endif %}>
+            <span class="pay-btn__spinner" aria-hidden="true"></span>
+            <span class="pay-btn__label">Оплатить</span>
+          </button>
+        {% endif %}
+      </form>
+      <a class="booking-card__action" href="{{ url_for('checkout') }}">Назад к оформлению</a>
+    </section>
+  </article>
+  {% endif %}
+
+  <article class="payment-result payment-result--success" id="paymentSuccess" hidden>
+    <div class="payment-result__icon payment-result__icon--success">✓</div>
+    <h2>Оплата прошла успешно</h2>
+    <p>Ваш заказ принят и будет подан к выбранному времени</p>
+    <div class="payment-result__actions">
+      <a class="booking-card__action" href="{{ url_for('orders') }}">К заказам</a>
+      <a class="booking-card__action" href="{{ url_for('menu') }}">В меню</a>
+    </div>
+  </article>
+
+  <article class="payment-result payment-result--error" id="paymentError" hidden>
+    <div class="payment-result__icon payment-result__icon--error">!</div>
+    <h2>Оплата не прошла</h2>
+    <p>Попробуйте снова</p>
+    <div class="payment-result__actions">
+      <button class="booking-card__action" type="button" id="retryPaymentButton">Повторить оплату</button>
+      <a class="booking-card__action" href="{{ url_for('checkout') }}">Назад</a>
+    </div>
+  </article>
+</section>
+{% endblock %}

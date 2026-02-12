@@ -20,7 +20,7 @@
 </div>
 
 <section class="section">
-  {% if bookings %}
+  {% if bookings or preparing_orders %}
     {% for booking in bookings %}
       <div class="notice">
         <div class="notice__title">Бронь подтверждена</div>
@@ -28,6 +28,20 @@
           Стол №{{ booking.table_id }} · {{ booking.date }} · {{ booking.time }}
         </div>
         <div class="notice__text">Ждём вас!</div>
+      </div>
+    {% endfor %}
+    {% for order in preparing_orders %}
+      <div class="notice">
+        <div class="notice__title">Заказ готовится</div>
+        <div class="notice__meta">
+          Заказ №{{ order.get("id") }} · Стол №{{ order.get("booking", {}).get("table_id") or "—" }}
+        </div>
+        <div class="notice__text">
+          {% for item in order.get("items", []) %}
+            {{ item.get("name") }} ×{{ item.get("qty") }}{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        </div>
+        <div class="notice__meta">Сумма: {{ order.get("payable_total") or order.get("items_total") }} ₽</div>
       </div>
     {% endfor %}
     <div class="notice notice--ad">

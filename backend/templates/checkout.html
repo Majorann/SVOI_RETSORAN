@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block body_class %}page-checkout page-checkout-payment{% endblock %}
+{% block content %}
+<header class="top checkout-head" id="checkoutHead">
+  <div class="brand">
+    <div class="brand__mark">С</div>
+    <div>
+      <p class="brand__name">Перейти к оплате</p>
+      <p class="brand__tag">Проверьте детали заказа перед оплатой</p>
+    </div>
+  </div>
+  <a class="icon-button" href="{{ url_for('menu') }}" aria-label="Назад в меню">←</a>
+</header>
+
+{% if checkout_error %}
+<section class="section">
+  <div class="notice notice--error">{{ checkout_error }}</div>
+</section>
+{% endif %}
+
+<script type="application/json" id="menuCatalogJson">{{ menu_catalog | tojson }}</script>
+
+{% if checkout_state != "active" %}
+<section class="section checkout-state-card">
+  {% if checkout_state == "expired_booking" %}
+    <h2>Ваша бронь больше не активна</h2>
+    <p>Забронируйте столик заново, чтобы продолжить оформление заказа.</p>
+    <a class="primary-action" href="{{ url_for('reserve') }}">Забронировать заново</a>
+  {% else %}
+    <h2>Сначала забронируйте столик</h2>
+    <p>Для перехода к оплате нужна активная бронь.</p>
+    <a class="primary-action" href="{{ url_for('reserve') }}">Перейти к бронированию</a>
+  {% endif %}
+</section>
+{% else %}
+<form class="checkout-layout" method="post" action="{{ url_for('payment') }}" id="checkoutForm">
+  <input type="hidden" name="items_json" id="checkoutItemsJson" value="[]" />
+
+  <div class="checkout-main">
+    <section class="section">
+      <div class="section__title">
+        <h2>Бронь</h2>
+      </div>
+      <div class="checkout-card">
+        <div class="checkout-booking">
+          <div>
+            <p class="checkout-booking__title">Столик №{{ booking.table_id }}</p>
+            <p class="checkout-booking__meta">{{ booking.date }} · {{ booking.time }}</p>
+          </div>
+          <span class="pill">Активна</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section__title">
+        <h2>Состав заказа</h2>
+      </div>
+      <div class="checkout-card">
+        <div class="checkout-items" id="checkoutItems"></div>
+        <div class="checkout-empty notice notice--empty" id="checkoutEmpty">Корзина пуста</div>
+        <div class="checkout-summary">
+          <span>Итог по позициям</span>
+          <strong><span id="checkoutItemsTotal">0</span> ₽</strong>
+        </div>
+        <a class="booking-card__action" href="{{ url_for('menu') }}">Вернуться в меню</a>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section__title">
+        <h2>Комментарий к заказу</h2>
+      </div>
+      <div class="checkout-card">
+        <p class="field">Пожелания для кухни</p>
+        <label class="checkout-comment">
+          <textarea
+            id="checkoutComment"
+            name="comment"
+            maxlength="300"
+            rows="4"
+            placeholder="Например: без лука, аллергия на орехи..."
+          ></textarea>
+        </label>
+        <div class="checkout-counter"><span id="checkoutCommentCount">0</span> / 300</div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section__title">
+        <h2>Подача</h2>
+      </div>
+      <div class="checkout-card checkout-serving">
+        <label><input type="radio" name="serve_mode" value="booking_start" checked /> К началу брони</label>
+        <label><input type="radio" name="serve_mode" value="plus_15" /> Через 15 минут</label>
+        <label><input type="radio" name="serve_mode" value="plus_30" /> Через 30 минут</label>
+        <label><input type="radio" name="serve_mode" value="plus_45" /> Через 45 минут</label>
+        <label><input type="radio" name="serve_mode" value="plus_60" /> Через 60 минут</label>
+        <label class="checkout-serving__custom">
+          <input type="radio" name="serve_mode" value="custom" /> В своё время
+          <input
+            type="time"
+            name="serve_custom_time"
+            id="serveCustomTime"
+            min="{{ booking.time }}"
+            {% if custom_time_max %}max="{{ custom_time_max }}"{% endif %}
+          />
+        </label>
+      </div>
+    </section>
+  </div>
+
+  <aside class="checkout-side">
+    <section class="section">
+      <div class="section__title">
+        <h2>Итого</h2>
+      </div>
+      <div class="checkout-card checkout-total checkout-total--fixed" id="checkoutTotalPanel">
+        <div class="checkout-brief-list" id="checkoutSummaryList"></div>
+        <p class="checkout-total__hint">Сумма: <span id="checkoutTotal">0</span> ₽</p>
+        <label class="checkout-points">
+          <input type="checkbox" name="use_points" id="usePoints" value="1" {% if user_balance <= 0 %}disabled{% endif %} />
+          <span>Использовать баллы</span>
+        </label>
+        <p class="checkout-total__hint">Доступно баллов: <span id="availablePoints">{{ user_balance }}</span></p>
+        <p class="checkout-total__hint">Списать баллов: <span id="checkoutPointsApplied">0</span> ₽</p>
+        <p class="checkout-total__value">К оплате: <span id="checkoutPayable">0</span> ₽</p>
+        <button class="primary-action" type="submit" id="goToPayment"{% if not active_card %} disabled{% endif %}>Перейти к оплате</button>
+        <p class="checkout-total__hint">Оплата картой из профиля</p>
+        {% if active_card %}
+          <p class="checkout-total__hint">Активная карта: {{ active_card.brand }} •••• {{ active_card.last4 }}</p>
+        {% else %}
+          <p class="notice notice--error">Нет активной карты. Добавьте карту в профиле.</p>
+        {% endif %}
+      </div>
+    </section>
+  </aside>
+</form>
+
+{% endif %}
+
+<nav class="bottom-nav">
+  <a class="bottom-nav__item" href="{{ url_for('notifications') }}">
+    <span>🔔</span>
+    <span>Уведомления</span>
+    {% if notifications_count %}
+      <span class="nav-badge">{{ notifications_count }}</span>
+    {% endif %}
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('index') }}">
+    <span>🏠</span>
+    <span>Главная</span>
+  </a>
+  <a class="bottom-nav__item bottom-nav__item--active" href="{{ url_for('profile') }}">
+    <span>👤</span>
+    <span>Профиль</span>
+  </a>
+</nav>
+{% endblock %}
