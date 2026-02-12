@@ -73,6 +73,26 @@
 </section>
 {% endif %}
 
+{% if preparing_orders %}
+<section class="section bookings">
+  <div class="section__title">
+    <h2>Ваши заказы</h2>
+    <span class="pill">Статус</span>
+  </div>
+  <div class="bookings__list">
+    {% for order in preparing_orders %}
+      <div class="booking-card">
+        <div>
+          <p class="booking-card__title">Заказ №{{ order.id }}</p>
+          <p class="booking-card__meta">Статус: заказ готовится</p>
+        </div>
+        <a class="booking-card__action" href="{{ url_for('notifications') }}">Детали</a>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <section class="section">
   <div class="section__title">
     <h2>Что нового</h2>

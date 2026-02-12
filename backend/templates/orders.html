@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block body_class %}page-orders{% endblock %}
+{% block content %}
+<header class="top">
+  <div class="brand">
+    <div class="brand__mark">С</div>
+    <div>
+      <p class="brand__name">История заказов</p>
+      <p class="brand__tag">Оплаченные заказы</p>
+    </div>
+  </div>
+  <a class="icon-button" href="{{ url_for('profile') }}" aria-label="Назад в профиль">←</a>
+</header>
+
+<section class="section">
+  {% if orders %}
+    <div class="bookings__list">
+      {% for order in orders %}
+        <a class="booking-card" href="{{ url_for('order_detail', order_id=order.id) }}">
+          <div>
+            <p class="booking-card__title">
+              Заказ №{{ order.id }}
+              {% if order.comment %}<span class="order-comment-icon">💬</span>{% endif %}
+            </p>
+            <p class="booking-card__meta">{{ order.created_at.replace('T', ' ') }}</p>
+          </div>
+          <div>
+            <p class="booking-card__meta">Стол №{{ order.booking.table_id or "—" }}</p>
+            <p class="price">{{ order.payable_total or order.items_total }} ₽</p>
+          </div>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="notice notice--empty">Заказов пока нет.</div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block body_class %}page-order-detail{% endblock %}
+{% block content %}
+<header class="top">
+  <div class="brand">
+    <div class="brand__mark">С</div>
+    <div>
+      <p class="brand__name">Заказ №{{ order.id }}</p>
+      <p class="brand__tag">Детали заказа</p>
+    </div>
+  </div>
+  <a class="icon-button" href="{{ url_for('orders') }}" aria-label="Назад к истории">←</a>
+</header>
+
+{% if request.args.get("paid") == "1" %}
+<section class="section">
+  <div class="notice">Оплата прошла успешно.</div>
+</section>
+{% endif %}
+
+<section class="section">
+  <div class="checkout-card">
+    <p>Статус: Оплачен</p>
+    <p>Бронь: стол №{{ order.booking.table_id or "—" }}, {{ order.booking.date or "—" }} · {{ order.booking.time or "—" }}</p>
+    <p>Подача: {{ order.serving.label or "—" }}</p>
+    <p>Карта: {{ order.payment_card.brand or "Карта" }} •••• {{ order.payment_card.last4 or "0000" }}</p>
+    {% if order.points_applied %}
+      <p>Списано баллов: {{ order.points_applied }} ₽</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="section">
+  <div class="section__title">
+    <h2>Состав заказа</h2>
+  </div>
+  <div class="checkout-card">
+    <div class="checkout-items">
+      {% for item in order.items %}
+      <div class="checkout-item">
+        <div class="checkout-item__meta">
+          <p class="checkout-item__name">{{ item.name }}</p>
+          <p class="checkout-item__sub">{{ item.qty }} × {{ item.price }} ₽</p>
+        </div>
+        <strong>{{ item.qty * item.price }} ₽</strong>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="checkout-summary">
+      <span>Итого</span>
+      <strong>{{ order.payable_total or order.items_total }} ₽</strong>
+    </div>
+  </div>
+</section>
+
+{% if order.comment %}
+<section class="section">
+  <div class="section__title">
+    <h2>Комментарий к заказу</h2>
+  </div>
+  <div class="checkout-card">
+    <p>{{ order.comment }}</p>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

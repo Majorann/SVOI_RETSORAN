@@ -7,20 +7,12 @@
     "created_at": "2026-02-03T16:57:29",
     "cards": [
       {
-        "brand": "Карта",
-        "last4": "4124",
-        "active": false,
-        "holder": "ANDREY YAROSHCUK",
-        "expiry": "12/34",
-        "created_at": "2026-02-03T19:15:15"
-      },
-      {
-        "brand": "Карта",
-        "last4": "3512",
+        "brand": "МИР",
+        "last4": "4141",
         "active": true,
         "holder": "ANDREY YAROSHCUK",
-        "expiry": "12/31",
-        "created_at": "2026-02-04T00:23:15"
+        "expiry": "12/42",
+        "created_at": "2026-02-12T22:14:03"
       }
     ]
   }

@@ -16,6 +16,7 @@ app.permanent_session_lifetime = timedelta(days=30)
 # Хранилища JSON
 BOOKINGS_PATH = Path(__file__).with_name("bookings.json")
 USERS_PATH = Path(__file__).with_name("users.json")
+ORDERS_PATH = Path(__file__).with_name("orders.json")
 MENU_ITEMS_PATH = Path(__file__).with_name("static") / "menu_items"
 PROMO_ITEMS_PATH = Path(__file__).with_name("static") / "promo_items"
 # Длительность брони в минутах (для проверки пересечений)
@@ -217,6 +218,7 @@ WALLS = [
 def index():
     user_id = session.get("user_id")
     bookings = load_bookings()
+    preparing_orders = []
     promo_items = load_promo_items()
     promo_news = promo_items_to_news_cards(promo_items)
     news_cards = promo_news or NEWS_CARDS
@@ -226,9 +228,16 @@ def index():
         popular_menu = all_menu_items[:3]
     if user_id:
         bookings = [b for b in bookings if b.get("user_id") == user_id]
+        preparing_orders = get_user_preparing_orders(user_id)
     else:
         bookings = []
-    return render_template("index.html", news=news_cards, menu=popular_menu, bookings=bookings)
+    return render_template(
+        "index.html",
+        news=news_cards,
+        menu=popular_menu,
+        bookings=bookings,
+        preparing_orders=preparing_orders,
+    )
 
 
 @app.route("/reserve")
@@ -319,11 +328,13 @@ def delivery():
 
 @app.route("/notifications")
 def notifications():
-    # Уведомления — это брони текущего пользователя
+    # Уведомления: брони + статусы заказов
     user_id = session.get("user_id")
     bookings = load_bookings()
+    preparing_orders = []
     if user_id:
         bookings = [b for b in bookings if b.get("user_id") == user_id]
+        preparing_orders = get_user_preparing_orders(user_id)
     else:
         bookings = []
     bookings_sorted = sorted(
@@ -331,7 +342,11 @@ def notifications():
         key=lambda b: (b.get("date", ""), b.get("time", ""), b.get("created_at", "")),
         reverse=True,
     )
-    return render_template("notifications.html", bookings=bookings_sorted)
+    return render_template(
+        "notifications.html",
+        bookings=bookings_sorted,
+        preparing_orders=preparing_orders,
+    )
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -392,16 +407,37 @@ def inject_notifications_count():
     # Бейдж уведомлений в нижнем меню
     user_id = session.get("user_id")
     bookings = load_bookings()
+    preparing_orders = []
     if user_id:
         bookings = [b for b in bookings if b.get("user_id") == user_id]
+        preparing_orders = get_user_preparing_orders(user_id)
     else:
         bookings = []
-    return {"notifications_count": len(bookings), "current_user_name": session.get("user_name")}
+    return {
+        "notifications_count": len(bookings) + len(preparing_orders),
+        "current_user_name": session.get("user_name"),
+    }
 
 
 @app.route("/orders")
 def orders():
-    return render_template("placeholder.html", title="История заказов")
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login", error="Войдите, чтобы открыть историю заказов."))
+    user_orders = [o for o in load_orders() if o.get("user_id") == user_id]
+    user_orders.sort(key=lambda o: o.get("created_at", ""), reverse=True)
+    return render_template("orders.html", orders=user_orders)
+
+
+@app.route("/orders/<int:order_id>")
+def order_detail(order_id: int):
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login", error="Войдите, чтобы открыть детали заказа."))
+    order = next((o for o in load_orders() if o.get("id") == order_id and o.get("user_id") == user_id), None)
+    if order is None:
+        return render_template("placeholder.html", title="Заказ не найден"), 404
+    return render_template("order-detail.html", order=order)
 
 
 @app.route("/reviews")
@@ -420,6 +456,166 @@ def menu_item(item_id: int):
 @app.route("/menu")
 def menu():
     return render_template("menu.html", items=load_menu_items())
+
+
+@app.route("/checkout")
+def checkout():
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login", error="Войдите, чтобы оформить заказ."))
+    booking_state = latest_user_booking_status(user_id)
+    booking = booking_state.get("booking")
+    checkout_state = booking_state.get("state", "no_booking")
+    custom_time_max = None
+    if booking and checkout_state == "active":
+        booking_dt = parse_datetime(booking.get("date"), booking.get("time"))
+        if booking_dt:
+            custom_time_max = (booking_dt + timedelta(minutes=BOOKING_DURATION_MINUTES - 1)).strftime("%H:%M")
+    users = load_users()
+    user = next((u for u in users if u.get("id") == user_id), None)
+    cards = list((user or {}).get("cards", []))
+    active_card = next((card for card in cards if card.get("active")), None)
+    checkout_error = request.args.get("error")
+    menu_catalog = [
+        {
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "price": item.get("price"),
+            "photo": item.get("photo"),
+        }
+        for item in load_menu_items()
+    ]
+    user_balance = int((user or {}).get("balance", 0) or 0)
+    return render_template(
+        "checkout.html",
+        booking=booking,
+        checkout_state=checkout_state,
+        custom_time_max=custom_time_max,
+        active_card=active_card,
+        user_balance=user_balance,
+        checkout_error=checkout_error,
+        menu_catalog=menu_catalog,
+    )
+
+
+@app.post("/payment")
+def payment():
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login", error="Войдите, чтобы продолжить оплату."))
+
+    users = load_users()
+    user = next((u for u in users if u.get("id") == user_id), None)
+    cards = list((user or {}).get("cards", []))
+    active_card = next((card for card in cards if card.get("active")), None)
+    user_balance = int((user or {}).get("balance", 0) or 0)
+
+    booking_status = latest_user_booking_status(user_id)
+    booking = booking_status.get("booking")
+    booking_state = booking_status.get("state")
+
+    items = resolve_order_items(request.form.get("items_json"))
+
+    comment = (request.form.get("comment") or "").strip()[:300]
+    serve_mode = (request.form.get("serve_mode") or "").strip()
+    serve_custom_time = (request.form.get("serve_custom_time") or "").strip()
+    serving = parse_serving_option(serve_mode, serve_custom_time, booking or {})
+    if serving is None:
+        serving = {"mode": "booking_start", "label": "К началу брони"}
+
+    items_total = sum(item["price"] * item["qty"] for item in items)
+    use_points = (request.form.get("use_points") or "") == "1"
+    points_applied = min(user_balance, items_total) if use_points else 0
+    payable_total = items_total - points_applied
+    payment_error_code = None
+    payment_error_text = None
+    if booking_state == "no_booking":
+        payment_error_code = "no_booking"
+        payment_error_text = "Нет активной брони. Сначала забронируйте столик."
+    elif booking_state == "expired_booking":
+        payment_error_code = "expired_booking"
+        payment_error_text = "Ваша бронь устарела. Забронируйте столик заново."
+    elif not items:
+        payment_error_code = "empty_cart"
+        payment_error_text = "Корзина пуста. Добавьте блюда в меню."
+    elif not active_card:
+        payment_error_code = "no_card"
+        payment_error_text = "Карта не привязана. Перейдите в профиль и добавьте карту."
+
+    can_pay = payment_error_code is None
+    preview = {
+        "items": items,
+        "items_total": items_total,
+        "items_count": sum(item["qty"] for item in items),
+        "points_applied": points_applied,
+        "payable_total": payable_total,
+        "comment": comment,
+        "serving": serving,
+        "booking": {
+            "table_id": (booking or {}).get("table_id"),
+            "date": (booking or {}).get("date"),
+            "time": (booking or {}).get("time"),
+            "status": "Активна" if booking_state == "active" else "Неактивна",
+        },
+        "payment_card": {
+            "brand": (active_card or {}).get("brand", "Карта"),
+            "last4": (active_card or {}).get("last4", "0000"),
+            "expiry": (active_card or {}).get("expiry"),
+        },
+    }
+    session["checkout_preview"] = preview if can_pay else None
+    return render_template(
+        "payment.html",
+        preview=preview,
+        can_pay=can_pay,
+        payment_error_code=payment_error_code,
+        payment_error_text=payment_error_text,
+    )
+
+
+@app.post("/payment/confirm")
+def payment_confirm():
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login", error="Войдите, чтобы завершить оплату."))
+    preview = session.get("checkout_preview")
+    if not preview:
+        return redirect(url_for("checkout", error="Сессия оплаты устарела. Повторите оформление."))
+
+    orders = load_orders()
+    order_id = next_order_id(orders)
+    new_order = {
+        "id": order_id,
+        "user_id": user_id,
+        "status": "preparing",
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "items": preview.get("items", []),
+        "items_total": preview.get("items_total", 0),
+        "points_applied": preview.get("points_applied", 0),
+        "payable_total": preview.get("payable_total", preview.get("items_total", 0)),
+        "comment": preview.get("comment", ""),
+        "serving": preview.get("serving", {}),
+        "booking": preview.get("booking", {}),
+        "payment_card": preview.get("payment_card", {}),
+    }
+    orders.append(new_order)
+    save_orders(orders)
+
+    points_applied = int(preview.get("points_applied", 0) or 0)
+    if points_applied > 0:
+        users = load_users()
+        user = next((u for u in users if u.get("id") == user_id), None)
+        if user is not None:
+            current_balance = int(user.get("balance", 0) or 0)
+            user["balance"] = max(0, current_balance - points_applied)
+            save_users(users)
+
+    session.pop("checkout_preview", None)
+    order_url = url_for("order_detail", order_id=order_id, paid="1")
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return jsonify({"ok": True, "order_url": order_url})
+    return redirect(order_url)
+
 
 @app.post("/book")
 def book_table():
@@ -658,9 +854,31 @@ def load_bookings():
     return active
 
 
+def load_bookings_raw():
+    if not BOOKINGS_PATH.exists():
+        return []
+    try:
+        return json.loads(BOOKINGS_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+
+
 def save_bookings(bookings):
     # Сохранение bookings.json
     BOOKINGS_PATH.write_text(json.dumps(bookings, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_orders():
+    if not ORDERS_PATH.exists():
+        return []
+    try:
+        return json.loads(ORDERS_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+
+
+def save_orders(orders):
+    ORDERS_PATH.write_text(json.dumps(orders, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_users():
@@ -685,6 +903,12 @@ def next_user_id(users):
     return max(u.get("id", 0) for u in users) + 1
 
 
+def next_order_id(orders):
+    if not orders:
+        return 1
+    return max(o.get("id", 0) for o in orders) + 1
+
+
 def hash_password(password):
     # Простой хеш для демо (без соли)
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
@@ -705,6 +929,174 @@ def overlaps_booking(booking, selected_dt):
         return False
     end_dt = booking_dt + timedelta(minutes=BOOKING_DURATION_MINUTES)
     return booking_dt <= selected_dt < end_dt
+
+
+def latest_user_booking(user_id):
+    bookings = [b for b in load_bookings() if b.get("user_id") == user_id]
+    if not bookings:
+        return None
+    bookings.sort(key=lambda b: (b.get("date", ""), b.get("time", ""), b.get("created_at", "")), reverse=True)
+    return bookings[0]
+
+
+def get_user_preparing_orders(user_id):
+    orders = [o for o in load_orders() if o.get("user_id") == user_id]
+    now = datetime.now()
+    preparing_now = []
+    for order in orders:
+        window = order_cooking_window(order)
+        if window is None:
+            continue
+        cook_start, ready_time, booking_end = window
+        # После конца брони уведомления по этому заказу не показываем.
+        if now >= booking_end:
+            continue
+        # Показываем только "Заказ готовится" в 20-минутном окне.
+        if cook_start <= now < ready_time:
+            enriched = dict(order)
+            enriched["cooking_expires_at"] = ready_time.isoformat(timespec="seconds")
+            preparing_now.append(enriched)
+    preparing_now.sort(key=lambda o: o.get("created_at", ""), reverse=True)
+    return preparing_now
+
+
+def order_cooking_window(order):
+    booking = order.get("booking") or {}
+    booking_dt = parse_datetime(booking.get("date"), booking.get("time"))
+    if booking_dt is None:
+        return None
+    booking_end = booking_dt + timedelta(minutes=BOOKING_DURATION_MINUTES)
+
+    order_time = parse_iso_datetime(order.get("created_at"))
+    if order_time is None:
+        order_time = booking_dt
+
+    serve_dt = compute_serve_datetime(order, booking_dt)
+    if serve_dt is None:
+        serve_dt = booking_dt
+
+    # clamp serve_time в рамки окна брони
+    if serve_dt < booking_dt:
+        serve_dt = booking_dt
+    if serve_dt > booking_end:
+        serve_dt = booking_end
+
+    cook_start = max(order_time, serve_dt - timedelta(minutes=20))
+    ready_time = cook_start + timedelta(minutes=20)
+    return cook_start, ready_time, booking_end
+
+
+def compute_serve_datetime(order, booking_dt):
+    serving = order.get("serving") or {}
+    mode = serving.get("mode")
+    if mode == "booking_start":
+        return booking_dt
+    if mode == "plus_15":
+        return booking_dt + timedelta(minutes=15)
+    if mode == "plus_30":
+        return booking_dt + timedelta(minutes=30)
+    if mode == "plus_45":
+        return booking_dt + timedelta(minutes=45)
+    if mode == "plus_60":
+        return booking_dt + timedelta(minutes=60)
+    if mode == "custom":
+        custom_time = serving.get("time")
+        if not custom_time:
+            return None
+        return parse_datetime(booking_dt.date().isoformat(), custom_time)
+    return None
+
+
+def parse_iso_datetime(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def latest_user_booking_status(user_id):
+    bookings = [b for b in load_bookings_raw() if b.get("user_id") == user_id]
+    if not bookings:
+        return {"state": "no_booking", "booking": None}
+    bookings.sort(
+        key=lambda b: (b.get("date", ""), b.get("time", ""), b.get("created_at", "")),
+        reverse=True,
+    )
+    booking = bookings[0]
+    booking_dt = parse_datetime(booking.get("date"), booking.get("time"))
+    if booking_dt is None:
+        return {"state": "no_booking", "booking": None}
+    if booking_dt + timedelta(minutes=BOOKING_DURATION_MINUTES) <= datetime.now():
+        return {"state": "expired_booking", "booking": booking}
+    return {"state": "active", "booking": booking}
+
+
+def resolve_order_items(raw_items_json):
+    try:
+        raw_items = json.loads(raw_items_json or "[]")
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(raw_items, list):
+        return []
+
+    normalized = {}
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            item_id = int(item.get("id"))
+            qty = int(item.get("qty"))
+        except (TypeError, ValueError):
+            continue
+        if qty <= 0:
+            continue
+        normalized[item_id] = normalized.get(item_id, 0) + qty
+
+    if not normalized:
+        return []
+
+    menu_index = {m["id"]: m for m in load_menu_items()}
+    items = []
+    for item_id, qty in normalized.items():
+        menu_item = menu_index.get(item_id)
+        if not menu_item:
+            continue
+        items.append(
+            {
+                "id": menu_item["id"],
+                "name": menu_item["name"],
+                "price": menu_item["price"],
+                "qty": qty,
+                "photo": menu_item.get("photo"),
+            }
+        )
+    return items
+
+
+def parse_serving_option(serve_mode, serve_custom_time, booking):
+    labels = {
+        "booking_start": "К началу брони",
+        "plus_15": "Через 15 минут",
+        "plus_30": "Через 30 минут",
+        "plus_45": "Через 45 минут",
+        "plus_60": "Через 60 минут",
+    }
+    if serve_mode in labels:
+        return {"mode": serve_mode, "label": labels[serve_mode]}
+    if serve_mode == "custom":
+        if not serve_custom_time:
+            return None
+        booking_start = parse_datetime(booking.get("date"), booking.get("time"))
+        custom_time = parse_datetime(booking.get("date"), serve_custom_time)
+        if booking_start is None or custom_time is None:
+            return None
+        booking_end = booking_start + timedelta(minutes=BOOKING_DURATION_MINUTES)
+        if not (booking_start <= custom_time < booking_end):
+            return None
+        return {"mode": "custom", "label": f"В своё время ({serve_custom_time})", "time": serve_custom_time}
+    return None
 
 
 @app.post("/release")
