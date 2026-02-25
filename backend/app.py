@@ -10,6 +10,7 @@ from pathlib import Path
 from dataclasses import dataclass
 import json
 import hashlib
+import os
 
 app = Flask(__name__)
 app.permanent_session_lifetime = timedelta(days=30)
@@ -22,7 +23,7 @@ PROMO_ITEMS_PATH = Path(__file__).with_name("static") / "promo_items"
 # Длительность брони в минутах (для проверки пересечений)
 BOOKING_DURATION_MINUTES = 60
 # Секрет для сессий (в проде заменить)
-app.secret_key = "replace-me-in-production"
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "replace-me-in-production")
 # Карусель на главной
 NEWS_CARDS = []
 
@@ -1219,4 +1220,5 @@ def delete_card():
 
 if __name__ == "__main__":
     app.run(debug=True)
+
 
