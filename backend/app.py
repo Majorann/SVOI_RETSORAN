@@ -11,6 +11,14 @@ from dataclasses import dataclass
 import json
 import hashlib
 import os
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+
+def env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 app = Flask(__name__)
 app.permanent_session_lifetime = timedelta(days=30)
@@ -24,12 +32,18 @@ PROMO_ITEMS_PATH = Path(__file__).with_name("static") / "promo_items"
 BOOKING_DURATION_MINUTES = 60
 # Секрет для сессий (в проде заменить)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "replace-me-in-production")
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = env_bool("SESSION_COOKIE_SECURE", True)
+app.config["PREFERRED_URL_SCHEME"] = "https"
+if env_bool("TRUST_PROXY_HEADERS", True):
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 # Карусель на главной
 NEWS_CARDS = []
 
-MENU_PHOTO_NAME = "photo.png"
+MENU_PHOTO_NAMES = ("photo.png", "photo.webp")
 MENU_META_NAME = "item.txt"
-PROMO_PHOTO_NAME = "photo.png"
+PROMO_PHOTO_NAMES = ("photo.png", "photo.webp")
 PROMO_META_NAME = "item.txt"
 
 
@@ -672,12 +686,12 @@ def load_menu_items():
         if not item_dir.is_dir():
             continue
         meta_path = item_dir / MENU_META_NAME
-        photo_path = item_dir / MENU_PHOTO_NAME
-        if not meta_path.exists() or not photo_path.exists():
+        photo_name = resolve_photo_name(item_dir, MENU_PHOTO_NAMES)
+        if not meta_path.exists() or not photo_name:
             continue
 
         meta = parse_menu_meta(meta_path)
-        menu_item = parse_menu_item(meta, item_dir.name)
+        menu_item = parse_menu_item(meta, item_dir.name, photo_name)
         if menu_item is None:
             continue
         items.append(menu_item)
@@ -696,12 +710,12 @@ def load_promo_items():
         if not item_dir.is_dir():
             continue
         meta_path = item_dir / PROMO_META_NAME
-        photo_path = item_dir / PROMO_PHOTO_NAME
+        photo_name = resolve_photo_name(item_dir, PROMO_PHOTO_NAMES)
         if not meta_path.exists():
             continue
 
         meta = parse_menu_meta(meta_path)
-        promo_item = parse_promo_item(meta, item_dir.name, photo_path.exists())
+        promo_item = parse_promo_item(meta, item_dir.name, photo_name)
         if promo_item is None:
             continue
         if not promo_item.get("active", True):
@@ -725,7 +739,14 @@ def parse_menu_meta(meta_path: Path):
     return data
 
 
-def parse_menu_item(meta: dict, slug: str):
+def resolve_photo_name(item_dir: Path, photo_names):
+    for photo_name in photo_names:
+        if (item_dir / photo_name).exists():
+            return photo_name
+    return None
+
+
+def parse_menu_item(meta: dict, slug: str, photo_name: str):
     try:
         item_id = int(meta.get("id", ""))
         price = int(meta.get("price", ""))
@@ -750,14 +771,14 @@ def parse_menu_item(meta: dict, slug: str):
         lore=lore,
         type=dish_type,
         price=price,
-        photo=f"menu_items/{slug}/{MENU_PHOTO_NAME}",
+        photo=f"menu_items/{slug}/{photo_name}",
         popularity=popularity,
         featured=featured,
     )
     return item.__dict__
 
 
-def parse_promo_item(meta: dict, slug: str, has_photo: bool):
+def parse_promo_item(meta: dict, slug: str, photo_name):
     try:
         item_id = int(meta.get("id", ""))
     except ValueError:
@@ -774,7 +795,7 @@ def parse_promo_item(meta: dict, slug: str, has_photo: bool):
 
     active_value = (meta.get("active", "true") or "").lower()
     active = active_value in {"1", "true", "yes", "y", "on"}
-    photo = f"promo_items/{slug}/{PROMO_PHOTO_NAME}" if has_photo else None
+    photo = f"promo_items/{slug}/{photo_name}" if photo_name else None
 
     if item_class == "reklama":
         text = (meta.get("text", "") or "").strip()

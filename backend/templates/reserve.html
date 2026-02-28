@@ -17,6 +17,17 @@
     <h2>Схема зала</h2>
     <span class="pill">Интерактивно</span>
   </div>
+  <div class="reserve-mobile-summary" id="reserveMobileSummary">
+    <div class="reserve-mobile-summary__meta">
+      <span class="reserve-mobile-summary__label">Дата</span>
+      <strong id="bookingDateSummary">-</strong>
+    </div>
+    <div class="reserve-mobile-summary__meta">
+      <span class="reserve-mobile-summary__label">Время</span>
+      <strong id="bookingTimeSummary">-</strong>
+    </div>
+    <button class="secondary" type="button" id="openDateTimeSheet">Изменить</button>
+  </div>
   <div class="hall hall--with-timeline">
     <div class="hall__neon" id="hallNeon" aria-hidden="true"></div>
     <div class="hall__map">
@@ -86,35 +97,6 @@
           </div>
         </div>
       {% endfor %}
-
-      <div class="booking" id="bookingPanel" aria-hidden="true">
-        <div class="booking__stage">
-          <div class="booking__table">
-            <div class="booking__table-top" id="bookingTableId">1</div>
-            <div class="booking__table-seats" id="bookingTableSeats">2 места</div>
-          </div>
-          <div class="booking__details">
-            <h3>Бронирование</h3>
-            <label class="field">
-              <span>Дата</span>
-              <input type="date" id="bookingDate" />
-            </label>
-            <label class="field">
-              <span>Время</span>
-              <input type="time" id="bookingTime" />
-            </label>
-            <label class="field">
-              <span>Имя</span>
-              <input type="text" id="bookingName" placeholder="Ваше имя" value="{{ current_user_name or '' }}" />
-            </label>
-            <div class="booking__actions">
-              <button class="secondary" id="bookingCancel" type="button">Отмена</button>
-              <button class="primary" id="bookingSubmit" type="button">Забронировать</button>
-            </div>
-          </div>
-        </div>
-        <div class="booking__info" id="bookingInfo">Столик у окна: да</div>
-      </div>
     </div>
     <aside class="timeline" aria-label="Время">
       <div class="timeline__title">Дата</div>
@@ -140,6 +122,70 @@
   </div>
   <div class="hall__hint">Наведите на стол, чтобы увидеть детали.</div>
 </section>
+
+<div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+
+<div class="booking" id="bookingPanel" aria-hidden="true">
+  <div class="booking__stage">
+    <div class="booking__table">
+      <div class="booking__table-top" id="bookingTableId">1</div>
+      <div class="booking__table-seats" id="bookingTableSeats">2 места</div>
+    </div>
+    <div class="booking__details">
+      <h3>Бронирование</h3>
+      <p class="booking__flow">1. Столик  2. Дата и время  3. Имя  4. Подтверждение</p>
+      <label class="field">
+        <span>Дата</span>
+        <input type="date" id="bookingDate" />
+      </label>
+      <label class="field">
+        <span>Время</span>
+        <input type="time" id="bookingTime" />
+      </label>
+      <label class="field">
+        <span>Имя</span>
+        <input type="text" id="bookingName" placeholder="Ваше имя" value="{{ current_user_name or '' }}" />
+      </label>
+      <div class="booking__summary" id="bookingSummary">Выберите дату и время</div>
+      <div class="booking__actions">
+        <button class="secondary" id="bookingCancel" type="button">Отмена</button>
+        <button class="primary" id="bookingSubmit" type="button">Забронировать</button>
+      </div>
+    </div>
+  </div>
+  <div class="booking__info" id="bookingInfo">Столик у окна: да</div>
+</div>
+
+<div class="datetime-sheet" id="dateTimeSheet" aria-hidden="true">
+  <div class="datetime-sheet__head">
+    <h3>Дата и время</h3>
+    <button type="button" id="dateTimeClose" aria-label="Закрыть">×</button>
+  </div>
+  <label class="field">
+    <span>Дата</span>
+    <input
+      class="timeline__date"
+      type="text"
+      id="bookingDateMobile"
+      inputmode="numeric"
+      maxlength="10"
+      placeholder="ДД.ММ.ГГГГ"
+      aria-describedby="bookingDateMobileError"
+    />
+    <input class="timeline__date-picker-native" type="date" id="bookingDateMobilePicker" tabindex="-1" aria-hidden="true" />
+    <small class="field__error" id="bookingDateMobileError" aria-live="polite"></small>
+  </label>
+  <div class="timeline__title">Время</div>
+  <div class="timeline__list timeline__list--mobile" id="timeScaleMobile">
+    {% for h in range(9, 23) %}
+      <div class="timeline__slot" data-time="{{ "%02d"|format(h) }}:00">{{ "%02d"|format(h) }}:00</div>
+      {% if h < 22 %}
+        <div class="timeline__slot timeline__slot--half" data-time="{{ "%02d"|format(h) }}:30">{{ "%02d"|format(h) }}:30</div>
+      {% endif %}
+    {% endfor %}
+  </div>
+  <button class="primary" type="button" id="dateTimeApply">Применить</button>
+</div>
 
 <div class="tooltip" id="tableTooltip" aria-hidden="true"></div>
 
