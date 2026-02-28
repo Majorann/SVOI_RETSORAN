@@ -32,5 +32,39 @@
       "expiry": "12/42",
       "last4": "4141"
     }
+  },
+  {
+    "id": 2,
+    "user_id": 1,
+    "status": "preparing",
+    "created_at": "2026-02-27T19:12:27",
+    "items": [
+      {
+        "id": 1,
+        "name": "Пирог Мина",
+        "photo": "menu_items/пирог_мина/photo.png",
+        "price": 390,
+        "qty": 1
+      }
+    ],
+    "items_total": 390,
+    "points_applied": 0,
+    "payable_total": 390,
+    "comment": "",
+    "serving": {
+      "label": "К началу брони",
+      "mode": "booking_start"
+    },
+    "booking": {
+      "date": "2026-02-27",
+      "status": "Активна",
+      "table_id": 13,
+      "time": "19:30"
+    },
+    "payment_card": {
+      "brand": "МИР",
+      "expiry": "12/42",
+      "last4": "4141"
+    }
   }
 ]

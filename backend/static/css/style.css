@@ -28,7 +28,7 @@
   --menu-divider-bottom: 0px;
   --menu-hover-rgb: 112, 238, 255;
   --menu-bg-opacity: 0;
-  --menu-neon-rgb: 204, 123, 87;
+  --menu-neon-rgb: 218, 119, 86;
 
   --surface: rgba(255, 255, 255, 0.12);
   --surface-strong: rgba(255, 255, 255, 0.18);
@@ -36,8 +36,8 @@
   --border: rgba(255, 255, 255, 0.18);
   --text-primary: #f2f6ff;
   --text-muted: rgba(242, 246, 255, 0.72);
-  --accent: #ffb648;
-  --accent-strong: #ff7b3d;
+  --accent: #da7756;
+  --accent-strong: #da7756;
   --shadow: 0 16px 40px rgba(5, 10, 20, 0.35);
 }
 
@@ -58,8 +58,7 @@ html {
 /* Page background + mood tint */
 body {
   margin: 0;
-  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: Georgia, Cambria, "Times New Roman", Times, serif;
   background: linear-gradient(0deg, var(--mood-tint), var(--mood-tint)),
     radial-gradient(circle at 20% 10%, rgba(255, 255, 255, 0.08), transparent 45%),
     linear-gradient(180deg, var(--bg-top), var(--bg-mid) 45%, var(--bg-bottom));
@@ -116,8 +115,7 @@ body.menu-photo-hover {
 h1,
 h2,
 h3 {
-  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: Georgia, Cambria, "Times New Roman", Times, serif;
   margin: 0;
   letter-spacing: 0.3px;
 }
@@ -1099,7 +1097,7 @@ a {
 .payment-card__delete {
   width: 38px;
   height: 38px;
-  border: 1px solid #cc7b57;
+  border: 1px solid #da7756;
   border-radius: 12px;
   background: #3b3029;
   display: grid;
@@ -1118,7 +1116,7 @@ a {
 .payment-card__delete:hover {
   background: #3b3029;
   transform: scale(1.06);
-  box-shadow: 0 0 0 1px rgba(204, 123, 87, 0.45), 0 0 10px rgba(204, 123, 87, 0.45);
+  box-shadow: 0 0 0 1px rgba(218, 119, 86, 0.45), 0 0 10px rgba(218, 119, 86, 0.45);
 }
 
 .payment-add {
@@ -1772,12 +1770,12 @@ body.mood-night { --mood-tint: rgba(20, 30, 60, 0.18); }
   margin-right: 6px;
 }
 
-.dot--orange { background: #ffb648; }
+.dot--orange { background: #da7756; }
 .dot--red { background: #ff5656; }
 .dot--yellow { background: #ffe46a; }
 .dot--yellow-outline {
   background: transparent;
-  border: 2px solid #ffb648;
+  border: 2px solid #da7756;
 }
 .dot--pink { background: #ff7aa5; }
 .dot--navy { background: #5a8cff; }
@@ -2275,16 +2273,15 @@ body.mood-night { --mood-tint: rgba(20, 30, 60, 0.18); }
   --border: #453a32;
   --text-primary: #ece4db;
   --text-muted: #b1a59a;
-  --accent: #b86a47;
-  --accent-strong: #cc7b57;
+  --accent: #da7756;
+  --accent-strong: #da7756;
   --status-green: #5e7f63;
   --status-red: #7a3e3e;
   --shadow: 0 12px 28px rgba(8, 6, 5, 0.28);
 }
 
 body {
-  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: Georgia, Cambria, "Times New Roman", Times, serif;
   background: linear-gradient(180deg, var(--bg-top), var(--bg-mid) 54%, var(--bg-bottom));
   color: var(--text-primary);
   transition: background 0.45s ease;
@@ -2356,7 +2353,7 @@ h3 {
 
 .pill {
   background: #3b3029;
-  color: #d9a789;
+  color: #da7756;
   border: 1px solid #54443a;
 }
 
@@ -2419,7 +2416,7 @@ h3 {
 .filter-button:focus-visible,
 .add-button:focus-visible,
 .cart-item__btn:focus-visible {
-  outline: 2px solid #c88566;
+  outline: 2px solid #da7756;
   outline-offset: 2px;
 }
 
@@ -2464,7 +2461,7 @@ h3 {
 .news-card__accent,
 .badge {
   background: #40342d;
-  color: #d8a384;
+  color: #da7756;
 }
 
 .menu-card__content p,
@@ -4081,6 +4078,326 @@ body.page-menu #cartCheckout:active {
 @keyframes paySpin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+body.page-reserve .reserve-mobile-summary {
+  display: none;
+}
+
+body.page-reserve .booking__flow {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+body.page-reserve .booking__summary {
+  margin-top: 2px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+body.page-reserve .sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 7, 6, 0.56);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+  z-index: 45;
+}
+
+body.page-reserve .sheet-backdrop.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body.page-reserve .datetime-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 56;
+  background: #201a17;
+  border-radius: 18px 18px 0 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: none;
+  padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+  transform: translateY(105%);
+  transition: transform 220ms ease;
+  max-height: 86dvh;
+  overflow: auto;
+}
+
+body.page-reserve .datetime-sheet.is-open {
+  transform: translateY(0);
+}
+
+body.page-reserve .datetime-sheet__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+body.page-reserve .datetime-sheet__head h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+body.page-reserve #openDateTimeSheet {
+  border: none;
+  border-radius: 9999px;
+  background: #da7756;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 0 0 1px rgba(218, 119, 86, 0.16), 0 0 18px rgba(218, 119, 86, 0.24);
+  transition: box-shadow 140ms ease, filter 140ms ease, transform 80ms ease;
+}
+
+body.page-reserve #openDateTimeSheet:hover {
+  box-shadow: 0 0 0 1px rgba(218, 119, 86, 0.2), 0 0 24px rgba(218, 119, 86, 0.34);
+}
+
+body.page-reserve #openDateTimeSheet:active {
+  transform: translateY(1px);
+  box-shadow: 0 0 0 1px rgba(218, 119, 86, 0.24), 0 0 26px rgba(218, 119, 86, 0.4);
+}
+
+body.page-reserve #dateTimeClose {
+  border: none;
+  background: transparent;
+  color: #da7756;
+  font-size: 28px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+  transition: color 120ms ease, filter 120ms ease;
+}
+
+body.page-reserve #dateTimeClose:hover {
+  color: #da7756;
+  filter: drop-shadow(0 0 4px rgba(218, 119, 86, 0.35));
+}
+
+body.page-reserve #dateTimeApply {
+  width: 100%;
+  border: none;
+  border-radius: 14px;
+  background: #5e7f63;
+  color: #fff;
+  font-weight: 600;
+  padding: 14px 16px;
+  box-shadow: 0 8px 14px rgba(10, 8, 7, 0.28);
+  transition: transform 90ms ease, box-shadow 140ms ease, filter 140ms ease;
+}
+
+body.page-reserve #dateTimeApply:hover {
+  filter: brightness(1.05);
+  box-shadow: 0 9px 16px rgba(10, 8, 7, 0.32);
+}
+
+body.page-reserve #dateTimeApply:active {
+  transform: scale(0.98);
+}
+
+body.page-reserve #dateTimeApply:disabled {
+  opacity: 0.6;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+body.page-reserve #bookingDateMobile {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
+body.page-reserve .timeline__date-picker-native {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+body.page-reserve .field__error {
+  min-height: 16px;
+  font-size: 12px;
+  color: var(--status-red);
+}
+
+body.page-reserve .timeline__date.is-invalid {
+  border-color: var(--status-red);
+  box-shadow: 0 0 0 1px var(--status-red);
+}
+
+body.page-reserve #bookingDate.is-invalid,
+body.page-reserve #bookingTime.is-invalid {
+  border-color: var(--status-red);
+  box-shadow: 0 0 0 1px var(--status-red);
+}
+
+body.page-reserve .timeline__list--mobile {
+  height: 280px;
+  margin-bottom: 12px;
+}
+
+body.page-reserve .datetime-sheet .field {
+  position: relative;
+}
+
+@media (max-width: 767px) {
+  body.page-reserve .timeline {
+    display: none;
+  }
+
+  body.page-reserve .reserve-mobile-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 12px;
+  }
+
+  body.page-reserve .reserve-mobile-summary__meta {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  body.page-reserve .reserve-mobile-summary__label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  body.page-reserve .reserve-mobile-summary strong {
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  body.page-reserve #openDateTimeSheet {
+    min-height: 44px;
+    padding: 0 12px;
+  }
+
+  body.page-reserve .hall__map {
+    min-height: clamp(440px, 66vh, 640px);
+  }
+
+  body.page-reserve .table {
+    width: 78px;
+    height: 52px;
+  }
+
+  body.page-reserve .table--square {
+    width: 56px;
+    height: 56px;
+  }
+
+  body.page-reserve .table--long {
+    width: 136px;
+    height: 56px;
+  }
+
+  body.page-reserve .table__top {
+    width: 26px;
+    height: 26px;
+    font-size: 13px;
+  }
+
+  body.page-reserve .hall__legend {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    font-size: 13px;
+  }
+
+  body.page-reserve .hall__hint {
+    font-size: 13px;
+  }
+
+  body.page-reserve .tooltip {
+    display: none;
+  }
+
+  body.page-reserve .booking {
+    position: fixed;
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    bottom: 0;
+    transform: translateY(105%) !important;
+    width: 100% !important;
+    max-width: none !important;
+    border-radius: 18px 18px 0 0;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-bottom: none;
+    background: rgba(28, 23, 20, 0.98);
+    z-index: 55;
+    padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+    max-height: 88dvh;
+    overflow: auto;
+    gap: 10px;
+  }
+
+  body.page-reserve .booking.is-open {
+    transform: translateY(0) !important;
+  }
+
+  body.page-reserve .booking__stage {
+    grid-template-columns: 86px 1fr;
+    gap: 12px;
+    align-items: start;
+  }
+
+  body.page-reserve .booking__table {
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  body.page-reserve .booking__table-top {
+    width: 48px;
+    height: 48px;
+  }
+
+  body.page-reserve .booking .field input {
+    min-height: 48px;
+    font-size: 15px;
+  }
+
+  body.page-reserve .booking__actions {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 6px;
+  }
+
+  body.page-reserve .booking__actions .primary,
+  body.page-reserve .booking__actions .secondary {
+    min-height: 50px;
+    font-size: 15px;
+  }
+
+  body.page-reserve .timeline__slot {
+    min-height: 48px;
+    font-size: 14px;
+  }
+
+  body.page-reserve .timeline__slot--half {
+    min-height: 40px;
+    font-size: 13px;
+  }
 }
 
 

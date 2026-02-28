@@ -24,7 +24,7 @@
 - `static/`
   - `css/style.css` — стили
   - `js/app.js` — фронтенд-логика
-  - `menu_items/<позиция>/` — данные блюд (`item.txt`) и фото (`photo.png`)
+  - `menu_items/<позиция>/` — данные блюд (`item.txt`) и фото (`photo.png` или `photo.webp`)
   - `img/` — изображения
 - `bookings.json` — бронирования (создаётся автоматически)
 - `users.json` — пользователи (создаётся автоматически)
@@ -95,7 +95,7 @@ python app.py
 Каждое блюдо хранится в отдельной папке:
 
 `static/menu_items/<slug>/item.txt`  
-`static/menu_items/<slug>/photo.png` (рекомендуется 480x480)
+`static/menu_items/<slug>/photo.png` или `static/menu_items/<slug>/photo.webp` (рекомендуется 480x480)
 
 Пример `item.txt`:
 
@@ -120,7 +120,7 @@ featured=true
 
 Папка:
 - `static/promo_items/<slug>/item.txt`
-- `static/promo_items/<slug>/photo.png` (если используете изображение)
+- `static/promo_items/<slug>/photo.png` или `static/promo_items/<slug>/photo.webp` (если используете изображение)
 
 Созданы заготовки:
 - `static/promo_items/reklama/item.txt`
