@@ -5,6 +5,9 @@ const stagger = (selector, step = 120) => {
   });
 };
 
+const getCsrfToken = () =>
+  document.querySelector('meta[name="csrf-token"]')?.getAttribute("content")?.trim() || "";
+
 // Menu hover mood: push dish photo to whole-page background
 const setupMenuHoverMood = () => {
   const cards = document.querySelectorAll(".menu-card--menu");
@@ -154,10 +157,50 @@ const setupBottomNavMotion = () => {
     moveIndicator(target, instant);
   };
 
-  const active = items.find((item) => item.classList.contains("bottom-nav__item--active")) || items[0];
+  // Trigger a stronger neon pulse on tab switch, even before page navigation.
+  const pulseNavItem = (target) => {
+    target.classList.remove("is-neon-pulse");
+    // Force reflow to restart animation on repeated quick clicks.
+    void target.offsetWidth;
+    target.classList.add("is-neon-pulse");
+    window.setTimeout(() => target.classList.remove("is-neon-pulse"), 1660);
+  };
+
+  const path = window.location.pathname;
+  const getItemPath = (item) => {
+    try {
+      return new URL(item.getAttribute("href"), window.location.origin).pathname;
+    } catch {
+      return "";
+    }
+  };
+  const profileLikePaths = new Set(["/profile", "/login", "/register", "/checkout", "/payment"]);
+
+  const resolveActiveNavItem = () => {
+    const explicitActive = items.find((item) => item.classList.contains("bottom-nav__item--active"));
+    if (explicitActive) return explicitActive;
+
+    const exactPathMatch = items.find((item) => getItemPath(item) === path);
+    if (exactPathMatch) return exactPathMatch;
+
+    if (profileLikePaths.has(path) || path.startsWith("/orders")) {
+      const profileItem = items.find((item) => getItemPath(item) === "/profile");
+      if (profileItem) return profileItem;
+    }
+
+    const homeItem = items.find((item) => getItemPath(item) === "/");
+    return homeItem || items[0];
+  };
+
+  const active = resolveActiveNavItem();
   setActive(active, true);
 
   items.forEach((item) => {
+    // Start pulse on press so effect is visible on the first tap.
+    item.addEventListener("pointerdown", () => {
+      pulseNavItem(item);
+    });
+
     item.addEventListener("click", (event) => {
       const isMainClick = event.button === 0;
       const hasModifier = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
@@ -165,9 +208,11 @@ const setupBottomNavMotion = () => {
       if (!isMainClick || hasModifier || !href) return;
       event.preventDefault();
       setActive(item);
+      pulseNavItem(item);
+      // Keep tab transition long enough for pulse to be noticeable.
       window.setTimeout(() => {
         window.location.href = href;
-      }, 170);
+      }, 300);
     });
   });
 
@@ -280,20 +325,20 @@ const setupTableTooltip = () => {
     }
     if (rawMasked && !candidateIso) {
       valid = false;
-      errorText = "Введите дату в формате ДД.ММ.ГГГГ.";
+      errorText = "Р’РІРµРґРёС‚Рµ РґР°С‚Сѓ РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“.";
     } else if (candidateIso && candidateIso < today) {
       valid = false;
-      errorText = "Дата не может быть раньше сегодняшней.";
+      errorText = "Р”Р°С‚Р° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ СЂР°РЅСЊС€Рµ СЃРµРіРѕРґРЅСЏС€РЅРµР№.";
     } else if (!candidateIso || !valid) {
       valid = false;
-      errorText = "Укажите дату бронирования.";
+      errorText = "РЈРєР°Р¶РёС‚Рµ РґР°С‚Сѓ Р±СЂРѕРЅРёСЂРѕРІР°РЅРёСЏ.";
     } else if (!hasTime) {
       valid = false;
       timeValid = false;
-      errorText = "Укажите время бронирования.";
+      errorText = "РЈРєР°Р¶РёС‚Рµ РІСЂРµРјСЏ Р±СЂРѕРЅРёСЂРѕРІР°РЅРёСЏ.";
     } else if (selectedIsPast) {
       valid = false;
-      errorText = "Время не может быть в прошлом.";
+      errorText = "Р’СЂРµРјСЏ РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РІ РїСЂРѕС€Р»РѕРј.";
     }
     isDateValid = valid;
     if (bookingDateMobileError) {
@@ -332,12 +377,12 @@ const setupTableTooltip = () => {
   const syncBookingSummary = () => {
     if (!bookingSummary) return;
     if (!selectedTableId) {
-      bookingSummary.textContent = "Выберите свободный столик на схеме.";
+      bookingSummary.textContent = "Р’С‹Р±РµСЂРёС‚Рµ СЃРІРѕР±РѕРґРЅС‹Р№ СЃС‚РѕР»РёРє РЅР° СЃС…РµРјРµ.";
       return;
     }
-    bookingSummary.textContent = `${selectedTableLabel || selectedTableId} • ${formatDateDisplay(
+    bookingSummary.textContent = `${selectedTableLabel || selectedTableId} вЂў ${formatDateDisplay(
       bookingDate?.value || ""
-    )} • ${bookingTime?.value || "-"}`;
+    )} вЂў ${bookingTime?.value || "-"}`;
   };
 
   const setDateValue = (nextDate, source = "") => {
@@ -578,8 +623,8 @@ const setupTableTooltip = () => {
       }
       tooltip.innerHTML = `
         <strong>${label}</strong><br />
-        Мест: ${seats}<br />
-        У окна: ${windowSide}
+        РњРµСЃС‚: ${seats}<br />
+        РЈ РѕРєРЅР°: ${windowSide}
       `;
       if (isFree) {
         tooltip.classList.add("is-visible");
@@ -607,8 +652,8 @@ const setupTableTooltip = () => {
       selectedTableId = table.dataset.id;
       selectedTableLabel = table.dataset.label || table.dataset.id;
       bookingTableId.textContent = table.querySelector(".table__top")?.textContent || "";
-      bookingTableSeats.textContent = `${seats} места`;
-      bookingInfo.textContent = `Столик у окна: ${windowSide}`;
+      bookingTableSeats.textContent = `${seats} РјРµСЃС‚Р°`;
+      bookingInfo.textContent = `РЎС‚РѕР»РёРє Сѓ РѕРєРЅР°: ${windowSide}`;
       openBookingPanel();
       tooltip.classList.remove("is-visible");
       table.classList.add("table--hovered");
@@ -623,7 +668,7 @@ const setupTableTooltip = () => {
   bookingSubmit?.addEventListener("click", async () => {
     if (!selectedTableId) return;
     if (!isDateValid) {
-      bookingInfo.textContent = "Укажите корректную дату.";
+      bookingInfo.textContent = "РЈРєР°Р¶РёС‚Рµ РєРѕСЂСЂРµРєС‚РЅСѓСЋ РґР°С‚Сѓ.";
       return;
     }
     const dateValue = bookingDate?.value;
@@ -631,21 +676,25 @@ const setupTableTooltip = () => {
     const nameValue = bookingName?.value?.trim();
 
     if (!dateValue || !timeValue || !nameValue) {
-      bookingInfo.textContent = "Заполните дату, время и имя.";
+      bookingInfo.textContent = "Р—Р°РїРѕР»РЅРёС‚Рµ РґР°С‚Сѓ, РІСЂРµРјСЏ Рё РёРјСЏ.";
       return;
     }
 
     const now = new Date();
     const selected = new Date(`${dateValue}T${timeValue}`);
     if (selected < now) {
-      bookingInfo.textContent = "Время не может быть в прошлом.";
+      bookingInfo.textContent = "Р’СЂРµРјСЏ РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РІ РїСЂРѕС€Р»РѕРј.";
       return;
     }
 
-    bookingInfo.textContent = "Сохраняем бронь...";
+    bookingInfo.textContent = "РЎРѕС…СЂР°РЅСЏРµРј Р±СЂРѕРЅСЊ...";
+    const csrfToken = getCsrfToken();
     const response = await fetch("/book", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+      },
       body: JSON.stringify({
         table_id: Number(selectedTableId),
         date: dateValue,
@@ -656,12 +705,12 @@ const setupTableTooltip = () => {
 
     const result = await response.json().catch(() => ({}));
     if (response.status === 401) {
-      bookingInfo.textContent = "Войдите в аккаунт, чтобы забронировать.";
+      bookingInfo.textContent = "Р’РѕР№РґРёС‚Рµ РІ Р°РєРєР°СѓРЅС‚, С‡С‚РѕР±С‹ Р·Р°Р±СЂРѕРЅРёСЂРѕРІР°С‚СЊ.";
       window.location.href = "/login";
       return;
     }
     if (!response.ok) {
-      bookingInfo.textContent = result.error || "Не удалось сохранить бронь.";
+      bookingInfo.textContent = result.error || "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ Р±СЂРѕРЅСЊ.";
       return;
     }
 
@@ -670,7 +719,7 @@ const setupTableTooltip = () => {
       table.classList.remove("table--free");
       table.classList.add("table--reserved");
     }
-    bookingInfo.textContent = "Бронь подтверждена.";
+    bookingInfo.textContent = "Р‘СЂРѕРЅСЊ РїРѕРґС‚РІРµСЂР¶РґРµРЅР°.";
     window.location.href = "/";
   });
 
@@ -810,13 +859,289 @@ const setupTableTooltip = () => {
   if (bookingDateMobilePicker) bookingDateMobilePicker.value = bookingDate?.value || "";
   updateDateValidation();
 };
+
+const setupOrderStatusBar = () => {
+  const bar = document.getElementById("orderStatusBar");
+  if (!bar) return;
+
+  const secondaryRow = document.getElementById("orderStatusSecondary");
+  const secondaryTextNode = document.getElementById("orderStatusSecondaryText");
+  const iconNode = document.getElementById("orderStatusIcon");
+  const titleNode = document.getElementById("orderStatusTitle");
+  const orderNode = document.getElementById("orderStatusOrder");
+  const moreNode = document.getElementById("orderStatusMore");
+  const textNode = document.getElementById("orderStatusText");
+  const timerNode = document.getElementById("orderStatusTimer");
+  const progressNode = document.getElementById("orderStatusProgress");
+  const expandedNode = document.getElementById("orderStatusExpanded");
+  const listNode = document.getElementById("orderStatusList");
+
+  const rawOrders = bar.dataset.orders || "[]";
+  let initialOrders = [];
+  try {
+    initialOrders = JSON.parse(rawOrders);
+  } catch {
+    initialOrders = [];
+  }
+  if (!Array.isArray(initialOrders) || !initialOrders.length) return;
+
+  const phasePriority = { served: 0, delivering: 1, preparing: 2 };
+  const phases = [
+    {
+      key: "preparing",
+      duration: 15 * 60,
+      icon: "/static/img/frying-pan-svgrepo-com.svg",
+      title: "Р“РѕС‚РѕРІРёС‚СЃСЏ",
+      primary: () => "РћСЃС‚Р°Р»РѕСЃСЊ",
+      secondary: (timer) => `РЎР»РµРґСѓСЋС‰РёР№ Р·Р°РєР°Р· РіРѕС‚РѕРІРёС‚СЃСЏ вЂў ${timer}`,
+      secondaryShort: (timer) => `РЎР»РµРґСѓСЋС‰РёР№: Р·Р°РєР°Р· РіРѕС‚РѕРІРёС‚СЃСЏ вЂў ${timer}`,
+      rowTitle: "Р“РѕС‚РѕРІРёС‚СЃСЏ",
+    },
+    {
+      key: "delivering",
+      duration: 60,
+      icon: "/static/img/waiter.svg",
+      title: "Р—Р°РєР°Р· РЅРµСЃСѓС‚",
+      primary: () => "РЎРµР№С‡Р°СЃ РїСЂРёРЅРµСЃС‘Рј",
+      secondary: (timer) => `РЎР»РµРґСѓСЋС‰РёР№: Р·Р°РєР°Р· РЅРµСЃСѓС‚ вЂў ${timer}`,
+      secondaryShort: (timer) => `РЎР»РµРґСѓСЋС‰РёР№: Р·Р°РєР°Р· РЅРµСЃСѓС‚ вЂў ${timer}`,
+      rowTitle: "Р—Р°РєР°Р· РЅРµСЃСѓС‚",
+    },
+    {
+      key: "served",
+      duration: 60,
+      icon: "вњ“",
+      title: "Р—Р°РєР°Р· РІС‹РґР°РЅ",
+      primary: () => "РњРѕР¶РЅРѕ Р·Р°Р±РёСЂР°С‚СЊ",
+      secondary: (timer) => `РЎР»РµРґСѓСЋС‰РёР№: Р·Р°РєР°Р· РІС‹РґР°РЅ вЂў ${timer}`,
+      secondaryShort: (timer) => `РЎР»РµРґСѓСЋС‰РёР№: Р·Р°РєР°Р· РІС‹РґР°РЅ вЂў ${timer}`,
+      rowTitle: "Р—Р°РєР°Р· РІС‹РґР°РЅ",
+    },
+  ];
+  const totalDuration = phases.reduce((sum, phase) => sum + phase.duration, 0);
+  const phaseOffsets = [];
+  let offset = 0;
+  for (const phase of phases) {
+    phaseOffsets.push({ ...phase, start: offset, end: offset + phase.duration });
+    offset += phase.duration;
+  }
+
+  let isExpanded = false;
+  let lastPrimarySignature = "";
+  let timerId = null;
+
+  const formatTimer = (seconds) => {
+    const safe = Math.max(0, Math.floor(seconds));
+    const mm = String(Math.floor(safe / 60)).padStart(2, "0");
+    const ss = String(safe % 60).padStart(2, "0");
+    return `${mm}:${ss}`;
+  };
+
+  const resolveOrder = (order) => {
+    const cycleStartedAtMs = Date.parse(order?.cycle_started_at || "");
+    if (!Number.isFinite(cycleStartedAtMs)) return null;
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - cycleStartedAtMs) / 1000));
+    if (elapsedSeconds >= totalDuration) return null;
+
+    for (const phase of phaseOffsets) {
+      if (elapsedSeconds < phase.end) {
+        const phaseElapsed = elapsedSeconds - phase.start;
+        const remaining = Math.max(0, phase.duration - phaseElapsed);
+        const timer = formatTimer(remaining);
+        return {
+          orderId: order.order_id,
+          key: phase.key,
+          icon: phase.icon,
+          title: phase.title,
+          remainingSeconds: remaining,
+          timer,
+          primaryText: phase.primary(timer),
+          secondaryText: phase.secondary(timer),
+          secondaryShortText: phase.secondaryShort(timer),
+          rowText: `Р—Р°РєР°Р· в„–${order.order_id} вЂ” ${phase.rowTitle} вЂў ${timer}`,
+          progressRatio: phase.duration ? phaseElapsed / phase.duration : 1,
+        };
+      }
+    }
+    return null;
+  };
+
+  const resolveAllActive = () => {
+    const active = [];
+    for (const order of initialOrders) {
+      const state = resolveOrder(order);
+      if (state) active.push(state);
+    }
+    active.sort((a, b) => {
+      const phaseDiff = (phasePriority[a.key] ?? 99) - (phasePriority[b.key] ?? 99);
+      if (phaseDiff !== 0) return phaseDiff;
+      const remainDiff = a.remainingSeconds - b.remainingSeconds;
+      if (remainDiff !== 0) return remainDiff;
+      return (a.orderId || 0) - (b.orderId || 0);
+    });
+    return active;
+  };
+
+  const setExpanded = (nextExpanded) => {
+    isExpanded = Boolean(nextExpanded);
+    bar.classList.toggle("is-expanded", isExpanded);
+    bar.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+    if (expandedNode) expandedNode.hidden = !isExpanded;
+  };
+
+  const toggleExpanded = () => {
+    if (!resolveAllActive().length) return;
+    setExpanded(!isExpanded);
+  };
+
+  bar.addEventListener("click", () => toggleExpanded());
+  bar.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggleExpanded();
+  });
+
+  const removeStatusBar = () => {
+    if (timerId) {
+      window.clearInterval(timerId);
+      timerId = null;
+    }
+    bar.classList.add("is-exiting");
+    const container = bar.closest(".order-status-section");
+    window.setTimeout(() => {
+      if (container) container.remove();
+    }, 260);
+  };
+
+  const renderExpandedList = (states) => {
+    if (!listNode) return;
+    const visible = states.slice(0, 3);
+    listNode.innerHTML = visible
+      .map((item) => `<div class="order-status-bar__row">${item.rowText}</div>`)
+      .join("");
+  };
+
+  const render = () => {
+    const active = resolveAllActive();
+    if (!active.length) {
+      removeStatusBar();
+      return false;
+    }
+
+    const primary = active[0];
+    const next = active[1] || null;
+    const moreCount = Math.max(0, active.length - 1);
+    const signature = `${primary.orderId}:${primary.key}`;
+
+    if (signature !== lastPrimarySignature) {
+      bar.classList.remove("is-phase-changing");
+      void bar.offsetWidth;
+      bar.classList.add("is-phase-changing");
+      window.setTimeout(() => bar.classList.remove("is-phase-changing"), 240);
+      lastPrimarySignature = signature;
+    }
+
+    bar.dataset.phase = primary.key;
+    if (iconNode) {
+      if (typeof primary.icon === "string" && primary.icon.startsWith("/static/")) {
+        iconNode.innerHTML = `<img src="${primary.icon}" alt="" />`;
+      } else {
+        iconNode.textContent = primary.icon;
+      }
+    }
+    if (titleNode) titleNode.textContent = primary.title;
+    if (orderNode) orderNode.textContent = `Р—Р°РєР°Р· в„–${primary.orderId}`;
+    if (textNode) textNode.textContent = primary.primaryText;
+    if (timerNode) timerNode.textContent = primary.timer;
+    if (progressNode) {
+      progressNode.style.width = `${Math.max(0, Math.min(1, primary.progressRatio)) * 100}%`;
+      progressNode.classList.toggle("is-pulse", primary.key === "delivering");
+    }
+
+    if (secondaryRow && secondaryTextNode) {
+      if (next) {
+        secondaryRow.hidden = false;
+        secondaryTextNode.textContent = next.key === "preparing" ? next.secondaryText : next.secondaryShortText;
+      } else {
+        secondaryRow.hidden = true;
+      }
+    }
+
+    if (moreNode) {
+      if (moreCount > 0) {
+        moreNode.hidden = false;
+        moreNode.textContent = `+${moreCount}`;
+      } else {
+        moreNode.hidden = true;
+      }
+    }
+
+    renderExpandedList(active);
+    bar.querySelector(".order-status-bar__progress")?.setAttribute(
+      "aria-valuenow",
+      String(Math.round(Math.max(0, Math.min(1, primary.progressRatio)) * 100))
+    );
+    return true;
+  };
+
+  window.requestAnimationFrame(() => bar.classList.add("is-entered"));
+  if (!render()) return;
+  setExpanded(false);
+  timerId = window.setInterval(() => {
+    render();
+  }, 1000);
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) render();
+  });
+};
+
+const setupPointsBalanceCard = () => {
+  const balanceNode = document.getElementById("pointsBalanceValue");
+  if (!balanceNode) return;
+
+  const targetValue = Number.parseInt(balanceNode.dataset.value || "0", 10);
+  if (!Number.isFinite(targetValue) || targetValue < 0) return;
+
+  const formatPoints = (value) =>
+    new Intl.NumberFormat("ru-RU").format(value).replace(/\u00A0|\u202F/g, " ");
+
+  const applyValue = (value) => {
+    balanceNode.textContent = formatPoints(value);
+  };
+
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reducedMotion || targetValue === 0) {
+    applyValue(targetValue);
+    balanceNode.classList.add("is-ready");
+    return;
+  }
+
+  const durationMs = 620;
+  const startedAt = performance.now();
+  const tick = (now) => {
+    const progress = Math.min(1, (now - startedAt) / durationMs);
+    const eased = 1 - (1 - progress) * (1 - progress);
+    applyValue(Math.round(targetValue * eased));
+    if (progress < 1) {
+      window.requestAnimationFrame(tick);
+    } else {
+      balanceNode.classList.add("is-ready");
+    }
+  };
+
+  applyValue(0);
+  window.requestAnimationFrame(tick);
+};
 // Page init: animations + interactions
 window.addEventListener("DOMContentLoaded", () => {
   stagger(".news-card", 140);
   stagger(".menu-card", 120);
+  setupPointsBalanceCard();
   setupBottomNavMotion();
   setupTableTooltip();
   setupMenuHoverMood();
+  setupOrderStatusBar();
 
   const menuList = document.querySelector(".menu");
   const menuCards = Array.from(document.querySelectorAll(".menu-card--menu"));
@@ -849,9 +1174,9 @@ window.addEventListener("DOMContentLoaded", () => {
   const holderInput = document.querySelector('input[name="holder"]');
   if (menuList && menuCards.length) {
     const sortLabels = {
-      popular: "По популярности",
-      "price-asc": "Цена ↑",
-      "price-desc": "Цена ↓",
+      popular: "РџРѕ РїРѕРїСѓР»СЏСЂРЅРѕСЃС‚Рё",
+      "price-asc": "Р¦РµРЅР° в†‘",
+      "price-desc": "Р¦РµРЅР° в†“",
     };
     let activeCategory = "all";
     let activeSort = "popular";
@@ -999,7 +1324,7 @@ window.addEventListener("DOMContentLoaded", () => {
   if (holderInput) {
     holderInput.addEventListener("input", () => {
       const cleaned = holderInput.value
-        .replace(/[^a-zA-Zа-яА-ЯёЁ\s-]/g, "")
+        .replace(/[^a-zA-ZР°-СЏРђ-РЇС‘РЃ\s-]/g, "")
         .replace(/\s+/g, " ")
         .trimStart();
       holderInput.value = cleaned.toUpperCase();
@@ -1084,10 +1409,10 @@ window.addEventListener("DOMContentLoaded", () => {
       row.innerHTML = `
         <div>
           <div class="cart-item__name">${item.name}</div>
-          <div class="cart-item__meta">${item.price} ₽</div>
+          <div class="cart-item__meta">${item.price} в‚Ѕ</div>
         </div>
         <div class="cart-item__actions">
-          <button class="cart-item__btn" data-action="dec" data-id="${item.id}">−</button>
+          <button class="cart-item__btn" data-action="dec" data-id="${item.id}">в€’</button>
           <span
             class="cart-item__qty${
               prevQty && prevQty !== item.qty
@@ -1145,14 +1470,14 @@ window.addEventListener("DOMContentLoaded", () => {
     const idsInCart = new Set(cart.map((item) => Number(item.id)));
     document.querySelectorAll(".add-button").forEach((btn) => {
       if (!btn.dataset.defaultLabel) {
-        btn.dataset.defaultLabel = btn.textContent.trim() || "В корзину";
+        btn.dataset.defaultLabel = btn.textContent.trim() || "Р’ РєРѕСЂР·РёРЅСѓ";
       }
       const id = Number(btn.dataset.id);
       const inCart = idsInCart.has(id);
       if (inCart) {
         btn.classList.remove("is-added");
         btn.classList.add("is-remove");
-        btn.textContent = "Убрать";
+        btn.textContent = "РЈР±СЂР°С‚СЊ";
       } else {
         btn.classList.remove("is-remove", "is-added");
         btn.textContent = btn.dataset.defaultLabel;
@@ -1184,7 +1509,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   document.querySelectorAll(".add-button").forEach((btn) => {
     if (!btn.dataset.defaultLabel) {
-      btn.dataset.defaultLabel = btn.textContent.trim() || "В корзину";
+      btn.dataset.defaultLabel = btn.textContent.trim() || "Р’ РєРѕСЂР·РёРЅСѓ";
     }
     btn.addEventListener("click", () => {
       const id = Number(btn.dataset.id);
@@ -1192,7 +1517,7 @@ window.addEventListener("DOMContentLoaded", () => {
         removeFromCart(id);
         return;
       }
-      const name = btn.dataset.name || "Позиция";
+      const name = btn.dataset.name || "РџРѕР·РёС†РёСЏ";
       const price = Number(btn.dataset.price) || 0;
       addToCart(id, name, price);
     });
@@ -1266,13 +1591,15 @@ window.addEventListener("DOMContentLoaded", () => {
       }
     })();
     const menuById = new Map(menuCatalog.map((item) => [Number(item.id), item]));
+    const goToPaymentDefaultText = goToPayment?.textContent?.trim() || "РџРµСЂРµР№С‚Рё Рє РѕРїР»Р°С‚Рµ";
+    const goToPaymentInitiallyDisabled = Boolean(goToPayment?.disabled);
     const normalizeCheckoutItem = (item) => {
       const id = Number(item.id);
       const fromCatalog = menuById.get(id) || {};
       return {
         ...item,
         id,
-        name: item.name || fromCatalog.name || "Позиция",
+        name: item.name || fromCatalog.name || "РџРѕР·РёС†РёСЏ",
         price: Number(item.price) || Number(fromCatalog.price) || 0,
         qty: Number(item.qty) || 0,
         photo: item.photo || fromCatalog.photo || "",
@@ -1282,6 +1609,14 @@ window.addEventListener("DOMContentLoaded", () => {
       loadCart()
         .map(normalizeCheckoutItem)
         .filter((item) => Number(item.qty) > 0);
+
+    const resetGoToPaymentState = () => {
+      if (!goToPayment) return;
+      goToPayment.classList.remove("is-loading");
+      goToPayment.textContent = goToPaymentDefaultText;
+      const cartLength = getCheckoutCart().length;
+      goToPayment.disabled = goToPaymentInitiallyDisabled || cartLength === 0;
+    };
 
     const updateCommentCounter = () => {
       if (!checkoutComment || !checkoutCommentCount) return;
@@ -1308,7 +1643,7 @@ window.addEventListener("DOMContentLoaded", () => {
         checkoutEmpty.hidden = cart.length > 0;
         checkoutEmpty.style.display = cart.length > 0 ? "none" : "";
       }
-      if (goToPayment) goToPayment.disabled = cart.length === 0;
+      if (goToPayment) goToPayment.disabled = goToPaymentInitiallyDisabled || cart.length === 0;
 
       checkoutItemsNode.innerHTML = "";
       cart.forEach((item) => {
@@ -1323,13 +1658,13 @@ window.addEventListener("DOMContentLoaded", () => {
             }
             <div class="checkout-item__meta">
               <p class="checkout-item__name">${item.name}</p>
-              <p class="checkout-item__sub">${item.price} ₽</p>
+              <p class="checkout-item__sub">${item.price} в‚Ѕ</p>
             </div>
           </div>
           <div class="checkout-item__controls">
             <span class="checkout-item__qty">${item.qty}</span>
-            <span class="checkout-item__sub">× ${item.price} ₽</span>
-            <strong>${item.qty * item.price} ₽</strong>
+            <span class="checkout-item__sub">Г— ${item.price} в‚Ѕ</span>
+            <strong>${item.qty * item.price} в‚Ѕ</strong>
           </div>
         `;
         checkoutItemsNode.appendChild(row);
@@ -1340,7 +1675,7 @@ window.addEventListener("DOMContentLoaded", () => {
         cart.forEach((item) => {
           const brief = document.createElement("div");
           brief.className = "checkout-brief";
-          brief.innerHTML = `<span>${item.name}</span><span>× ${item.qty}</span>`;
+          brief.innerHTML = `<span>${item.name}</span><span>Г— ${item.qty}</span>`;
           checkoutSummaryList.appendChild(brief);
         });
       }
@@ -1381,6 +1716,7 @@ window.addEventListener("DOMContentLoaded", () => {
       const cart = getCheckoutCart();
       if (!cart.length) {
         event.preventDefault();
+        resetGoToPaymentState();
         return;
       }
       const customChecked = Boolean(
@@ -1388,6 +1724,8 @@ window.addEventListener("DOMContentLoaded", () => {
       );
       if (customChecked && serveCustomTime && !serveCustomTime.value) {
         event.preventDefault();
+        resetGoToPaymentState();
+        return;
       }
       if (checkoutComment) {
         sessionStorage.setItem(commentStorageKey, checkoutComment.value);
@@ -1395,8 +1733,13 @@ window.addEventListener("DOMContentLoaded", () => {
       if (goToPayment) {
         goToPayment.classList.add("is-loading");
         goToPayment.disabled = true;
-        goToPayment.textContent = "Переходим...";
+        goToPayment.textContent = "РџРµСЂРµС…РѕРґРёРј...";
       }
+    });
+
+    window.addEventListener("pageshow", () => {
+      resetGoToPaymentState();
+      renderCheckout();
     });
 
     const cards = Array.from(document.querySelectorAll(".checkout-main .checkout-card"));
@@ -1434,7 +1777,7 @@ window.addEventListener("DOMContentLoaded", () => {
       payNowButton.classList.toggle("is-loading", loading);
       paymentCardMain?.classList.toggle("is-processing", loading);
       const label = payNowButton.querySelector(".pay-btn__label");
-      if (label) label.textContent = loading ? "Обработка..." : "Оплатить";
+      if (label) label.textContent = loading ? "РћР±СЂР°Р±РѕС‚РєР°..." : "РћРїР»Р°С‚РёС‚СЊ";
     };
 
     const hideAllPaymentStates = () => {
@@ -1474,6 +1817,12 @@ window.addEventListener("DOMContentLoaded", () => {
       setLoading(false);
     };
 
+    const resetPaymentLoadingState = () => {
+      const successVisible = paymentSuccess && !paymentSuccess.hasAttribute("hidden");
+      if (successVisible) return;
+      setLoading(false);
+    };
+
     paymentConfirmForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (payNowButton.disabled) return;
@@ -1483,7 +1832,11 @@ window.addEventListener("DOMContentLoaded", () => {
 
       const response = await fetch(paymentConfirmForm.action, {
         method: "POST",
-        headers: { "X-Requested-With": "XMLHttpRequest" },
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          ...(getCsrfToken() ? { "X-CSRF-Token": getCsrfToken() } : {}),
+        },
+        body: new FormData(paymentConfirmForm),
       }).catch(() => null);
       if (!response || !response.ok) {
         await showErrorState();
@@ -1501,6 +1854,14 @@ window.addEventListener("DOMContentLoaded", () => {
       showMainState();
       payNowButton.removeAttribute("data-lock");
       setLoading(false);
+    });
+
+    window.addEventListener("pageshow", () => {
+      resetPaymentLoadingState();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) resetPaymentLoadingState();
     });
   }
 

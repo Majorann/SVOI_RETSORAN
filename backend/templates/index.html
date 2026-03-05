@@ -24,17 +24,68 @@
   </a>
 </section>
 
+{% if order_statuses %}
+<section class="section order-status-section">
+  <article
+    class="order-status-bar"
+    id="orderStatusBar"
+    data-orders="{{ order_statuses|tojson|forceescape }}"
+    role="button"
+    tabindex="0"
+    aria-expanded="false"
+    aria-label="Статусы заказов"
+  >
+    <div class="order-status-bar__secondary" id="orderStatusSecondary" hidden>
+      <span id="orderStatusSecondaryText"></span>
+    </div>
+    <div class="order-status-bar__main">
+      <div class="order-status-bar__icon" id="orderStatusIcon" aria-hidden="true">🍳</div>
+      <div class="order-status-bar__content">
+        <div class="order-status-bar__head">
+          <p class="order-status-bar__title" id="orderStatusTitle">Готовится</p>
+          <div class="order-status-bar__meta">
+            <span class="order-status-bar__order" id="orderStatusOrder">Заказ №0</span>
+            <span class="order-status-bar__chip" id="orderStatusMore" hidden>+0</span>
+          </div>
+        </div>
+        <p class="order-status-bar__subline">
+          <span id="orderStatusText">Осталось</span>
+          <strong id="orderStatusTimer">00:00</strong>
+        </p>
+        <div class="order-status-bar__progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Order status progress">
+          <span id="orderStatusProgress"></span>
+        </div>
+      </div>
+    </div>
+    <div class="order-status-bar__expanded" id="orderStatusExpanded" hidden>
+      <div class="order-status-bar__list" id="orderStatusList"></div>
+      <div class="order-status-bar__hint">Нажмите, чтобы свернуть</div>
+    </div>
+  </article>
+</section>
+{% endif %}
+
 <section class="section">
   <div class="secondary-actions">
-    <a class="secondary-card" href="{{ url_for('points') }}">
-      <div class="secondary-card__icon secondary-card__icon--image">
-        <img src="{{ url_for('static', filename='img/P_RU.png') }}" alt="Баллы" />
-      </div>
-      <div>
+    <div class="secondary-card secondary-card--points">
+      <div class="secondary-card__content secondary-card__content--points">
         <p class="secondary-card__title">Мои баллы</p>
-        <p class="secondary-card__text">Бонусы и уровни</p>
+        <div class="secondary-card__balance-row">
+          <span class="secondary-card__icon secondary-card__icon--image secondary-card__icon--coins" aria-hidden="true">
+            <img src="{{ url_for('static', filename='img/coins.svg') }}" alt="" />
+          </span>
+          <span class="secondary-card__icon secondary-card__icon--image secondary-card__icon--points" aria-hidden="true">
+            <img src="{{ url_for('static', filename='img/rubl.svg') }}" alt="" />
+          </span>
+          <p
+            class="secondary-card__balance"
+            id="pointsBalanceValue"
+            data-value="{{ points_balance }}"
+            aria-label="Баланс баллов {{ points_balance_formatted }}"
+          >{{ points_balance_formatted }}</p>
+        </div>
       </div>
-    </a>
+    </div>
     <a class="secondary-card" href="{{ url_for('delivery') }}">
       <div class="secondary-card__icon">🚚</div>
       <div>
@@ -61,32 +112,13 @@
         <div class="booking-card__actions">
           <a class="booking-card__action" href="{{ url_for('menu') }}">Меню</a>
           <form method="post" action="{{ url_for('cancel_booking') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <input type="hidden" name="table_id" value="{{ booking.table_id }}" />
             <input type="hidden" name="date" value="{{ booking.date }}" />
             <input type="hidden" name="time" value="{{ booking.time }}" />
             <button class="booking-card__action booking-card__action--danger" type="submit">Отменить</button>
           </form>
         </div>
-      </div>
-    {% endfor %}
-  </div>
-</section>
-{% endif %}
-
-{% if preparing_orders %}
-<section class="section bookings">
-  <div class="section__title">
-    <h2>Ваши заказы</h2>
-    <span class="pill">Статус</span>
-  </div>
-  <div class="bookings__list">
-    {% for order in preparing_orders %}
-      <div class="booking-card">
-        <div>
-          <p class="booking-card__title">Заказ №{{ order.id }}</p>
-          <p class="booking-card__meta">Статус: заказ готовится</p>
-        </div>
-        <a class="booking-card__action" href="{{ url_for('notifications') }}">Детали</a>
       </div>
     {% endfor %}
   </div>

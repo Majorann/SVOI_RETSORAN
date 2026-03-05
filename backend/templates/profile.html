@@ -44,10 +44,11 @@
             <div class="payment-card__status">{% if card.active %}Активна{% else %}Не активна{% endif %}</div>
           </div>
           <form class="payment-card__delete-form" method="post" action="{{ url_for('delete_card') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <input type="hidden" name="created_at" value="{{ card.created_at or '' }}" />
             <input type="hidden" name="last4" value="{{ card.last4 or '' }}" />
             <button class="payment-card__delete" type="submit" aria-label="Удалить карту">
-              <img src="{{ url_for('static', filename='img/trash.png') }}" alt="" />
+              <img src="{{ url_for('static', filename='img/trash.svg') }}" alt="" />
             </button>
           </form>
         </div>
@@ -55,6 +56,7 @@
       <details class="payment-add">
         <summary class="payment-card payment-card--add">+ Привязать новую карту</summary>
         <form class="payment-form" method="post" action="{{ url_for('add_card') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <label class="payment-form__field">
             <span>Номер карты</span>
             <input type="text" name="card_number" placeholder="0000 0000 0000 0000" inputmode="numeric" autocomplete="cc-number" required />

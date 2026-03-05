@@ -14,3 +14,4 @@
 Ручной режим:
 - 01_start_app.bat      (только локальное приложение)
 - 02_start_public_tunnel.bat (только интернет-туннель)
+[NOTE] 02_start_public_tunnel.bat uses Cloudflare Quick Tunnel without auto-reconnect. Keep tunnel window open; after stop/restart a new URL is issued.
