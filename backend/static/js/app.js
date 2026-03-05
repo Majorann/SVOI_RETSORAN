@@ -325,20 +325,20 @@ const setupTableTooltip = () => {
     }
     if (rawMasked && !candidateIso) {
       valid = false;
-      errorText = "Р’РІРµРґРёС‚Рµ РґР°С‚Сѓ РІ С„РѕСЂРјР°С‚Рµ Р”Р”.РњРњ.Р“Р“Р“Р“.";
+      errorText = "Введите дату в формате ДД.ММ.ГГГГ.";
     } else if (candidateIso && candidateIso < today) {
       valid = false;
-      errorText = "Р”Р°С‚Р° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ СЂР°РЅСЊС€Рµ СЃРµРіРѕРґРЅСЏС€РЅРµР№.";
+      errorText = "Дата не может быть раньше сегодняшней.";
     } else if (!candidateIso || !valid) {
       valid = false;
-      errorText = "РЈРєР°Р¶РёС‚Рµ РґР°С‚Сѓ Р±СЂРѕРЅРёСЂРѕРІР°РЅРёСЏ.";
+      errorText = "Укажите дату бронирования.";
     } else if (!hasTime) {
       valid = false;
       timeValid = false;
-      errorText = "РЈРєР°Р¶РёС‚Рµ РІСЂРµРјСЏ Р±СЂРѕРЅРёСЂРѕРІР°РЅРёСЏ.";
+      errorText = "Укажите время бронирования.";
     } else if (selectedIsPast) {
       valid = false;
-      errorText = "Р’СЂРµРјСЏ РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РІ РїСЂРѕС€Р»РѕРј.";
+      errorText = "Время не может быть в прошлом.";
     }
     isDateValid = valid;
     if (bookingDateMobileError) {
@@ -377,12 +377,12 @@ const setupTableTooltip = () => {
   const syncBookingSummary = () => {
     if (!bookingSummary) return;
     if (!selectedTableId) {
-      bookingSummary.textContent = "Р’С‹Р±РµСЂРёС‚Рµ СЃРІРѕР±РѕРґРЅС‹Р№ СЃС‚РѕР»РёРє РЅР° СЃС…РµРјРµ.";
+      bookingSummary.textContent = "Выберите свободный столик на схеме.";
       return;
     }
-    bookingSummary.textContent = `${selectedTableLabel || selectedTableId} вЂў ${formatDateDisplay(
+    bookingSummary.textContent = `${selectedTableLabel || selectedTableId} • ${formatDateDisplay(
       bookingDate?.value || ""
-    )} вЂў ${bookingTime?.value || "-"}`;
+    )} • ${bookingTime?.value || "-"}`;
   };
 
   const setDateValue = (nextDate, source = "") => {
@@ -623,8 +623,8 @@ const setupTableTooltip = () => {
       }
       tooltip.innerHTML = `
         <strong>${label}</strong><br />
-        РњРµСЃС‚: ${seats}<br />
-        РЈ РѕРєРЅР°: ${windowSide}
+        Мест: ${seats}<br />
+        У окна: ${windowSide}
       `;
       if (isFree) {
         tooltip.classList.add("is-visible");
@@ -652,8 +652,8 @@ const setupTableTooltip = () => {
       selectedTableId = table.dataset.id;
       selectedTableLabel = table.dataset.label || table.dataset.id;
       bookingTableId.textContent = table.querySelector(".table__top")?.textContent || "";
-      bookingTableSeats.textContent = `${seats} РјРµСЃС‚Р°`;
-      bookingInfo.textContent = `РЎС‚РѕР»РёРє Сѓ РѕРєРЅР°: ${windowSide}`;
+      bookingTableSeats.textContent = `${seats} места`;
+      bookingInfo.textContent = `Столик у окна: ${windowSide}`;
       openBookingPanel();
       tooltip.classList.remove("is-visible");
       table.classList.add("table--hovered");
@@ -668,7 +668,7 @@ const setupTableTooltip = () => {
   bookingSubmit?.addEventListener("click", async () => {
     if (!selectedTableId) return;
     if (!isDateValid) {
-      bookingInfo.textContent = "РЈРєР°Р¶РёС‚Рµ РєРѕСЂСЂРµРєС‚РЅСѓСЋ РґР°С‚Сѓ.";
+      bookingInfo.textContent = "Укажите корректную дату.";
       return;
     }
     const dateValue = bookingDate?.value;
@@ -676,18 +676,18 @@ const setupTableTooltip = () => {
     const nameValue = bookingName?.value?.trim();
 
     if (!dateValue || !timeValue || !nameValue) {
-      bookingInfo.textContent = "Р—Р°РїРѕР»РЅРёС‚Рµ РґР°С‚Сѓ, РІСЂРµРјСЏ Рё РёРјСЏ.";
+      bookingInfo.textContent = "Заполните дату, время и имя.";
       return;
     }
 
     const now = new Date();
     const selected = new Date(`${dateValue}T${timeValue}`);
     if (selected < now) {
-      bookingInfo.textContent = "Р’СЂРµРјСЏ РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РІ РїСЂРѕС€Р»РѕРј.";
+      bookingInfo.textContent = "Время не может быть в прошлом.";
       return;
     }
 
-    bookingInfo.textContent = "РЎРѕС…СЂР°РЅСЏРµРј Р±СЂРѕРЅСЊ...";
+    bookingInfo.textContent = "Сохраняем бронь...";
     const csrfToken = getCsrfToken();
     const response = await fetch("/book", {
       method: "POST",
@@ -705,12 +705,12 @@ const setupTableTooltip = () => {
 
     const result = await response.json().catch(() => ({}));
     if (response.status === 401) {
-      bookingInfo.textContent = "Р’РѕР№РґРёС‚Рµ РІ Р°РєРєР°СѓРЅС‚, С‡С‚РѕР±С‹ Р·Р°Р±СЂРѕРЅРёСЂРѕРІР°С‚СЊ.";
+      bookingInfo.textContent = "Войдите в аккаунт, чтобы забронировать.";
       window.location.href = "/login";
       return;
     }
     if (!response.ok) {
-      bookingInfo.textContent = result.error || "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ Р±СЂРѕРЅСЊ.";
+      bookingInfo.textContent = result.error || "Не удалось сохранить бронь.";
       return;
     }
 
@@ -719,7 +719,7 @@ const setupTableTooltip = () => {
       table.classList.remove("table--free");
       table.classList.add("table--reserved");
     }
-    bookingInfo.textContent = "Р‘СЂРѕРЅСЊ РїРѕРґС‚РІРµСЂР¶РґРµРЅР°.";
+    bookingInfo.textContent = "Бронь подтверждена.";
     window.location.href = "/";
   });
 
@@ -891,31 +891,31 @@ const setupOrderStatusBar = () => {
       key: "preparing",
       duration: 15 * 60,
       icon: "/static/img/frying-pan-svgrepo-com.svg",
-      title: "Р“РѕС‚РѕРІРёС‚СЃСЏ",
-      primary: () => "РћСЃС‚Р°Р»РѕСЃСЊ",
-      secondary: (timer) => `РЎР»РµРґСѓСЋС‰РёР№ Р·Р°РєР°Р· РіРѕС‚РѕРІРёС‚СЃСЏ вЂў ${timer}`,
-      secondaryShort: (timer) => `РЎР»РµРґСѓСЋС‰РёР№: Р·Р°РєР°Р· РіРѕС‚РѕРІРёС‚СЃСЏ вЂў ${timer}`,
-      rowTitle: "Р“РѕС‚РѕРІРёС‚СЃСЏ",
+      title: "Готовится",
+      primary: () => "Осталось",
+      secondary: (timer) => `Следующий заказ готовится • ${timer}`,
+      secondaryShort: (timer) => `Следующий: заказ готовится • ${timer}`,
+      rowTitle: "Готовится",
     },
     {
       key: "delivering",
       duration: 60,
       icon: "/static/img/waiter.svg",
-      title: "Р—Р°РєР°Р· РЅРµСЃСѓС‚",
-      primary: () => "РЎРµР№С‡Р°СЃ РїСЂРёРЅРµСЃС‘Рј",
-      secondary: (timer) => `РЎР»РµРґСѓСЋС‰РёР№: Р·Р°РєР°Р· РЅРµСЃСѓС‚ вЂў ${timer}`,
-      secondaryShort: (timer) => `РЎР»РµРґСѓСЋС‰РёР№: Р·Р°РєР°Р· РЅРµСЃСѓС‚ вЂў ${timer}`,
-      rowTitle: "Р—Р°РєР°Р· РЅРµСЃСѓС‚",
+      title: "Заказ несут",
+      primary: () => "Сейчас принесём",
+      secondary: (timer) => `Следующий: заказ несут • ${timer}`,
+      secondaryShort: (timer) => `Следующий: заказ несут • ${timer}`,
+      rowTitle: "Заказ несут",
     },
     {
       key: "served",
       duration: 60,
-      icon: "вњ“",
-      title: "Р—Р°РєР°Р· РІС‹РґР°РЅ",
-      primary: () => "РњРѕР¶РЅРѕ Р·Р°Р±РёСЂР°С‚СЊ",
-      secondary: (timer) => `РЎР»РµРґСѓСЋС‰РёР№: Р·Р°РєР°Р· РІС‹РґР°РЅ вЂў ${timer}`,
-      secondaryShort: (timer) => `РЎР»РµРґСѓСЋС‰РёР№: Р·Р°РєР°Р· РІС‹РґР°РЅ вЂў ${timer}`,
-      rowTitle: "Р—Р°РєР°Р· РІС‹РґР°РЅ",
+      icon: "✓",
+      title: "Заказ выдан",
+      primary: () => "Можно забирать",
+      secondary: (timer) => `Следующий: заказ выдан • ${timer}`,
+      secondaryShort: (timer) => `Следующий: заказ выдан • ${timer}`,
+      rowTitle: "Заказ выдан",
     },
   ];
   const totalDuration = phases.reduce((sum, phase) => sum + phase.duration, 0);
@@ -958,7 +958,7 @@ const setupOrderStatusBar = () => {
           primaryText: phase.primary(timer),
           secondaryText: phase.secondary(timer),
           secondaryShortText: phase.secondaryShort(timer),
-          rowText: `Р—Р°РєР°Р· в„–${order.order_id} вЂ” ${phase.rowTitle} вЂў ${timer}`,
+          rowText: `Заказ №${order.order_id} — ${phase.rowTitle} • ${timer}`,
           progressRatio: phase.duration ? phaseElapsed / phase.duration : 1,
         };
       }
@@ -1050,7 +1050,7 @@ const setupOrderStatusBar = () => {
       }
     }
     if (titleNode) titleNode.textContent = primary.title;
-    if (orderNode) orderNode.textContent = `Р—Р°РєР°Р· в„–${primary.orderId}`;
+    if (orderNode) orderNode.textContent = `Заказ №${primary.orderId}`;
     if (textNode) textNode.textContent = primary.primaryText;
     if (timerNode) timerNode.textContent = primary.timer;
     if (progressNode) {
@@ -1174,9 +1174,9 @@ window.addEventListener("DOMContentLoaded", () => {
   const holderInput = document.querySelector('input[name="holder"]');
   if (menuList && menuCards.length) {
     const sortLabels = {
-      popular: "РџРѕ РїРѕРїСѓР»СЏСЂРЅРѕСЃС‚Рё",
-      "price-asc": "Р¦РµРЅР° в†‘",
-      "price-desc": "Р¦РµРЅР° в†“",
+      popular: "По популярности",
+      "price-asc": "Цена ↑",
+      "price-desc": "Цена ↓",
     };
     let activeCategory = "all";
     let activeSort = "popular";
@@ -1324,7 +1324,7 @@ window.addEventListener("DOMContentLoaded", () => {
   if (holderInput) {
     holderInput.addEventListener("input", () => {
       const cleaned = holderInput.value
-        .replace(/[^a-zA-ZР°-СЏРђ-РЇС‘РЃ\s-]/g, "")
+        .replace(/[^A-Za-z\u0400-\u04FF\s-]/g, "")
         .replace(/\s+/g, " ")
         .trimStart();
       holderInput.value = cleaned.toUpperCase();
@@ -1409,10 +1409,10 @@ window.addEventListener("DOMContentLoaded", () => {
       row.innerHTML = `
         <div>
           <div class="cart-item__name">${item.name}</div>
-          <div class="cart-item__meta">${item.price} в‚Ѕ</div>
+          <div class="cart-item__meta">${item.price} ₽</div>
         </div>
         <div class="cart-item__actions">
-          <button class="cart-item__btn" data-action="dec" data-id="${item.id}">в€’</button>
+          <button class="cart-item__btn" data-action="dec" data-id="${item.id}">−</button>
           <span
             class="cart-item__qty${
               prevQty && prevQty !== item.qty
@@ -1470,14 +1470,14 @@ window.addEventListener("DOMContentLoaded", () => {
     const idsInCart = new Set(cart.map((item) => Number(item.id)));
     document.querySelectorAll(".add-button").forEach((btn) => {
       if (!btn.dataset.defaultLabel) {
-        btn.dataset.defaultLabel = btn.textContent.trim() || "Р’ РєРѕСЂР·РёРЅСѓ";
+        btn.dataset.defaultLabel = btn.textContent.trim() || "В корзину";
       }
       const id = Number(btn.dataset.id);
       const inCart = idsInCart.has(id);
       if (inCart) {
         btn.classList.remove("is-added");
         btn.classList.add("is-remove");
-        btn.textContent = "РЈР±СЂР°С‚СЊ";
+        btn.textContent = "Убрать";
       } else {
         btn.classList.remove("is-remove", "is-added");
         btn.textContent = btn.dataset.defaultLabel;
@@ -1509,7 +1509,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   document.querySelectorAll(".add-button").forEach((btn) => {
     if (!btn.dataset.defaultLabel) {
-      btn.dataset.defaultLabel = btn.textContent.trim() || "Р’ РєРѕСЂР·РёРЅСѓ";
+      btn.dataset.defaultLabel = btn.textContent.trim() || "В корзину";
     }
     btn.addEventListener("click", () => {
       const id = Number(btn.dataset.id);
@@ -1517,7 +1517,7 @@ window.addEventListener("DOMContentLoaded", () => {
         removeFromCart(id);
         return;
       }
-      const name = btn.dataset.name || "РџРѕР·РёС†РёСЏ";
+      const name = btn.dataset.name || "Позиция";
       const price = Number(btn.dataset.price) || 0;
       addToCart(id, name, price);
     });
@@ -1591,7 +1591,7 @@ window.addEventListener("DOMContentLoaded", () => {
       }
     })();
     const menuById = new Map(menuCatalog.map((item) => [Number(item.id), item]));
-    const goToPaymentDefaultText = goToPayment?.textContent?.trim() || "РџРµСЂРµР№С‚Рё Рє РѕРїР»Р°С‚Рµ";
+    const goToPaymentDefaultText = goToPayment?.textContent?.trim() || "Перейти к оплате";
     const goToPaymentInitiallyDisabled = Boolean(goToPayment?.disabled);
     const normalizeCheckoutItem = (item) => {
       const id = Number(item.id);
@@ -1599,7 +1599,7 @@ window.addEventListener("DOMContentLoaded", () => {
       return {
         ...item,
         id,
-        name: item.name || fromCatalog.name || "РџРѕР·РёС†РёСЏ",
+        name: item.name || fromCatalog.name || "Позиция",
         price: Number(item.price) || Number(fromCatalog.price) || 0,
         qty: Number(item.qty) || 0,
         photo: item.photo || fromCatalog.photo || "",
@@ -1658,13 +1658,13 @@ window.addEventListener("DOMContentLoaded", () => {
             }
             <div class="checkout-item__meta">
               <p class="checkout-item__name">${item.name}</p>
-              <p class="checkout-item__sub">${item.price} в‚Ѕ</p>
+              <p class="checkout-item__sub">${item.price} ₽</p>
             </div>
           </div>
           <div class="checkout-item__controls">
             <span class="checkout-item__qty">${item.qty}</span>
-            <span class="checkout-item__sub">Г— ${item.price} в‚Ѕ</span>
-            <strong>${item.qty * item.price} в‚Ѕ</strong>
+            <span class="checkout-item__sub">× ${item.price} ₽</span>
+            <strong>${item.qty * item.price} ₽</strong>
           </div>
         `;
         checkoutItemsNode.appendChild(row);
@@ -1675,7 +1675,7 @@ window.addEventListener("DOMContentLoaded", () => {
         cart.forEach((item) => {
           const brief = document.createElement("div");
           brief.className = "checkout-brief";
-          brief.innerHTML = `<span>${item.name}</span><span>Г— ${item.qty}</span>`;
+          brief.innerHTML = `<span>${item.name}</span><span>× ${item.qty}</span>`;
           checkoutSummaryList.appendChild(brief);
         });
       }
@@ -1733,7 +1733,7 @@ window.addEventListener("DOMContentLoaded", () => {
       if (goToPayment) {
         goToPayment.classList.add("is-loading");
         goToPayment.disabled = true;
-        goToPayment.textContent = "РџРµСЂРµС…РѕРґРёРј...";
+        goToPayment.textContent = "Переходим...";
       }
     });
 
@@ -1777,7 +1777,7 @@ window.addEventListener("DOMContentLoaded", () => {
       payNowButton.classList.toggle("is-loading", loading);
       paymentCardMain?.classList.toggle("is-processing", loading);
       const label = payNowButton.querySelector(".pay-btn__label");
-      if (label) label.textContent = loading ? "РћР±СЂР°Р±РѕС‚РєР°..." : "РћРїР»Р°С‚РёС‚СЊ";
+      if (label) label.textContent = loading ? "Обработка..." : "Оплатить";
     };
 
     const hideAllPaymentStates = () => {
