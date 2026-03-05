@@ -66,6 +66,7 @@
 
     <section class="payment-block payment-block--actions">
       <form method="post" action="{{ url_for('payment_confirm') }}" id="paymentConfirmForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         {% if not has_card_issue %}
           <button class="primary-action" id="payNowButton" type="submit" {% if not can_pay %}disabled{% endif %}>
             <span class="pay-btn__spinner" aria-hidden="true"></span>

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Restaurant demo app (Flask).
 - Landing, hall reservation, menu, notifications, auth
 - Bookings/users stored in JSON files
@@ -8,9 +8,13 @@ from flask import Flask, render_template, url_for, request, jsonify, session, re
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from dataclasses import dataclass
+from contextlib import contextmanager
 import json
 import hashlib
 import os
+import secrets
+import threading
+import time
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 
@@ -45,6 +49,46 @@ MENU_PHOTO_NAMES = ("photo.png", "photo.webp")
 MENU_META_NAME = "item.txt"
 PROMO_PHOTO_NAMES = ("photo.png", "photo.webp")
 PROMO_META_NAME = "item.txt"
+_PROCESS_LOCKS = {}
+_PROCESS_LOCKS_GUARD = threading.RLock()
+ORDER_STATUS_STEPS = (
+    {"key": "preparing", "duration_seconds": 15 * 60},
+    {"key": "delivering", "duration_seconds": 60},
+    {"key": "served", "duration_seconds": 60},
+)
+
+
+@contextmanager
+def json_file_lock(path: Path, timeout_seconds: float = 5.0, poll_interval: float = 0.05):
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_key = str(path.resolve())
+    with _PROCESS_LOCKS_GUARD:
+        process_lock = _PROCESS_LOCKS.setdefault(lock_key, threading.RLock())
+
+    with process_lock:
+        started_at = time.monotonic()
+        lock_fd = None
+        while True:
+            try:
+                lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(lock_fd, f"{os.getpid()}:{threading.get_ident()}".encode("utf-8"))
+                os.close(lock_fd)
+                lock_fd = None
+                break
+            except FileExistsError:
+                if time.monotonic() - started_at >= timeout_seconds:
+                    raise TimeoutError(f"Timeout while waiting lock for {path.name}")
+                time.sleep(poll_interval)
+
+        try:
+            yield
+        finally:
+            if lock_fd is not None:
+                os.close(lock_fd)
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 @dataclass
@@ -70,6 +114,28 @@ def keep_user_session():
     user = next((u for u in load_users() if u.get("id") == user_id), None)
     if user:
         session["user_name"] = user.get("name")
+
+
+@app.before_request
+def ensure_csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_urlsafe(32)
+
+
+@app.before_request
+def validate_csrf_token():
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return
+    if request.endpoint == "static":
+        return
+
+    token = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
+    if token and token == session.get("csrf_token"):
+        return
+
+    if request.is_json:
+        return jsonify({"ok": False, "error": "CSRF token is missing or invalid."}), 400
+    return redirect(url_for("index"))
 
 # Схема зала: координаты и расстановка стульев (в процентах)
 TABLES = [
@@ -234,6 +300,9 @@ def index():
     user_id = session.get("user_id")
     bookings = load_bookings()
     preparing_orders = []
+    order_status = None
+    order_statuses = []
+    points_balance = 0
     promo_items = load_promo_items()
     promo_news = promo_items_to_news_cards(promo_items)
     news_cards = promo_news or NEWS_CARDS
@@ -244,14 +313,23 @@ def index():
     if user_id:
         bookings = [b for b in bookings if b.get("user_id") == user_id]
         preparing_orders = get_user_preparing_orders(user_id)
+        order_statuses = list_active_order_statuses(user_id)
+        order_status = order_statuses[0] if order_statuses else None
+        user = next((u for u in load_users() if u.get("id") == user_id), None)
+        points_balance = int((user or {}).get("balance", 0) or 0)
     else:
         bookings = []
+    points_balance_formatted = f"{points_balance:,}".replace(",", " ")
     return render_template(
         "index.html",
         news=news_cards,
         menu=popular_menu,
         bookings=bookings,
         preparing_orders=preparing_orders,
+        order_status=order_status,
+        order_statuses=order_statuses,
+        points_balance=points_balance,
+        points_balance_formatted=points_balance_formatted,
     )
 
 
@@ -304,7 +382,7 @@ def availability():
 
 @app.route("/points")
 def points():
-    return render_template("placeholder.html", title="Мои баллы")
+    return redirect(url_for("index"))
 
 
 @app.route("/profile")
@@ -384,32 +462,34 @@ def login():
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    # Регистрация нового пользователя в users.json
+    # Register new user in users.json
     if request.method == "POST":
         name = (request.form.get("name") or "").strip()
         phone = (request.form.get("phone") or "").strip()
         password = request.form.get("password") or ""
         if not name or not phone or not password:
-            return render_template("register.html", error="Заполните все поля.")
-        users = load_users()
-        if any(u.get("phone") == phone for u in users):
-            return render_template("register.html", error="Этот номер уже зарегистрирован.")
-        new_user = {
-            "id": next_user_id(users),
-            "name": name,
-            "phone": phone,
-            "password_hash": hash_password(password),
-            "balance": 0,
-            "cards": [],
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-        }
-        users.append(new_user)
-        save_users(users)
+            return render_template("register.html", error="Fill in all fields.")
+        with json_file_lock(USERS_PATH):
+            users = load_users()
+            if any(u.get("phone") == phone for u in users):
+                return render_template("register.html", error="This phone is already registered.")
+            new_user = {
+                "id": next_user_id(users),
+                "name": name,
+                "phone": phone,
+                "password_hash": hash_password(password),
+                "balance": 0,
+                "cards": [],
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            users.append(new_user)
+            save_users(users)
         session["user_id"] = new_user["id"]
         session["user_name"] = new_user["name"]
         session.permanent = True
         return redirect(url_for("index"))
     return render_template("register.html", error=None)
+
 @app.route("/logout")
 def logout():
     # Очищаем сессию и уходим на логин
@@ -431,6 +511,7 @@ def inject_notifications_count():
     return {
         "notifications_count": len(bookings) + len(preparing_orders),
         "current_user_name": session.get("user_name"),
+        "csrf_token": session.get("csrf_token", ""),
     }
 
 
@@ -592,37 +673,103 @@ def payment():
 def payment_confirm():
     user_id = session.get("user_id")
     if not user_id:
-        return redirect(url_for("login", error="Войдите, чтобы завершить оплату."))
+        return redirect(url_for("login", error="Log in to complete payment."))
+
     preview = session.get("checkout_preview")
     if not preview:
-        return redirect(url_for("checkout", error="Сессия оплаты устарела. Повторите оформление."))
+        return redirect(url_for("checkout", error="Payment session expired. Repeat checkout."))
 
-    orders = load_orders()
-    order_id = next_order_id(orders)
-    new_order = {
-        "id": order_id,
-        "user_id": user_id,
-        "status": "preparing",
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "items": preview.get("items", []),
-        "items_total": preview.get("items_total", 0),
-        "points_applied": preview.get("points_applied", 0),
-        "payable_total": preview.get("payable_total", preview.get("items_total", 0)),
-        "comment": preview.get("comment", ""),
-        "serving": preview.get("serving", {}),
-        "booking": preview.get("booking", {}),
-        "payment_card": preview.get("payment_card", {}),
-    }
-    orders.append(new_order)
-    save_orders(orders)
+    booking_status = latest_user_booking_status(user_id)
+    booking = booking_status.get("booking")
+    if booking_status.get("state") != "active":
+        session.pop("checkout_preview", None)
+        return redirect(url_for("checkout", error="Booking is no longer active."))
 
-    points_applied = int(preview.get("points_applied", 0) or 0)
-    if points_applied > 0:
+    users = load_users()
+    user = next((u for u in users if u.get("id") == user_id), None)
+    if user is None:
+        session.clear()
+        return redirect(url_for("login", error="User not found. Please log in again."))
+
+    active_card = next((card for card in user.get("cards", []) if card.get("active")), None)
+    if active_card is None:
+        session.pop("checkout_preview", None)
+        return redirect(url_for("checkout", error="No active payment card."))
+
+    preview_items = preview.get("items")
+    if not isinstance(preview_items, list):
+        session.pop("checkout_preview", None)
+        return redirect(url_for("checkout", error="Invalid order data."))
+
+    items = []
+    for item in preview_items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            item_id = int(item.get("id"))
+            qty = int(item.get("qty"))
+            price = int(item.get("price"))
+        except (TypeError, ValueError):
+            continue
+        if qty <= 0 or price < 0:
+            continue
+        items.append(
+            {
+                "id": item_id,
+                "name": item.get("name", ""),
+                "price": price,
+                "qty": qty,
+                "photo": item.get("photo"),
+            }
+        )
+
+    if not items:
+        session.pop("checkout_preview", None)
+        return redirect(url_for("checkout", error="Cart is empty."))
+
+    items_total = sum(item["price"] * item["qty"] for item in items)
+    current_balance = int(user.get("balance", 0) or 0)
+    requested_points = int(preview.get("points_applied", 0) or 0)
+    points_applied = max(0, min(requested_points, current_balance, items_total))
+    payable_total = items_total - points_applied
+    bonus_earned = int(payable_total * 0.05)
+
+    with json_file_lock(ORDERS_PATH):
+        orders = load_orders()
+        order_id = next_order_id(orders)
+        new_order = {
+            "id": order_id,
+            "user_id": user_id,
+            "status": "preparing",
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "items": items,
+            "items_total": items_total,
+            "points_applied": points_applied,
+            "payable_total": payable_total,
+            "bonus_earned": bonus_earned,
+            "comment": preview.get("comment", ""),
+            "serving": preview.get("serving", {}),
+            "booking": {
+                "table_id": booking.get("table_id"),
+                "date": booking.get("date"),
+                "time": booking.get("time"),
+                "status": "Active",
+            },
+            "payment_card": {
+                "brand": active_card.get("brand", "Card"),
+                "last4": active_card.get("last4", "0000"),
+                "expiry": active_card.get("expiry"),
+            },
+        }
+        orders.append(new_order)
+        save_orders(orders)
+
+    with json_file_lock(USERS_PATH):
         users = load_users()
         user = next((u for u in users if u.get("id") == user_id), None)
         if user is not None:
             current_balance = int(user.get("balance", 0) or 0)
-            user["balance"] = max(0, current_balance - points_applied)
+            user["balance"] = max(0, current_balance - points_applied) + bonus_earned
             save_users(users)
 
     session.pop("checkout_preview", None)
@@ -632,9 +779,10 @@ def payment_confirm():
     return redirect(order_url)
 
 
+
 @app.post("/book")
 def book_table():
-    # Создать бронь (нужен вход)
+    # Create a booking (requires login)
     data = request.get_json(silent=True) or {}
     user_id = session.get("user_id")
     table_id = data.get("table_id")
@@ -643,36 +791,37 @@ def book_table():
     name = (data.get("name") or "").strip()
 
     if not user_id:
-        return jsonify({"ok": False, "error": "Требуется вход в аккаунт."}), 401
+        return jsonify({"ok": False, "error": "Login is required."}), 401
     if not all([table_id, date_str, time_str, name]):
-        return jsonify({"ok": False, "error": "Заполните все поля."}), 400
+        return jsonify({"ok": False, "error": "Fill in all fields."}), 400
 
     try:
         booking_dt = datetime.fromisoformat(f"{date_str}T{time_str}")
     except ValueError:
-        return jsonify({"ok": False, "error": "Неверные дата/время."}), 400
+        return jsonify({"ok": False, "error": "Invalid date/time."}), 400
 
     if booking_dt < datetime.now():
-        return jsonify({"ok": False, "error": "Время не может быть в прошлом."}), 400
+        return jsonify({"ok": False, "error": "Time cannot be in the past."}), 400
 
-    bookings = load_bookings()
-    if any(
-        b.get("table_id") == table_id and overlaps_booking(b, booking_dt)
-        for b in bookings
-    ):
-        return jsonify({"ok": False, "error": "Столик уже занят на это время."}), 409
+    with json_file_lock(BOOKINGS_PATH):
+        bookings = load_bookings()
+        if any(
+            b.get("table_id") == table_id and overlaps_booking(b, booking_dt)
+            for b in bookings
+        ):
+            return jsonify({"ok": False, "error": "Table is already reserved for this time."}), 409
 
-    bookings.append(
-        {
-            "table_id": table_id,
-            "date": date_str,
-            "time": time_str,
-            "name": name,
-            "user_id": user_id,
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-        }
-    )
-    save_bookings(bookings)
+        bookings.append(
+            {
+                "table_id": table_id,
+                "date": date_str,
+                "time": time_str,
+                "name": name,
+                "user_id": user_id,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+        save_bookings(bookings)
     return jsonify({"ok": True})
 
 
@@ -729,7 +878,8 @@ def load_promo_items():
 def parse_menu_meta(meta_path: Path):
     # Формат item.txt: key=value, пустые строки и # комментарии игнорируются
     data = {}
-    for raw_line in meta_path.read_text(encoding="utf-8").splitlines():
+    raw_text = read_text_with_fallback(meta_path, ("utf-8", "utf-8-sig", "cp1251"))
+    for raw_line in raw_text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -737,6 +887,15 @@ def parse_menu_meta(meta_path: Path):
         normalized_key = key.strip().lower().lstrip("\ufeff")
         data[normalized_key] = value.strip()
     return data
+
+
+def read_text_with_fallback(path: Path, encodings):
+    for encoding in encodings:
+        try:
+            return path.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def resolve_photo_name(item_dir: Path, photo_names):
@@ -964,22 +1123,38 @@ def latest_user_booking(user_id):
 def get_user_preparing_orders(user_id):
     orders = [o for o in load_orders() if o.get("user_id") == user_id]
     now = datetime.now()
-    preparing_now = []
+    active_orders = []
+    status_titles = {
+        "preparing": "Заказ готовится",
+        "delivering": "Заказ несут",
+        "served": "Заказ выдан",
+    }
+    status_texts = {
+        "preparing": "Осталось",
+        "delivering": "Сейчас принесём",
+        "served": "Можно забирать",
+    }
+
     for order in orders:
-        window = order_cooking_window(order)
-        if window is None:
+        timeline = build_order_status_timeline(order, now)
+        if timeline is None:
             continue
-        cook_start, ready_time, booking_end = window
-        # После конца брони уведомления по этому заказу не показываем.
-        if now >= booking_end:
-            continue
-        # Показываем только "Заказ готовится" в 20-минутном окне.
-        if cook_start <= now < ready_time:
-            enriched = dict(order)
-            enriched["cooking_expires_at"] = ready_time.isoformat(timespec="seconds")
-            preparing_now.append(enriched)
-    preparing_now.sort(key=lambda o: o.get("created_at", ""), reverse=True)
-    return preparing_now
+
+        phase = timeline.get("phase")
+        remaining_seconds = int(timeline.get("phase_remaining_seconds", 0) or 0)
+        remaining_seconds = max(0, remaining_seconds)
+        minutes, seconds = divmod(remaining_seconds, 60)
+
+        enriched = dict(order)
+        enriched["status_phase"] = phase
+        enriched["status_title"] = status_titles.get(phase, "Статус заказа")
+        enriched["status_text"] = status_texts.get(phase, "Осталось")
+        enriched["status_remaining_seconds"] = remaining_seconds
+        enriched["status_remaining_mmss"] = f"{minutes:02d}:{seconds:02d}"
+        active_orders.append(enriched)
+
+    active_orders.sort(key=lambda o: o.get("created_at", ""), reverse=True)
+    return active_orders
 
 
 def order_cooking_window(order):
@@ -1036,6 +1211,80 @@ def parse_iso_datetime(value):
         return datetime.fromisoformat(value)
     except (TypeError, ValueError):
         return None
+
+
+def build_order_status_timeline(order, now: datetime):
+    created_at = parse_iso_datetime(order.get("created_at"))
+    if created_at is None:
+        return None
+
+    total_duration = sum(step["duration_seconds"] for step in ORDER_STATUS_STEPS)
+    elapsed = int((now - created_at).total_seconds())
+    if elapsed < 0:
+        elapsed = 0
+    if elapsed >= total_duration:
+        return None
+
+    phase_key = ORDER_STATUS_STEPS[-1]["key"]
+    phase_duration = ORDER_STATUS_STEPS[-1]["duration_seconds"]
+    phase_start_offset = 0
+    elapsed_acc = 0
+    for step in ORDER_STATUS_STEPS:
+        next_acc = elapsed_acc + step["duration_seconds"]
+        if elapsed < next_acc:
+            phase_key = step["key"]
+            phase_duration = step["duration_seconds"]
+            phase_start_offset = elapsed_acc
+            break
+        elapsed_acc = next_acc
+
+    phase_elapsed = elapsed - phase_start_offset
+    phase_remaining = max(0, phase_duration - phase_elapsed)
+    cycle_end = created_at + timedelta(seconds=total_duration)
+    phase_start = created_at + timedelta(seconds=phase_start_offset)
+    phase_end = phase_start + timedelta(seconds=phase_duration)
+
+    return {
+        "order_id": order.get("id"),
+        "phase": phase_key,
+        "phase_elapsed_seconds": phase_elapsed,
+        "phase_remaining_seconds": phase_remaining,
+        "phase_duration_seconds": phase_duration,
+        "phase_progress_ratio": (phase_elapsed / phase_duration) if phase_duration else 1.0,
+        "cycle_started_at": created_at.isoformat(timespec="seconds"),
+        "phase_started_at": phase_start.isoformat(timespec="seconds"),
+        "phase_ends_at": phase_end.isoformat(timespec="seconds"),
+        "cycle_ends_at": cycle_end.isoformat(timespec="seconds"),
+    }
+
+
+def latest_active_order_status(user_id):
+    active = list_active_order_statuses(user_id)
+    return active[0] if active else None
+
+
+def list_active_order_statuses(user_id):
+    now = datetime.now()
+    orders = [o for o in load_orders() if o.get("user_id") == user_id]
+    active = []
+    phase_priority = {"served": 0, "delivering": 1, "preparing": 2}
+
+    for order in orders:
+        timeline = build_order_status_timeline(order, now)
+        if timeline is None:
+            continue
+        timeline["created_at"] = order.get("created_at", "")
+        active.append(timeline)
+
+    active.sort(
+        key=lambda item: (
+            phase_priority.get(item.get("phase"), 99),
+            int(item.get("phase_remaining_seconds", 0) or 0),
+            item.get("created_at", ""),
+            int(item.get("order_id", 0) or 0),
+        )
+    )
+    return active
 
 
 def latest_user_booking_status(user_id):
@@ -1123,8 +1372,9 @@ def parse_serving_option(serve_mode, serve_custom_time, booking):
 
 @app.post("/release")
 def release_table():
-    # Заглушка (будущий сценарий для персонала)
-    return jsonify({"ok": False, "error": "Освобождение столиков будет добавлено позже."}), 501
+    # Placeholder for future staff flow.
+    return jsonify({"ok": False, "error": "Table release will be added later."}), 501
+
 
 @app.post("/bookings/cancel")
 def cancel_booking():
@@ -1138,22 +1388,23 @@ def cancel_booking():
     if not table_id or not date_str or not time_str:
         return redirect(url_for("index"))
 
-    bookings = load_bookings()
-    remaining = []
-    removed = False
-    for booking in bookings:
-        if (
-            not removed
-            and booking.get("user_id") == user_id
-            and booking.get("table_id") == table_id
-            and booking.get("date") == date_str
-            and booking.get("time") == time_str
-        ):
-            removed = True
-            continue
-        remaining.append(booking)
-    if removed:
-        save_bookings(remaining)
+    with json_file_lock(BOOKINGS_PATH):
+        bookings = load_bookings()
+        remaining = []
+        removed = False
+        for booking in bookings:
+            if (
+                not removed
+                and booking.get("user_id") == user_id
+                and booking.get("table_id") == table_id
+                and booking.get("date") == date_str
+                and booking.get("time") == time_str
+            ):
+                removed = True
+                continue
+            remaining.append(booking)
+        if removed:
+            save_bookings(remaining)
     return redirect(url_for("index"))
 
 
@@ -1169,33 +1420,34 @@ def add_card():
 
     digits = "".join(ch for ch in number if ch.isdigit())
     if len(digits) < 12:
-        return redirect(url_for("profile", error="Введите корректный номер карты."))
+        return redirect(url_for("profile", error="Enter a valid card number."))
 
     if expiry and "/" not in expiry:
-        return redirect(url_for("profile", error="Введите срок в формате ММ/ГГ."))
+        return redirect(url_for("profile", error="Enter expiry in MM/YY format."))
 
-    brand = "МИР"
+    brand = "MIR"
 
-    users = load_users()
-    user_record = next((u for u in users if u.get("id") == user_id), None)
-    if not user_record:
-        return redirect(url_for("profile", error="Пользователь не найден."))
+    with json_file_lock(USERS_PATH):
+        users = load_users()
+        user_record = next((u for u in users if u.get("id") == user_id), None)
+        if not user_record:
+            return redirect(url_for("profile", error="User not found."))
 
-    cards = user_record.get("cards", [])
-    for card in cards:
-        card["active"] = False
-    cards.append(
-        {
-            "brand": brand,
-            "last4": digits[-4:],
-            "active": True,
-            "holder": holder or None,
-            "expiry": expiry or None,
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-        }
-    )
-    user_record["cards"] = cards
-    save_users(users)
+        cards = user_record.get("cards", [])
+        for card in cards:
+            card["active"] = False
+        cards.append(
+            {
+                "brand": brand,
+                "last4": digits[-4:],
+                "active": True,
+                "holder": holder or None,
+                "expiry": expiry or None,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+        user_record["cards"] = cards
+        save_users(users)
     return redirect(url_for("profile"))
 
 
@@ -1208,38 +1460,38 @@ def delete_card():
     created_at = (request.form.get("created_at") or "").strip()
     last4 = (request.form.get("last4") or "").strip()
     if not created_at and not last4:
-        return redirect(url_for("profile", error="Не удалось определить карту для удаления."))
+        return redirect(url_for("profile", error="Failed to identify card to delete."))
 
-    users = load_users()
-    user_record = next((u for u in users if u.get("id") == user_id), None)
-    if not user_record:
-        return redirect(url_for("profile", error="Пользователь не найден."))
+    with json_file_lock(USERS_PATH):
+        users = load_users()
+        user_record = next((u for u in users if u.get("id") == user_id), None)
+        if not user_record:
+            return redirect(url_for("profile", error="User not found."))
 
-    cards = list(user_record.get("cards", []))
-    removed_index = None
-    for idx, card in enumerate(cards):
-        if created_at and card.get("created_at") == created_at:
-            removed_index = idx
-            break
-    if removed_index is None and last4:
+        cards = list(user_record.get("cards", []))
+        removed_index = None
         for idx, card in enumerate(cards):
-            if card.get("last4") == last4:
+            if created_at and card.get("created_at") == created_at:
                 removed_index = idx
                 break
+        if removed_index is None and last4:
+            for idx, card in enumerate(cards):
+                if card.get("last4") == last4:
+                    removed_index = idx
+                    break
 
-    if removed_index is None:
-        return redirect(url_for("profile", error="Карта не найдена."))
+        if removed_index is None:
+            return redirect(url_for("profile", error="Card not found."))
 
-    removed_card = cards.pop(removed_index)
-    if removed_card.get("active") and cards and not any(card.get("active") for card in cards):
-        cards[-1]["active"] = True
+        removed_card = cards.pop(removed_index)
+        if removed_card.get("active") and cards and not any(card.get("active") for card in cards):
+            cards[-1]["active"] = True
 
-    user_record["cards"] = cards
-    save_users(users)
+        user_record["cards"] = cards
+        save_users(users)
     return redirect(url_for("profile"))
 
 
 if __name__ == "__main__":
     app.run(debug=True)
-
 

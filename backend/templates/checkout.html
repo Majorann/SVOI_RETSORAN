@@ -34,6 +34,7 @@
 </section>
 {% else %}
 <form class="checkout-layout" method="post" action="{{ url_for('payment') }}" id="checkoutForm">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
   <input type="hidden" name="items_json" id="checkoutItemsJson" value="[]" />
 
   <div class="checkout-main">
@@ -124,7 +125,10 @@
         </label>
         <p class="checkout-total__hint">Доступно баллов: <span id="availablePoints">{{ user_balance }}</span></p>
         <p class="checkout-total__hint">Списать баллов: <span id="checkoutPointsApplied">0</span> ₽</p>
-        <p class="checkout-total__value">К оплате: <span id="checkoutPayable">0</span> ₽</p>
+        <p class="checkout-total__value">
+          <span class="checkout-total__label">К оплате:</span>
+          <span class="checkout-total__amount"><span id="checkoutPayable">0</span> <span class="checkout-total__currency">₽</span></span>
+        </p>
         <button class="primary-action" type="submit" id="goToPayment"{% if not active_card %} disabled{% endif %}>Перейти к оплате</button>
         <p class="checkout-total__hint">Оплата картой из профиля</p>
         {% if active_card %}

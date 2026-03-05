@@ -32,16 +32,13 @@
     {% endfor %}
     {% for order in preparing_orders %}
       <div class="notice">
-        <div class="notice__title">Заказ готовится</div>
+        <div class="notice__title">{{ order.get("status_title", "Заказ готовится") }}</div>
         <div class="notice__meta">
           Заказ №{{ order.get("id") }} · Стол №{{ order.get("booking", {}).get("table_id") or "—" }}
         </div>
-        <div class="notice__text">
-          {% for item in order.get("items", []) %}
-            {{ item.get("name") }} ×{{ item.get("qty") }}{% if not loop.last %}, {% endif %}
-          {% endfor %}
-        </div>
+        <div class="notice__text">{{ order.get("status_text", "Осталось") }}: {{ order.get("status_remaining_mmss", "00:00") }}</div>
         <div class="notice__meta">Сумма: {{ order.get("payable_total") or order.get("items_total") }} ₽</div>
+        <div class="notice__meta">Бонусы: +{{ order.get("bonus_earned", 0) }} ₽</div>
       </div>
     {% endfor %}
     <div class="notice notice--ad">

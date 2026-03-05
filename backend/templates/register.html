@@ -12,6 +12,7 @@
 
 <section class="section auth">
   <form class="auth__card" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
     {% if error %}
       <div class="auth__error">{{ error }}</div>
     {% endif %}
