@@ -49,7 +49,10 @@
           </div>
         </div>
         <p class="order-status-bar__subline">
-          <span id="orderStatusText">Осталось</span>
+          <span class="order-status-bar__statusline">
+            <span id="orderStatusText"></span>
+            <span class="order-status-bar__caret" id="orderStatusCaret" aria-hidden="true"></span>
+          </span>
           <strong id="orderStatusTimer">00:00</strong>
         </p>
         <div class="order-status-bar__progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Order status progress">
