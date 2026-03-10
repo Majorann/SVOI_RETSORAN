@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block body_class %}page-delivery-menu{% endblock %}
+{% block content %}
+<header class="top menu-top">
+  <a class="icon-button menu-top__back" href="{{ url_for('index') }}" aria-label="Назад на главную">←</a>
+  <div class="brand">
+    <div class="brand__mark">С</div>
+    <div>
+      <p class="brand__name">Доставка</p>
+      <p class="brand__tag">Выберите блюда и оформите доставку</p>
+    </div>
+  </div>
+</header>
+
+<section class="section delivery-layout">
+  <div class="delivery-menu">
+    <div class="section__title">
+      <h2>Меню доставки</h2>
+      <span class="pill">Онлайн</span>
+    </div>
+    <div class="menu">
+      {% for item in items %}
+      <article class="menu-card menu-card--delivery" style="--dish-photo: url('{{ url_for('static', filename=item.photo) }}');">
+        <div class="menu-card__media" style="background-image: var(--dish-photo);"></div>
+        <div class="menu-card__content">
+          <div class="menu-card__title-row">
+            <h3>{{ item.name }}</h3>
+            <span class="menu-type menu-type--{{ item.type|replace(' ', '-')|lower }}">{{ item.type }}</span>
+          </div>
+          <p class="menu-card__lore">{{ item.lore }}</p>
+          <div class="menu-card__bottom">
+            <span class="price">{{ item.price }} ₽</span>
+            <button
+              class="add-button delivery-add-button"
+              type="button"
+              data-id="{{ item.id }}"
+              data-name="{{ item.name }}"
+              data-price="{{ item.price }}"
+              data-photo="{{ item.photo }}"
+            >В корзину</button>
+          </div>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+  </div>
+
+  <aside class="delivery-cart checkout-card" id="deliveryCartPanel">
+    <div class="section__title">
+      <h2>Корзина</h2>
+      <span class="pill" id="deliveryCartCount">0</span>
+    </div>
+    <div class="delivery-cart__list" id="deliveryCartList"></div>
+    <div class="notice notice--empty" id="deliveryCartEmpty">Корзина пока пустая.</div>
+    <div class="delivery-cart__footer">
+      <p class="delivery-cart__total">Итого: <strong><span id="deliveryCartTotal">0</span> ₽</strong></p>
+      <a class="primary-action" id="deliveryGoCheckout" href="{{ url_for('delivery_checkout') }}" aria-disabled="true">Оформить доставку</a>
+    </div>
+  </aside>
+</section>
+
+<nav class="bottom-nav">
+  <a class="bottom-nav__item" href="{{ url_for('notifications') }}">
+    <span>🔔</span>
+    <span>Уведомления</span>
+    {% if notifications_count %}
+      <span class="nav-badge">{{ notifications_count }}</span>
+    {% endif %}
+  </a>
+  <a class="bottom-nav__item bottom-nav__item--active" href="{{ url_for('delivery') }}">
+    <span>🚚</span>
+    <span>Доставка</span>
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('profile') }}">
+    <span>👤</span>
+    <span>Профиль</span>
+  </a>
+</nav>
+{% endblock %}

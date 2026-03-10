@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block body_class %}page-payment-center{% endblock %}
+{% block content %}
+<section class="payment-shell">
+  <header class="payment-head" id="paymentHead">
+    <h1>Оплата доставки</h1>
+    <p>Проверьте данные и подтвердите оплату</p>
+  </header>
+
+  {% if payment_error %}
+  <article class="payment-card-main payment-card-main--blocked" id="paymentCardMain">
+    <section class="payment-block">
+      <div class="notice notice--error">{{ payment_error }}</div>
+      <a class="primary-action" href="{{ payment_action_url or url_for('delivery_checkout') }}">
+        {{ payment_action_label or "Вернуться к форме доставки" }}
+      </a>
+    </section>
+  </article>
+  {% else %}
+
+  <article class="payment-card-main" id="paymentCardMain">
+    <section class="payment-block payment-block--order">
+      <h2>Ваш заказ</h2>
+      <div class="payment-items-brief">
+        {% for item in preview.get("items", []) %}
+          <div class="payment-items-brief__row">
+            <span>{{ item.name }} ×{{ item.qty }}</span>
+            <span>{{ item.qty * item.price }} ₽</span>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="payment-block payment-block--card">
+      <h2>Данные доставки</h2>
+      <p>Получатель: {{ preview.get("delivery_name") }}</p>
+      <p>Телефон: {{ preview.get("delivery_phone") }}</p>
+      <p>Адрес: {{ preview.get("delivery_address") }}</p>
+      <p>ETA: {{ preview.get("delivery_eta_minutes", 20) }} минут</p>
+      {% if preview.get("delivery_comment") %}
+        <p>Комментарий: {{ preview.get("delivery_comment") }}</p>
+      {% endif %}
+    </section>
+
+    <section class="payment-block payment-block--total" id="paymentTotalBlock">
+      <p class="payment-total">К оплате: <strong>{{ preview.get("items_total", 0) }} ₽</strong></p>
+    </section>
+
+    <section class="payment-block payment-block--actions">
+      <form method="post" action="{{ url_for('delivery_confirm') }}" id="paymentConfirmForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button class="primary-action" id="payNowButton" type="submit">
+          <span class="pay-btn__spinner" aria-hidden="true"></span>
+          <span class="pay-btn__label">Оплатить</span>
+        </button>
+      </form>
+      <a class="booking-card__action" href="{{ url_for('delivery_checkout') }}">Назад к данным доставки</a>
+    </section>
+  </article>
+  {% endif %}
+
+  <article class="payment-result payment-result--success" id="paymentSuccess" hidden>
+    <div class="payment-result__icon payment-result__icon--success">✓</div>
+    <h2>Оплата прошла успешно</h2>
+    <p>Заказ доставки принят и передан в работу.</p>
+    <div class="payment-result__actions">
+      <a class="booking-card__action" href="{{ url_for('orders') }}">К заказам</a>
+      <a class="booking-card__action" href="{{ url_for('delivery') }}">В меню доставки</a>
+    </div>
+  </article>
+
+  <article class="payment-result payment-result--error" id="paymentError" hidden>
+    <div class="payment-result__icon payment-result__icon--error">!</div>
+    <h2>Оплата не прошла</h2>
+    <p>Попробуйте снова</p>
+    <div class="payment-result__actions">
+      <button class="booking-card__action" type="button" id="retryPaymentButton">Повторить оплату</button>
+      <a class="booking-card__action" href="{{ url_for('delivery_checkout') }}">Назад</a>
+    </div>
+  </article>
+</section>
+{% endblock %}

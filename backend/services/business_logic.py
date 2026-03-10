@@ -84,6 +84,135 @@ def build_order_status_timeline_value(order, now, order_status_steps, parse_iso_
     created_at = parse_iso_datetime_fn(order.get("created_at"))
     if created_at is None:
         return None
+    order_type = str(order.get("order_type") or "").strip().lower()
+
+    if order_type == "delivery":
+        cooking_seconds = 15 * 60
+        courier_sent_seconds = 60
+        eta_minutes = int(order.get("delivery_eta_minutes", 20) or 20)
+        eta_total_seconds = max(cooking_seconds + courier_sent_seconds, eta_minutes * 60)
+        delivering_seconds = max(0, eta_total_seconds - cooking_seconds - courier_sent_seconds)
+        delivered_seconds = 60
+
+        total_duration = eta_total_seconds + delivered_seconds
+        elapsed = int((now - created_at).total_seconds())
+        if elapsed < 0:
+            elapsed = 0
+        if elapsed >= total_duration:
+            return None
+
+        segments = (
+            ("cooking", cooking_seconds),
+            ("courier_sent", courier_sent_seconds),
+            ("delivering", delivering_seconds),
+            ("delivered", delivered_seconds),
+        )
+
+        phase_key = segments[-1][0]
+        phase_duration = segments[-1][1]
+        phase_start_offset = 0
+        elapsed_acc = 0
+        for key, duration in segments:
+            next_acc = elapsed_acc + duration
+            if elapsed < next_acc:
+                phase_key = key
+                phase_duration = duration
+                phase_start_offset = elapsed_acc
+                break
+            elapsed_acc = next_acc
+
+        phase_elapsed = max(0, elapsed - phase_start_offset)
+        phase_remaining = max(0, phase_duration - phase_elapsed)
+        phase_start = created_at + timedelta(seconds=phase_start_offset)
+        phase_end = phase_start + timedelta(seconds=phase_duration)
+        cycle_end = created_at + timedelta(seconds=total_duration)
+        eta_end = created_at + timedelta(seconds=eta_total_seconds)
+        eta_remaining = max(0, int((eta_end - now).total_seconds()))
+
+        return {
+            "order_id": order.get("id"),
+            "order_type": "delivery",
+            "phase": phase_key,
+            "phase_elapsed_seconds": phase_elapsed,
+            "phase_remaining_seconds": phase_remaining,
+            "phase_duration_seconds": phase_duration,
+            "phase_progress_ratio": (phase_elapsed / phase_duration) if phase_duration else 1.0,
+            "cycle_started_at": created_at.isoformat(timespec="seconds"),
+            "phase_started_at": phase_start.isoformat(timespec="seconds"),
+            "phase_ends_at": phase_end.isoformat(timespec="seconds"),
+            "cycle_ends_at": cycle_end.isoformat(timespec="seconds"),
+            "eta_total_seconds": eta_total_seconds,
+            "eta_remaining_seconds": eta_remaining,
+        }
+
+    steps_index = {
+        step.get("key"): int(step.get("duration_seconds", 0) or 0)
+        for step in order_status_steps
+    }
+    cooking_seconds = max(0, steps_index.get("preparing", 15 * 60))
+    delivering_seconds = max(0, steps_index.get("delivering", 60))
+    delivered_seconds = max(0, steps_index.get("served", 60))
+
+    booking = order.get("booking") or {}
+    booking_dt = parse_datetime_value(booking.get("date"), booking.get("time"))
+    if booking_dt and booking_dt > now:
+        cook_start = booking_dt - timedelta(seconds=cooking_seconds + delivering_seconds)
+        delivering_start = booking_dt - timedelta(seconds=delivering_seconds)
+        delivered_start = booking_dt
+        cycle_end = delivered_start + timedelta(seconds=delivered_seconds)
+
+        if created_at < cook_start and now < cook_start:
+            waiting_duration = max(1, int((cook_start - created_at).total_seconds()))
+            waiting_elapsed = min(
+                waiting_duration,
+                max(0, int((now - created_at).total_seconds())),
+            )
+            waiting_remaining = max(0, int((cook_start - now).total_seconds()))
+            return {
+                "order_id": order.get("id"),
+                "order_type": "dine_in",
+                "phase": "waiting",
+                "phase_elapsed_seconds": waiting_elapsed,
+                "phase_remaining_seconds": waiting_remaining,
+                "phase_duration_seconds": waiting_duration,
+                "phase_progress_ratio": (waiting_elapsed / waiting_duration),
+                "cycle_started_at": created_at.isoformat(timespec="seconds"),
+                "phase_started_at": created_at.isoformat(timespec="seconds"),
+                "phase_ends_at": cook_start.isoformat(timespec="seconds"),
+                "cycle_ends_at": cycle_end.isoformat(timespec="seconds"),
+            }
+
+        if now < delivering_start:
+            phase_key = "preparing"
+            phase_start = cook_start
+            phase_end = delivering_start
+        elif now < delivered_start:
+            phase_key = "delivering"
+            phase_start = delivering_start
+            phase_end = delivered_start
+        elif now < cycle_end:
+            phase_key = "served"
+            phase_start = delivered_start
+            phase_end = cycle_end
+        else:
+            return None
+
+        phase_duration = max(1, int((phase_end - phase_start).total_seconds()))
+        phase_elapsed = min(phase_duration, max(0, int((now - phase_start).total_seconds())))
+        phase_remaining = max(0, int((phase_end - now).total_seconds()))
+        return {
+            "order_id": order.get("id"),
+            "order_type": "dine_in",
+            "phase": phase_key,
+            "phase_elapsed_seconds": phase_elapsed,
+            "phase_remaining_seconds": phase_remaining,
+            "phase_duration_seconds": phase_duration,
+            "phase_progress_ratio": (phase_elapsed / phase_duration),
+            "cycle_started_at": phase_start.isoformat(timespec="seconds"),
+            "phase_started_at": phase_start.isoformat(timespec="seconds"),
+            "phase_ends_at": phase_end.isoformat(timespec="seconds"),
+            "cycle_ends_at": cycle_end.isoformat(timespec="seconds"),
+        }
 
     total_duration = sum(step["duration_seconds"] for step in order_status_steps)
     elapsed = int((now - created_at).total_seconds())
@@ -113,6 +242,7 @@ def build_order_status_timeline_value(order, now, order_status_steps, parse_iso_
 
     return {
         "order_id": order.get("id"),
+        "order_type": "dine_in",
         "phase": phase_key,
         "phase_elapsed_seconds": phase_elapsed,
         "phase_remaining_seconds": phase_remaining,
@@ -129,28 +259,51 @@ def get_user_preparing_orders_value(user_id, load_orders_fn, build_timeline_fn):
     orders = [o for o in load_orders_fn() if o.get("user_id") == user_id]
     now = datetime.now()
     active_orders = []
-    status_titles = {
-        "preparing": "Заказ готовится",
-        "delivering": "Заказ несут",
-        "served": "Заказ выдан",
-    }
-    status_texts = {
-        "preparing": "Осталось",
-        "delivering": "Сейчас принесём",
-        "served": "Можно забирать",
-    }
-
     for order in orders:
         timeline = build_timeline_fn(order, now)
         if timeline is None:
             continue
 
+        order_type = timeline.get("order_type", "dine_in")
         phase = timeline.get("phase")
-        remaining_seconds = int(timeline.get("phase_remaining_seconds", 0) or 0)
+        remaining_seconds = int(
+            timeline.get("eta_remaining_seconds")
+            if order_type == "delivery"
+            else timeline.get("phase_remaining_seconds", 0)
+            or 0
+        )
         remaining_seconds = max(0, remaining_seconds)
         minutes, seconds = divmod(remaining_seconds, 60)
 
+        if order_type == "delivery":
+            status_titles = {
+                "cooking": "Готовим заказ",
+                "courier_sent": "Отправили курьера",
+                "delivering": "Заказ в пути",
+                "delivered": "Заказ доставлен",
+            }
+            status_texts = {
+                "cooking": "До прибытия",
+                "courier_sent": "До прибытия",
+                "delivering": "До прибытия",
+                "delivered": "Доставлено",
+            }
+        else:
+            status_titles = {
+                "waiting": "Ожидаем время брони",
+                "preparing": "Заказ готовится",
+                "delivering": "Заказ несут",
+                "served": "Заказ выдан",
+            }
+            status_texts = {
+                "waiting": "До начала готовки",
+                "preparing": "Осталось",
+                "delivering": "Сейчас принесём",
+                "served": "Можно забирать",
+            }
+
         enriched = dict(order)
+        enriched["order_type"] = order_type
         enriched["status_phase"] = phase
         enriched["status_title"] = status_titles.get(phase, "Статус заказа")
         enriched["status_text"] = status_texts.get(phase, "Осталось")
@@ -166,7 +319,15 @@ def list_active_order_statuses_value(user_id, load_orders_fn, build_timeline_fn)
     now = datetime.now()
     orders = [o for o in load_orders_fn() if o.get("user_id") == user_id]
     active = []
-    phase_priority = {"served": 0, "delivering": 1, "preparing": 2}
+    phase_priority = {
+        "served": 0,
+        "delivered": 0,
+        "courier_sent": 1,
+        "delivering": 1,
+        "cooking": 2,
+        "preparing": 2,
+        "waiting": 3,
+    }
 
     for order in orders:
         timeline = build_timeline_fn(order, now)

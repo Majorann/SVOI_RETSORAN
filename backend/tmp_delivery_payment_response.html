@@ -1,0 +1,58 @@
+﻿<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content="test" />
+    <title>Свои — ресторан</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+  </head>
+  <body class="page-payment-center">
+    <div class="page">
+      
+<section class="payment-shell">
+  <header class="payment-head">
+    <h1>Оплата доставки</h1>
+    <p>Проверьте данные и подтвердите оплату</p>
+  </header>
+
+  
+
+  <article class="payment-card-main">
+    <section class="payment-block payment-block--order">
+      <h2>Ваш заказ</h2>
+      <div class="payment-items-brief">
+        
+          <div class="payment-items-brief__row">
+            <span>Пирог Мина ×1</span>
+            <span>390 ₽</span>
+          </div>
+        
+      </div>
+      <p class="payment-total">Итого: <strong>390 ₽</strong></p>
+    </section>
+
+    <section class="payment-block payment-block--card">
+      <h2>Данные доставки</h2>
+      <p>Получатель: A</p>
+      <p>Телефон: +79990000000</p>
+      <p>Адрес: ул. Test, д. 1</p>
+      <p>ETA: 20 минут</p>
+      
+    </section>
+
+    <section class="payment-block payment-block--actions">
+      <form method="post" action="/delivery/confirm">
+        <input type="hidden" name="csrf_token" value="test" />
+        <button class="primary-action" type="submit">Оплатить</button>
+      </form>
+      <a class="booking-card__action" href="/delivery/checkout">Назад к данным доставки</a>
+    </section>
+  </article>
+  
+</section>
+
+    </div>
+    <script type="module" src="/static/js/app.js"></script>
+  </body>
+</html>

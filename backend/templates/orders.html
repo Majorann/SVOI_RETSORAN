@@ -23,9 +23,18 @@
               {% if order.comment %}<span class="order-comment-icon">💬</span>{% endif %}
             </p>
             <p class="booking-card__meta">{{ order.created_at.replace('T', ' ') }}</p>
+            {% if order.order_type == "delivery" %}
+              <p class="booking-card__meta">Тип: Доставка</p>
+            {% else %}
+              <p class="booking-card__meta">Тип: В зале</p>
+            {% endif %}
           </div>
           <div>
-            <p class="booking-card__meta">Стол №{{ order.booking.table_id or "—" }}</p>
+            {% if order.order_type == "delivery" %}
+              <p class="booking-card__meta">{{ order.delivery_address or "Адрес не указан" }}</p>
+            {% else %}
+              <p class="booking-card__meta">Стол №{{ order.booking.table_id or "—" }}</p>
+            {% endif %}
             <p class="price">{{ order.payable_total or order.items_total }} ₽</p>
           </div>
         </a>

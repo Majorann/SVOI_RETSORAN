@@ -39,7 +39,9 @@
       <span id="orderStatusSecondaryText"></span>
     </div>
     <div class="order-status-bar__main">
-      <div class="order-status-bar__icon" id="orderStatusIcon" aria-hidden="true">🍳</div>
+      <div class="order-status-bar__icon" id="orderStatusIcon" aria-hidden="true">
+        <img src="{{ url_for('static', filename='img/frying_pan.svg') }}" alt="" />
+      </div>
       <div class="order-status-bar__content">
         <div class="order-status-bar__head">
           <p class="order-status-bar__title" id="orderStatusTitle">Готовится</p>
@@ -56,7 +58,18 @@
           <strong id="orderStatusTimer">00:00</strong>
         </p>
         <div class="order-status-bar__progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Order status progress">
-          <span id="orderStatusProgress"></span>
+          <span id="orderStatusProgress">
+            <span class="loop-wrapper" id="deliveryProgressLoop" aria-hidden="true">
+              <span class="mountain"></span>
+              <span class="hill"></span>
+              <span class="tree"></span>
+              <span class="tree"></span>
+              <span class="tree"></span>
+              <span class="rock"></span>
+              <span class="truck"></span>
+              <span class="wheels"></span>
+            </span>
+          </span>
         </div>
       </div>
     </div>
@@ -89,9 +102,8 @@
         </div>
       </div>
     </div>
-    <a class="secondary-card" href="{{ url_for('delivery') }}">
-      <div class="secondary-card__icon">🚚</div>
-      <div>
+    <a class="secondary-card secondary-card--delivery" href="{{ url_for('delivery') }}">
+      <div class="secondary-card__content secondary-card__content--delivery">
         <p class="secondary-card__title">Доставка</p>
         <p class="secondary-card__text">Привезем быстро</p>
       </div>

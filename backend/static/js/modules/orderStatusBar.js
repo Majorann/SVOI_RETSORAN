@@ -1,4 +1,16 @@
 const PHRASE_POOLS = {
+  waiting: [
+    "Ждём время вашей брони",
+    "Заказ запланирован заранее",
+    "Начнём готовить ближе к вашему приходу",
+    "Всё под контролем, ждём нужное время",
+    "Заказ принят и ожидает старта",
+    "Подготовим всё к вашему визиту",
+    "Готовка начнётся вовремя",
+    "Заказ в очереди к нужному времени",
+    "Всё будет готово к вашей брони",
+    "Ожидаем начало приготовления",
+  ],
   cooking: [
     "Готовим ваш заказ",
     "На кухне кипит работа",
@@ -35,38 +47,107 @@ const PHRASE_POOLS = {
     "Всё готово",
     "Ваш заказ готов",
   ],
+  delivery_cooking: [
+    "Готовим ваш заказ для доставки",
+    "Кухня собирает заказ в дорогу",
+    "Подготавливаем доставку",
+    "Собираем пакет для курьера",
+    "Готовим к отправке",
+  ],
+  courier_sent: [
+    "Курьер уже выехал",
+    "Курьер в пути",
+    "Передали заказ курьеру",
+    "Заказ передан курьеру",
+    "Курьер забрал заказ",
+    "Курьер направляется к вам",
+    "Заказ едет к вам",
+    "Курьер уже в дороге",
+    "Доставка началась",
+  ],
+  delivery_delivering: [
+    "Курьер приближается",
+    "Уже едем к вам",
+    "Почти на месте",
+    "Доставка рядом",
+    "Остались минуты",
+  ],
+  delivery_delivered: [
+    "Заказ доставлен",
+    "Приятного аппетита!",
+    "Доставка завершена",
+    "Ваш заказ у двери",
+    "Готово!",
+  ],
 };
 
-const STAGE_PRIORITY = { delivered: 0, delivering: 1, cooking: 2 };
+const STAGE_PRIORITY = {
+  delivered: 0,
+  delivery_delivered: 0,
+  delivering: 1,
+  courier_sent: 1,
+  delivery_delivering: 1,
+  cooking: 2,
+  delivery_cooking: 2,
+  waiting: 3,
+};
 
-const PHASE_DEFS = [
-  {
-    backendKey: "preparing",
-    stageKey: "cooking",
-    stageLabel: "Готовим",
-    durationSeconds: 15 * 60,
-    icon: "/static/img/frying-pan-svgrepo-com.svg",
+const PHASE_DEFS = {
+  dine_in: {
+    waiting: {
+      stageKey: "waiting",
+      stageLabel: "Ожидаем время брони",
+      icon: "/static/img/time.svg",
+    },
+    preparing: {
+      stageKey: "cooking",
+      stageLabel: "Готовим",
+      icon: "/static/img/frying_pan.svg",
+    },
+    delivering: {
+      stageKey: "delivering",
+      stageLabel: "Несём",
+      icon: "/static/img/waiter_pixel.svg",
+    },
+    served: {
+      stageKey: "delivered",
+      stageLabel: "Заказ выдан",
+      icon: "/static/img/checkmark.svg",
+    },
   },
-  {
-    backendKey: "delivering",
-    stageKey: "delivering",
-    stageLabel: "Несём",
-    durationSeconds: 60,
-    icon: "/static/img/waiter.svg",
+  delivery: {
+    cooking: {
+      stageKey: "delivery_cooking",
+      stageLabel: "Готовим заказ",
+      icon: "/static/img/frying_pan.svg",
+    },
+    courier_sent: {
+      stageKey: "courier_sent",
+      stageLabel: "Отправили курьера",
+      icon: "/static/img/truck.svg",
+    },
+    delivering: {
+      stageKey: "delivery_delivering",
+      stageLabel: "Доставляем",
+      icon: "/static/img/truck.svg",
+    },
+    delivered: {
+      stageKey: "delivery_delivered",
+      stageLabel: "Заказ доставлен",
+      icon: "/static/img/checkmark.svg",
+    },
   },
-  {
-    backendKey: "served",
-    stageKey: "delivered",
-    stageLabel: "Заказ выдан",
-    durationSeconds: 60,
-    icon: "✓",
-  },
-];
+};
 
 const PROGRESS_RANGES = {
-  cooking: [0.2, 0.6],
-  delivering: [0.65, 0.9],
+  waiting: [0.05, 0.05],
+  cooking: [0.15, 0.88],
+  delivering: [0.88, 0.97],
   delivered: [1, 1],
+  delivery_cooking: [0, 0.4],
+  courier_sent: [0.4, 0.55],
+  delivery_delivering: [0.55, 1],
+  delivery_delivered: [1, 1],
 };
 const TABLO_CHARS = "АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ#_";
 const PHRASE_HOLD_MIN_MS = 9000;
@@ -80,6 +161,14 @@ const formatTimer = (seconds) => {
   const mm = String(Math.floor(safe / 60)).padStart(2, "0");
   const ss = String(safe % 60).padStart(2, "0");
   return `${mm}:${ss}`;
+};
+
+const formatLongTimer = (seconds) => {
+  const safe = Math.max(0, Math.floor(seconds));
+  const hh = String(Math.floor(safe / 3600)).padStart(2, "0");
+  const mm = String(Math.floor((safe % 3600) / 60)).padStart(2, "0");
+  const ss = String(safe % 60).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
 };
 
 const pickRandomPhrase = (stageKey, previousPhrase) => {
@@ -111,6 +200,7 @@ const setupOrderStatusBar = () => {
   const textNode = document.getElementById("orderStatusText");
   const timerNode = document.getElementById("orderStatusTimer");
   const progressNode = document.getElementById("orderStatusProgress");
+  const deliveryLoopNode = document.getElementById("deliveryProgressLoop");
   const expandedNode = document.getElementById("orderStatusExpanded");
   const listNode = document.getElementById("orderStatusList");
 
@@ -123,14 +213,6 @@ const setupOrderStatusBar = () => {
   }
   if (!Array.isArray(initialOrders) || !initialOrders.length) return;
 
-  const totalDuration = PHASE_DEFS.reduce((sum, phase) => sum + phase.durationSeconds, 0);
-  const phaseOffsets = [];
-  let offset = 0;
-  for (const phase of PHASE_DEFS) {
-    phaseOffsets.push({ ...phase, start: offset, end: offset + phase.durationSeconds });
-    offset += phase.durationSeconds;
-  }
-
   const phraseState = {
     stageKey: "",
     phrase: "",
@@ -139,6 +221,9 @@ const setupOrderStatusBar = () => {
 
   let isExpanded = false;
   let timerId = null;
+  let pollId = null;
+  let pollInFlight = false;
+  let statusesSnapshotAtMs = Date.now();
   let lastPrimarySignature = "";
   let statusAnimationToken = 0;
   let statusTypingTimeoutId = null;
@@ -273,41 +358,51 @@ const setupOrderStatusBar = () => {
   };
 
   const resolveProgressRatio = (stageKey, stagePhaseRatio) => {
-    const [start, end] = PROGRESS_RANGES[stageKey] || [0.2, 0.6];
+    const [start, end] = PROGRESS_RANGES[stageKey] || [0.15, 0.88];
     const ratio = Math.max(0, Math.min(1, stagePhaseRatio));
     return start + (end - start) * ratio;
   };
 
   const resolveOrderState = (order) => {
-    const cycleStartedAtMs = Date.parse(order?.cycle_started_at || "");
-    if (!Number.isFinite(cycleStartedAtMs)) return null;
+    const orderId = Number(order?.order_id);
+    const flow = String(order?.order_type || "dine_in") === "delivery" ? "delivery" : "dine_in";
+    const backendPhase = String(order?.phase || "");
+    const phaseDef = PHASE_DEFS[flow]?.[backendPhase];
+    if (!Number.isFinite(orderId) || !phaseDef) return null;
 
-    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - cycleStartedAtMs) / 1000));
-    if (elapsedSeconds >= totalDuration) return null;
+    const elapsedFromSnapshot = Math.max(0, Math.floor((Date.now() - statusesSnapshotAtMs) / 1000));
+    const rawRemainingSeconds = Math.max(0, Number(order?.phase_remaining_seconds) || 0);
+    const rawEtaRemainingSeconds = Math.max(0, Number(order?.eta_remaining_seconds) || 0);
+    const remainingSeconds = Math.max(0, rawRemainingSeconds - elapsedFromSnapshot);
+    const etaRemainingSeconds = Math.max(0, rawEtaRemainingSeconds - elapsedFromSnapshot);
+    const phaseProgress = Number(order?.phase_progress_ratio);
+    const phaseRatio = Number.isFinite(phaseProgress)
+      ? Math.max(0, Math.min(1, phaseProgress))
+      : 0;
 
-    for (const phase of phaseOffsets) {
-      if (elapsedSeconds >= phase.end) continue;
+    const timer = phaseDef.stageKey === "waiting"
+      ? formatLongTimer(remainingSeconds)
+      : flow === "delivery"
+        ? formatTimer(etaRemainingSeconds)
+      : formatTimer(remainingSeconds);
+    const rowTimer = flow === "delivery"
+      ? `ETA ${formatTimer(etaRemainingSeconds)}`
+      : phaseDef.stageKey === "waiting"
+        ? `До вашей брони ${formatLongTimer(remainingSeconds)}`
+      : formatTimer(remainingSeconds);
 
-      const stageElapsedSeconds = elapsedSeconds - phase.start;
-      const remainingSeconds = Math.max(0, phase.durationSeconds - stageElapsedSeconds);
-      const stagePhaseRatio = phase.durationSeconds
-        ? stageElapsedSeconds / phase.durationSeconds
-        : 1;
-
-      return {
-        orderId: order.order_id,
-        backendPhase: phase.backendKey,
-        stageKey: phase.stageKey,
-        stageLabel: phase.stageLabel,
-        icon: phase.icon,
-        timer: formatTimer(remainingSeconds),
-        remainingSeconds,
-        progressRatio: resolveProgressRatio(phase.stageKey, stagePhaseRatio),
-        rowText: `Заказ №${order.order_id} — ${phase.stageLabel} • ${formatTimer(remainingSeconds)}`,
-      };
-    }
-
-    return null;
+    return {
+      orderId,
+      flow,
+      backendPhase,
+      stageKey: phaseDef.stageKey,
+      stageLabel: phaseDef.stageLabel,
+      icon: phaseDef.icon,
+      timer,
+      remainingSeconds,
+      progressRatio: resolveProgressRatio(phaseDef.stageKey, phaseRatio),
+      rowText: `Заказ №${orderId} — ${phaseDef.stageLabel} • ${rowTimer}`,
+    };
   };
 
   const resolveActiveStates = () => {
@@ -345,6 +440,10 @@ const setupOrderStatusBar = () => {
       window.clearInterval(timerId);
       timerId = null;
     }
+    if (pollId) {
+      window.clearInterval(pollId);
+      pollId = null;
+    }
     clearStatusTypingTimeout();
     bar.classList.add("is-exiting");
     const container = bar.closest(".order-status-section");
@@ -359,6 +458,28 @@ const setupOrderStatusBar = () => {
     listNode.innerHTML = visible
       .map((item) => `<div class="order-status-bar__row">${item.rowText}</div>`)
       .join("");
+  };
+
+  const fetchOrderStatuses = async () => {
+    if (pollInFlight) return;
+    pollInFlight = true;
+    try {
+      const response = await fetch("/api/order-statuses", {
+        method: "GET",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const payload = await response.json().catch(() => null);
+      if (!payload || !Array.isArray(payload.order_statuses)) return;
+      initialOrders = payload.order_statuses;
+      statusesSnapshotAtMs = Date.now();
+      render();
+    } catch {
+      // Ignore transient polling errors; next tick will retry.
+    } finally {
+      pollInFlight = false;
+    }
   };
 
   const render = () => {
@@ -387,6 +508,7 @@ const setupOrderStatusBar = () => {
 
     bar.dataset.phase = primary.backendPhase;
     bar.dataset.stage = primary.stageKey;
+    bar.dataset.flow = primary.flow;
 
     if (iconNode) {
       if (typeof primary.icon === "string" && primary.icon.startsWith("/static/")) {
@@ -405,6 +527,17 @@ const setupOrderStatusBar = () => {
       bar
         .querySelector(".order-status-bar__progress")
         ?.setAttribute("aria-valuenow", String(Math.round(widthPercent)));
+    }
+
+    if (deliveryLoopNode) {
+      const showRoadLoop = primary.flow === "delivery"
+        && (primary.stageKey === "delivery_cooking"
+          || primary.stageKey === "courier_sent"
+          || primary.stageKey === "delivery_delivering");
+      const showTruck = primary.flow === "delivery"
+        && (primary.stageKey === "courier_sent" || primary.stageKey === "delivery_delivering");
+      deliveryLoopNode.hidden = !showRoadLoop;
+      bar.dataset.deliveryVehicle = showTruck ? "on" : "off";
     }
 
     void animateStatusText(statusPhrase);
@@ -446,8 +579,16 @@ const setupOrderStatusBar = () => {
     render();
   }, 1000);
 
+  // Keep status timeline in sync with backend without page reload.
+  pollId = window.setInterval(() => {
+    void fetchOrderStatuses();
+  }, 5000);
+
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) render();
+    if (!document.hidden) {
+      render();
+      void fetchOrderStatuses();
+    }
   });
 };
 
