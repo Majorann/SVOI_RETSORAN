@@ -31,8 +31,14 @@ from routes.orders_routes import (
     payment_route,
 )
 from routes.menu_routes import menu_item_route, menu_route
+from routes.delivery_routes import (
+    delivery_checkout_route,
+    delivery_confirm_route,
+    delivery_menu_route,
+    delivery_payment_page_route,
+    delivery_payment_route,
+)
 from routes.main_routes import (
-    delivery_route,
     index_route,
     notifications_route,
     points_route,
@@ -183,6 +189,20 @@ def index():
     )
 
 
+@app.get("/api/order-statuses")
+def api_order_statuses():
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"ok": True, "order_statuses": []})
+    return jsonify(
+        {
+            "ok": True,
+            "order_statuses": list_active_order_statuses(user_id),
+            "server_time": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+
+
 @app.route("/reserve")
 def reserve():
     return reserve_route(load_bookings, parse_datetime, overlaps_booking, TABLES, WALLS)
@@ -205,7 +225,33 @@ def profile():
 
 @app.route("/delivery")
 def delivery():
-    return delivery_route()
+    return delivery_menu_route(load_menu_items)
+
+
+@app.get("/delivery/checkout")
+def delivery_checkout():
+    return delivery_checkout_route(load_users)
+
+
+@app.post("/delivery/confirm")
+def delivery_confirm():
+    return delivery_confirm_route(
+        json_file_lock,
+        ORDERS_PATH,
+        load_orders,
+        next_order_id,
+        save_orders,
+    )
+
+
+@app.post("/delivery/payment")
+def delivery_payment():
+    return delivery_payment_route(resolve_order_items)
+
+
+@app.get("/delivery/payment")
+def delivery_payment_page():
+    return delivery_payment_page_route()
 
 
 @app.route("/notifications")
@@ -643,4 +689,3 @@ def delete_card():
 
 if __name__ == "__main__":
     app.run(debug=True)
-

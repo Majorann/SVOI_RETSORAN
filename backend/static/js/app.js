@@ -4,6 +4,7 @@ import { setupBottomNavMotion } from "./modules/bottomNavMotion.js";
 import { setupTableTooltip } from "./modules/tableTooltip.js";
 import { setupOrderStatusBar } from "./modules/orderStatusBar.js";
 import { setupPointsBalanceCard } from "./modules/pointsBalanceCard.js";
+import { setupDeliveryFlow } from "./modules/deliveryFlow.js";
 window.addEventListener("DOMContentLoaded", () => {
   stagger(".news-card", 140);
   stagger(".menu-card", 120);
@@ -12,6 +13,7 @@ window.addEventListener("DOMContentLoaded", () => {
   setupTableTooltip();
   setupMenuHoverMood();
   setupOrderStatusBar();
+  setupDeliveryFlow();
 
   const menuList = document.querySelector(".menu");
   const menuCards = Array.from(document.querySelectorAll(".menu-card--menu"));
@@ -45,6 +47,8 @@ window.addEventListener("DOMContentLoaded", () => {
   const checkoutPayable = document.getElementById("checkoutPayable");
   const goToPayment = document.getElementById("goToPayment");
   const serveCustomTime = document.getElementById("serveCustomTime");
+  const isDeliveryMenuPage = document.body.classList.contains("page-delivery-menu");
+  const cartStorageKey = isDeliveryMenuPage ? "delivery_cart" : "cart";
   const cardNumberInput = document.querySelector('input[name="card_number"]');
   const expiryInput = document.querySelector('input[name="expiry"]');
   const holderInput = document.querySelector('input[name="holder"]');
@@ -294,14 +298,14 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const loadCart = () => {
     try {
-      return JSON.parse(localStorage.getItem("cart") || "[]");
+      return JSON.parse(localStorage.getItem(cartStorageKey) || "[]");
     } catch {
       return [];
     }
   };
 
   const saveCart = (cart) => {
-    localStorage.setItem("cart", JSON.stringify(cart));
+    localStorage.setItem(cartStorageKey, JSON.stringify(cart));
   };
 
   const normalizeCart = (cart) =>
@@ -675,7 +679,8 @@ window.addEventListener("DOMContentLoaded", () => {
       if (cartTotal) cartTotal.textContent = "0";
       return;
     }
-    window.location.href = "/checkout";
+    const checkoutUrl = cartCheckout.dataset.checkoutUrl || "/checkout";
+    window.location.href = checkoutUrl;
   });
 
   cartList?.addEventListener("click", (event) => {
@@ -1014,9 +1019,9 @@ window.addEventListener("DOMContentLoaded", () => {
   const params = new URLSearchParams(window.location.search);
   if (params.get("paid") === "1") {
     localStorage.removeItem("cart");
+    localStorage.removeItem("delivery_cart");
     sessionStorage.removeItem("checkout_comment");
   }
 
   updateCartUI();
 });
-

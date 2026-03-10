@@ -20,12 +20,23 @@
 
 <section class="section">
   <div class="checkout-card">
-    <p>Статус: Оплачен</p>
-    <p>Бронь: стол №{{ order.booking.table_id or "—" }}, {{ order.booking.date or "—" }} · {{ order.booking.time or "—" }}</p>
-    <p>Подача: {{ order.serving.label or "—" }}</p>
-    <p>Карта: {{ order.payment_card.brand or "Карта" }} •••• {{ order.payment_card.last4 or "0000" }}</p>
-    {% if order.points_applied %}
-      <p>Списано баллов: {{ order.points_applied }} ₽</p>
+    {% if order.order_type == "delivery" %}
+      <p>Тип: Доставка</p>
+      <p>Получатель: {{ order.delivery_name or "—" }}</p>
+      <p>Телефон: {{ order.delivery_phone or "—" }}</p>
+      <p>Адрес: {{ order.delivery_address or "—" }}</p>
+      <p>ETA: {{ order.delivery_eta_minutes or 20 }} минут</p>
+      {% if order.delivery_comment %}
+        <p>Комментарий для курьера: {{ order.delivery_comment }}</p>
+      {% endif %}
+    {% else %}
+      <p>Статус: Оплачен</p>
+      <p>Бронь: стол №{{ order.booking.table_id or "—" }}, {{ order.booking.date or "—" }} · {{ order.booking.time or "—" }}</p>
+      <p>Подача: {{ order.serving.label or "—" }}</p>
+      <p>Карта: {{ order.payment_card.brand or "Карта" }} •••• {{ order.payment_card.last4 or "0000" }}</p>
+      {% if order.points_applied %}
+        <p>Списано баллов: {{ order.points_applied }} ₽</p>
+      {% endif %}
     {% endif %}
   </div>
 </section>
@@ -36,7 +47,7 @@
   </div>
   <div class="checkout-card">
     <div class="checkout-items">
-      {% for item in order.items %}
+      {% for item in order.get("items", []) %}
       <div class="checkout-item">
         <div class="checkout-item__meta">
           <p class="checkout-item__name">{{ item.name }}</p>
@@ -53,7 +64,7 @@
   </div>
 </section>
 
-{% if order.comment %}
+{% if order.comment and order.order_type != "delivery" %}
 <section class="section">
   <div class="section__title">
     <h2>Комментарий к заказу</h2>

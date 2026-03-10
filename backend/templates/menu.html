@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block body_class %}page-menu{% endblock %}
+{% block body_class %}{% if delivery_mode %}page-menu page-delivery-menu{% else %}page-menu{% endif %}{% endblock %}
 {% block content %}
 <div class="menu-shell">
 <header class="top menu-top">
@@ -16,7 +16,7 @@
   </a>
   <div class="brand__mark menu-top__mark">С</div>
   <div class="menu-top__heading">
-    <p class="brand__name menu-top__title">Меню</p>
+    <p class="brand__name menu-top__title">{% if delivery_mode %}Меню доставки{% else %}Меню{% endif %}</p>
   </div>
   <span class="menu-top__ghost" aria-hidden="true"></span>
 </header>
@@ -119,7 +119,12 @@
   <div class="cart-drawer__empty" id="cartEmpty">Корзина пока пустая. Добавьте блюда из меню.</div>
   <div class="cart-drawer__footer">
     <div class="cart-drawer__total">Итого: <span id="cartTotal">0</span> ₽</div>
-    <button class="primary-action" id="cartCheckout" type="button">Оформить</button>
+    <button
+      class="primary-action"
+      id="cartCheckout"
+      type="button"
+      data-checkout-url="{% if delivery_mode %}{{ url_for('delivery_checkout') }}{% else %}{{ url_for('checkout') }}{% endif %}"
+    >{% if delivery_mode %}Оформить доставку{% else %}Оформить{% endif %}</button>
   </div>
 </div>
 

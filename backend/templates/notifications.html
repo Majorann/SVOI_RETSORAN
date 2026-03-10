@@ -9,7 +9,9 @@
       <p class="brand__tag">Ваши брони</p>
     </div>
   </div>
-  <a class="icon-button" href="{{ url_for('index') }}" aria-label="На главную">🏠</a>
+  <a class="icon-button icon-button--home" href="{{ url_for('index') }}" aria-label="На главную">
+    <img class="icon-button__img" src="{{ url_for('static', filename='img/home2.svg') }}" alt="" />
+  </a>
 </header>
 
 <div class="notifications-side-human" aria-hidden="true">

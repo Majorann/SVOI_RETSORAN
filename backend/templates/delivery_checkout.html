@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block body_class %}page-delivery-checkout{% endblock %}
+{% block content %}
+<header class="top checkout-head">
+  <div class="brand">
+    <div class="brand__mark">С</div>
+    <div>
+      <p class="brand__name">Оформление доставки</p>
+      <p class="brand__tag">Проверьте заказ и заполните адрес</p>
+    </div>
+  </div>
+  <a class="icon-button menu-top__back" href="{{ url_for('delivery') }}" aria-label="Назад в меню доставки">
+    <svg class="menu-top__back-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 16" width="24" height="24" shape-rendering="crispEdges" aria-hidden="true" focusable="false">
+      <g fill="#F2F6FF">
+        <rect x="5" y="0" width="2" height="8"></rect>
+        <rect x="2" y="8" width="8" height="1"></rect>
+        <rect x="3" y="9" width="6" height="1"></rect>
+        <rect x="4" y="10" width="4" height="1"></rect>
+        <rect x="5" y="11" width="2" height="1"></rect>
+      </g>
+    </svg>
+  </a>
+</header>
+
+{% if delivery_error %}
+<section class="section">
+  <div class="notice notice--error">{{ delivery_error }}</div>
+</section>
+{% endif %}
+
+<form class="section delivery-checkout-layout delivery-checkout-layout--single" method="post" action="{{ url_for('delivery_payment') }}" id="deliveryCheckoutForm">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+  <input type="hidden" name="items_json" id="deliveryItemsJson" value="[]" />
+
+  <section class="checkout-card">
+    <div class="section__title">
+      <h2>Данные доставки</h2>
+    </div>
+    <div class="delivery-form">
+      <label class="field">
+        <span>Имя получателя *</span>
+        <input type="text" name="delivery_name" value="{{ prefill_name }}" required />
+      </label>
+      <label class="field">
+        <span>Телефон *</span>
+        <input type="tel" name="delivery_phone" value="{{ prefill_phone }}" required />
+      </label>
+      <label class="field">
+        <span>Улица *</span>
+        <input type="text" name="delivery_street" required />
+      </label>
+      <label class="field">
+        <span>Дом *</span>
+        <input type="text" name="delivery_house" required />
+      </label>
+      <label class="field">
+        <span>Квартира / офис</span>
+        <input type="text" name="delivery_apartment" />
+      </label>
+      <label class="field">
+        <span>Подъезд</span>
+        <input type="text" name="delivery_entrance" />
+      </label>
+      <label class="field">
+        <span>Этаж</span>
+        <input type="text" name="delivery_floor" />
+      </label>
+      <label class="field">
+        <span>Домофон</span>
+        <input type="text" name="delivery_intercom" />
+      </label>
+      <p class="field">Комментарий к заказу</p>
+      <label class="checkout-comment">
+        <textarea
+          id="deliveryComment"
+          name="delivery_comment"
+          rows="4"
+          maxlength="300"
+          placeholder="Например: не звоните в дверь, ребёнок спит"
+        ></textarea>
+      </label>
+      <div class="checkout-counter"><span id="deliveryCommentCount">0</span> / 300</div>
+    </div>
+    <p class="delivery-eta">Ориентировочное время доставки: <strong>20 минут</strong></p>
+    <button class="primary-action" type="submit" id="deliverySubmit">Перейти к оплате</button>
+  </section>
+</form>
+
+<nav class="bottom-nav">
+  <a class="bottom-nav__item" href="{{ url_for('notifications') }}">
+    <span>🔔</span>
+    <span>Уведомления</span>
+    {% if notifications_count %}
+      <span class="nav-badge">{{ notifications_count }}</span>
+    {% endif %}
+  </a>
+  <a class="bottom-nav__item bottom-nav__item--active" href="{{ url_for('delivery') }}">
+    <span>🚚</span>
+    <span>Доставка</span>
+  </a>
+  <a class="bottom-nav__item" href="{{ url_for('profile') }}">
+    <span>👤</span>
+    <span>Профиль</span>
+  </a>
+</nav>
+{% endblock %}
