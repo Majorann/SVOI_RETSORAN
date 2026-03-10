@@ -3,16 +3,22 @@
 {% block content %}
 <div class="menu-shell">
 <header class="top menu-top">
-  <div class="brand">
-    <div class="brand__mark">С</div>
-    <div>
-      <p class="brand__name">Меню</p>
-      <p class="brand__tag">Выберите блюда</p>
-    </div>
+  <a class="icon-button menu-top__back" href="{{ url_for('index') }}" aria-label="Назад">
+    <svg class="menu-top__back-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 16" width="24" height="24" shape-rendering="crispEdges" aria-hidden="true" focusable="false">
+      <g fill="#F2F6FF">
+        <rect x="5" y="0" width="2" height="8"></rect>
+        <rect x="2" y="8" width="8" height="1"></rect>
+        <rect x="3" y="9" width="6" height="1"></rect>
+        <rect x="4" y="10" width="4" height="1"></rect>
+        <rect x="5" y="11" width="2" height="1"></rect>
+      </g>
+    </svg>
+  </a>
+  <div class="brand__mark menu-top__mark">С</div>
+  <div class="menu-top__heading">
+    <p class="brand__name menu-top__title">Меню</p>
   </div>
-  <div class="menu-top__actions">
-    <a class="icon-button" href="{{ url_for('index') }}" aria-label="Назад">←</a>
-  </div>
+  <span class="menu-top__ghost" aria-hidden="true"></span>
 </header>
 
 <section class="section">
@@ -76,11 +82,41 @@
 </section>
 </div>
 
+<button
+  class="menu-cart-fab"
+  id="menuCartFab"
+  type="button"
+  aria-label="Открыть корзину"
+  aria-controls="cartDrawer"
+  aria-expanded="false"
+>
+  <img src="{{ url_for('static', filename='img/basket-menu.svg') }}" alt="" aria-hidden="true" />
+  <span class="menu-cart-fab__badge" id="menuCartFabBadge">0</span>
+</button>
+
+<div class="cart-overlay" id="cartOverlay" hidden></div>
+
 <div class="cart-drawer" id="cartDrawer" aria-hidden="true" hidden>
   <div class="cart-drawer__header">
+    <button class="cart-drawer__close" id="cartDrawerClose" type="button" aria-label="Свернуть корзину">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 7" width="16" height="12" shape-rendering="crispEdges" aria-hidden="true" focusable="false" style="transform: translateY(1px);">
+        <g fill="#F2F6FF">
+          <rect x="0" y="0" width="1" height="2"></rect>
+          <rect x="1" y="1" width="1" height="2"></rect>
+          <rect x="2" y="2" width="1" height="2"></rect>
+          <rect x="3" y="3" width="1" height="2"></rect>
+          <rect x="4" y="4" width="1" height="2"></rect>
+          <rect x="5" y="3" width="1" height="2"></rect>
+          <rect x="6" y="2" width="1" height="2"></rect>
+          <rect x="7" y="1" width="1" height="2"></rect>
+          <rect x="8" y="0" width="1" height="2"></rect>
+        </g>
+      </svg>
+    </button>
     <h3>Корзина</h3>
   </div>
   <div class="cart-drawer__list" id="cartList"></div>
+  <div class="cart-drawer__empty" id="cartEmpty">Корзина пока пустая. Добавьте блюда из меню.</div>
   <div class="cart-drawer__footer">
     <div class="cart-drawer__total">Итого: <span id="cartTotal">0</span> ₽</div>
     <button class="primary-action" id="cartCheckout" type="button">Оформить</button>

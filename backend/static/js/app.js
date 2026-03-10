@@ -1,1139 +1,9 @@
-// Simple stagger animation helper
-const stagger = (selector, step = 120) => {
-  document.querySelectorAll(selector).forEach((el, index) => {
-    el.style.animationDelay = `${index * step}ms`;
-  });
-};
-
-const getCsrfToken = () =>
-  document.querySelector('meta[name="csrf-token"]')?.getAttribute("content")?.trim() || "";
-
-// Menu hover mood: push dish photo to whole-page background
-const setupMenuHoverMood = () => {
-  const cards = document.querySelectorAll(".menu-card--menu");
-  if (!cards.length) return;
-  const body = document.body;
-  const colorCache = new Map();
-  const fallbackRgb = "112, 238, 255";
-  let activeMoodId = 0;
-  let clearMoodTimer = null;
-
-  const clamp = (value) => Math.max(0, Math.min(255, Math.round(value)));
-  const extractUrl = (cssUrlValue) => {
-    const match = cssUrlValue.match(/url\((['"]?)(.*?)\1\)/);
-    return match ? match[2] : null;
-  };
-
-  const colorFromImage = (url) => new Promise((resolve) => {
-    if (!url) {
-      resolve(fallbackRgb);
-      return;
-    }
-    if (colorCache.has(url)) {
-      resolve(colorCache.get(url));
-      return;
-    }
-
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    image.onload = () => {
-      try {
-        const canvas = document.createElement("canvas");
-        const side = 26;
-        canvas.width = side;
-        canvas.height = side;
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        if (!ctx) throw new Error("Canvas 2D context unavailable");
-
-        ctx.drawImage(image, 0, 0, side, side);
-        const pixels = ctx.getImageData(0, 0, side, side).data;
-        let red = 0;
-        let green = 0;
-        let blue = 0;
-        let weightTotal = 0;
-
-        for (let i = 0; i < pixels.length; i += 4) {
-          const alpha = pixels[i + 3] / 255;
-          if (alpha < 0.12) continue;
-          const luma = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
-          const contrastWeight = 0.55 + (Math.abs(128 - luma) / 255) * 0.45;
-          const weight = alpha * contrastWeight;
-          red += pixels[i] * weight;
-          green += pixels[i + 1] * weight;
-          blue += pixels[i + 2] * weight;
-          weightTotal += weight;
-        }
-
-        if (!weightTotal) throw new Error("No visible pixels");
-        const r = clamp((red / weightTotal) * 1.08 + 8);
-        const g = clamp((green / weightTotal) * 1.06 + 6);
-        const b = clamp((blue / weightTotal) * 1.08 + 8);
-        const rgb = `${r}, ${g}, ${b}`;
-        colorCache.set(url, rgb);
-        resolve(rgb);
-      } catch {
-        colorCache.set(url, fallbackRgb);
-        resolve(fallbackRgb);
-      }
-    };
-    image.onerror = () => {
-      colorCache.set(url, fallbackRgb);
-      resolve(fallbackRgb);
-    };
-    image.src = url;
-  });
-
-  const applyMood = (rgb) => {
-    if (clearMoodTimer) {
-      window.clearTimeout(clearMoodTimer);
-      clearMoodTimer = null;
-    }
-    body.style.setProperty("--menu-hover-rgb", rgb);
-    body.style.setProperty("--menu-neon-rgb", rgb);
-    body.classList.add("menu-photo-hover");
-  };
-
-  const activateMood = async (card) => {
-    activeMoodId += 1;
-    const moodId = activeMoodId;
-    const photo = getComputedStyle(card).getPropertyValue("--dish-photo").trim();
-    const photoUrl = extractUrl(photo);
-    const rgb = await colorFromImage(photoUrl);
-    if (moodId !== activeMoodId) return;
-    applyMood(rgb);
-  };
-
-  const deactivateMood = () => {
-    if (document.querySelector(".menu-card--menu:hover, .menu-card--menu:focus-within")) return;
-    activeMoodId += 1;
-    body.classList.remove("menu-photo-hover");
-    if (clearMoodTimer) {
-      window.clearTimeout(clearMoodTimer);
-    }
-    // Keep current color during fade-out to avoid bright flicker.
-    clearMoodTimer = window.setTimeout(() => {
-      if (document.querySelector(".menu-card--menu:hover, .menu-card--menu:focus-within")) return;
-      body.style.removeProperty("--menu-hover-rgb");
-      body.style.removeProperty("--menu-neon-rgb");
-      clearMoodTimer = null;
-    }, 760);
-  };
-
-  cards.forEach((card) => {
-    card.addEventListener("mouseenter", () => activateMood(card));
-    card.addEventListener("mouseleave", () => window.setTimeout(deactivateMood, 30));
-    card.addEventListener("focusin", () => activateMood(card));
-    card.addEventListener("focusout", () => window.setTimeout(deactivateMood, 30));
-  });
-};
-
-// Bottom navigation: animated focus fill between tabs
-const setupBottomNavMotion = () => {
-  const nav = document.querySelector(".bottom-nav");
-  if (!nav) return;
-  const items = Array.from(nav.querySelectorAll(".bottom-nav__item"));
-  if (!items.length) return;
-
-  const indicator = document.createElement("span");
-  indicator.className = "bottom-nav__indicator";
-  nav.prepend(indicator);
-
-  const moveIndicator = (target, instant = false) => {
-    const navRect = nav.getBoundingClientRect();
-    const itemRect = target.getBoundingClientRect();
-    const left = itemRect.left - navRect.left;
-    indicator.classList.toggle("is-no-anim", instant);
-    indicator.style.width = `${itemRect.width}px`;
-    indicator.style.transform = `translateX(${left}px)`;
-    indicator.style.opacity = "1";
-    if (instant) {
-      window.requestAnimationFrame(() => indicator.classList.remove("is-no-anim"));
-    }
-  };
-
-  const setActive = (target, instant = false) => {
-    items.forEach((item) => item.classList.remove("bottom-nav__item--active"));
-    target.classList.add("bottom-nav__item--active");
-    moveIndicator(target, instant);
-  };
-
-  // Trigger a stronger neon pulse on tab switch, even before page navigation.
-  const pulseNavItem = (target) => {
-    target.classList.remove("is-neon-pulse");
-    // Force reflow to restart animation on repeated quick clicks.
-    void target.offsetWidth;
-    target.classList.add("is-neon-pulse");
-    window.setTimeout(() => target.classList.remove("is-neon-pulse"), 1660);
-  };
-
-  const path = window.location.pathname;
-  const getItemPath = (item) => {
-    try {
-      return new URL(item.getAttribute("href"), window.location.origin).pathname;
-    } catch {
-      return "";
-    }
-  };
-  const profileLikePaths = new Set(["/profile", "/login", "/register", "/checkout", "/payment"]);
-
-  const resolveActiveNavItem = () => {
-    const explicitActive = items.find((item) => item.classList.contains("bottom-nav__item--active"));
-    if (explicitActive) return explicitActive;
-
-    const exactPathMatch = items.find((item) => getItemPath(item) === path);
-    if (exactPathMatch) return exactPathMatch;
-
-    if (profileLikePaths.has(path) || path.startsWith("/orders")) {
-      const profileItem = items.find((item) => getItemPath(item) === "/profile");
-      if (profileItem) return profileItem;
-    }
-
-    const homeItem = items.find((item) => getItemPath(item) === "/");
-    return homeItem || items[0];
-  };
-
-  const active = resolveActiveNavItem();
-  setActive(active, true);
-
-  items.forEach((item) => {
-    // Start pulse on press so effect is visible on the first tap.
-    item.addEventListener("pointerdown", () => {
-      pulseNavItem(item);
-    });
-
-    item.addEventListener("click", (event) => {
-      const isMainClick = event.button === 0;
-      const hasModifier = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
-      const href = item.getAttribute("href");
-      if (!isMainClick || hasModifier || !href) return;
-      event.preventDefault();
-      setActive(item);
-      pulseNavItem(item);
-      // Keep tab transition long enough for pulse to be noticeable.
-      window.setTimeout(() => {
-        window.location.href = href;
-      }, 300);
-    });
-  });
-
-  window.addEventListener("resize", () => {
-    const current = items.find((item) => item.classList.contains("bottom-nav__item--active")) || items[0];
-    moveIndicator(current, true);
-  });
-};
-
-// Hall map interactions: hover/tooltip, booking panel, time scale
-const setupTableTooltip = () => {
-  const tooltip = document.getElementById("tableTooltip");
-  if (!tooltip) return;
-
-  const hallMap = document.querySelector(".hall__map");
-  const bookingPanel = document.getElementById("bookingPanel");
-  const bookingTableId = document.getElementById("bookingTableId");
-  const bookingTableSeats = document.getElementById("bookingTableSeats");
-  const bookingInfo = document.getElementById("bookingInfo");
-  const bookingSummary = document.getElementById("bookingSummary");
-  const bookingCancel = document.getElementById("bookingCancel");
-  const bookingSubmit = document.getElementById("bookingSubmit");
-  const bookingDate = document.getElementById("bookingDate");
-  const bookingTime = document.getElementById("bookingTime");
-  const bookingName = document.getElementById("bookingName");
-  const bookingDateTop = document.getElementById("bookingDateTop");
-  const bookingDateMobile = document.getElementById("bookingDateMobile");
-  const bookingDateMobilePicker = document.getElementById("bookingDateMobilePicker");
-  const bookingDateMobileError = document.getElementById("bookingDateMobileError");
-  const bookingDateSummary = document.getElementById("bookingDateSummary");
-  const bookingTimeSummary = document.getElementById("bookingTimeSummary");
-  const openDateTimeSheet = document.getElementById("openDateTimeSheet");
-  const dateTimeSheet = document.getElementById("dateTimeSheet");
-  const dateTimeClose = document.getElementById("dateTimeClose");
-  const dateTimeApply = document.getElementById("dateTimeApply");
-  const sheetBackdrop = document.getElementById("sheetBackdrop");
-  const neon = document.getElementById("hallNeon");
-  const timeScale = document.getElementById("timeScale");
-  const timeScaleMobile = document.getElementById("timeScaleMobile");
-
-  const timeScales = [timeScale, timeScaleMobile].filter(Boolean);
-  const timelineIndicators = new Map();
-  timeScales.forEach((scaleNode) => {
-    const indicator = document.createElement("div");
-    indicator.className = "timeline__active-indicator";
-    scaleNode.prepend(indicator);
-    timelineIndicators.set(scaleNode, indicator);
-  });
-
-  const isMobileViewport = () => window.matchMedia("(max-width: 767px)").matches;
-
-  const pad = (value) => String(value).padStart(2, "0");
-  const toDateInput = (date) =>
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-  const toTimeInput = (date) => `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  const formatDateDisplay = (value) => {
-    if (!value || !value.includes("-")) return value || "-";
-    const [year, month, day] = value.split("-");
-    return `${day}.${month}.${year}`;
-  };
-  const isoToMaskedDate = (value) => formatDateDisplay(value);
-  const maskedToIsoDate = (maskedValue) => {
-    const parts = String(maskedValue || "").trim().split(".");
-    if (parts.length !== 3) return null;
-    const [dayRaw, monthRaw, yearRaw] = parts;
-    if (dayRaw.length !== 2 || monthRaw.length !== 2 || yearRaw.length !== 4) return null;
-    const day = Number(dayRaw);
-    const month = Number(monthRaw);
-    const year = Number(yearRaw);
-    if (!Number.isInteger(day) || !Number.isInteger(month) || !Number.isInteger(year)) return null;
-    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-    const candidate = `${yearRaw}-${monthRaw}-${dayRaw}`;
-    const parsed = new Date(`${candidate}T00:00:00`);
-    if (Number.isNaN(parsed.getTime())) return null;
-    if (toDateInput(parsed) !== candidate) return null;
-    return candidate;
-  };
-  const applyDateMask = (rawValue) => {
-    const digits = String(rawValue || "").replace(/\D/g, "").slice(0, 8);
-    if (!digits) return "";
-    if (digits.length <= 2) return digits;
-    if (digits.length <= 4) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
-    return `${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4)}`;
-  };
-
-  let selectedTableId = null;
-  let selectedTableLabel = "";
-  let isDateValid = true;
-
-  const setBackdropVisible = (isVisible) => {
-    if (!sheetBackdrop) return;
-    sheetBackdrop.hidden = !isVisible;
-    sheetBackdrop.classList.toggle("is-open", isVisible);
-  };
-
-  const updateDateValidation = ({ candidateIso = bookingDate?.value || "", rawMasked = "" } = {}) => {
-    const today = toDateInput(new Date());
-    const currentTime = bookingTime?.value || "";
-    const hasTime = /^\d{2}:\d{2}$/.test(currentTime);
-    let valid = Boolean(candidateIso) && candidateIso >= today;
-    let errorText = "";
-    let timeValid = hasTime;
-    let selectedIsPast = false;
-    if (valid && hasTime) {
-      const selectedMoment = new Date(`${candidateIso}T${currentTime}`);
-      if (!Number.isNaN(selectedMoment.getTime()) && selectedMoment < new Date()) {
-        selectedIsPast = true;
-        timeValid = false;
-      }
-    }
-    if (rawMasked && !candidateIso) {
-      valid = false;
-      errorText = "Введите дату в формате ДД.ММ.ГГГГ.";
-    } else if (candidateIso && candidateIso < today) {
-      valid = false;
-      errorText = "Дата не может быть раньше сегодняшней.";
-    } else if (!candidateIso || !valid) {
-      valid = false;
-      errorText = "Укажите дату бронирования.";
-    } else if (!hasTime) {
-      valid = false;
-      timeValid = false;
-      errorText = "Укажите время бронирования.";
-    } else if (selectedIsPast) {
-      valid = false;
-      errorText = "Время не может быть в прошлом.";
-    }
-    isDateValid = valid;
-    if (bookingDateMobileError) {
-      bookingDateMobileError.textContent = valid ? "" : errorText;
-    }
-    bookingDate?.classList.toggle("is-invalid", !valid);
-    bookingDateTop?.classList.toggle("is-invalid", !valid);
-    bookingDateMobile?.classList.toggle("is-invalid", !valid);
-    bookingTime?.classList.toggle("is-invalid", !timeValid);
-    if (dateTimeApply) dateTimeApply.disabled = !valid;
-    if (bookingSubmit) bookingSubmit.disabled = !valid;
-    return valid;
-  };
-
-  const isSelectedDateTimeInPast = () => {
-    const dateValue = bookingDate?.value;
-    const timeValue = bookingTime?.value;
-    if (!dateValue || !timeValue) return false;
-    const selectedMoment = new Date(`${dateValue}T${timeValue}`);
-    if (Number.isNaN(selectedMoment.getTime())) return false;
-    return selectedMoment < new Date();
-  };
-
-  const setAllTablesReserved = (reserved) => {
-    document.querySelectorAll(".table").forEach((table) => {
-      table.classList.toggle("table--reserved", reserved);
-      table.classList.toggle("table--free", !reserved);
-    });
-  };
-
-  const syncSummaryLine = () => {
-    if (bookingDateSummary) bookingDateSummary.textContent = formatDateDisplay(bookingDate?.value || "");
-    if (bookingTimeSummary) bookingTimeSummary.textContent = bookingTime?.value || "-";
-  };
-
-  const syncBookingSummary = () => {
-    if (!bookingSummary) return;
-    if (!selectedTableId) {
-      bookingSummary.textContent = "Выберите свободный столик на схеме.";
-      return;
-    }
-    bookingSummary.textContent = `${selectedTableLabel || selectedTableId} • ${formatDateDisplay(
-      bookingDate?.value || ""
-    )} • ${bookingTime?.value || "-"}`;
-  };
-
-  const setDateValue = (nextDate, source = "") => {
-    if (!nextDate) return;
-    if (bookingDate && bookingDate.value !== nextDate) bookingDate.value = nextDate;
-    if (bookingDateTop && source !== "top" && bookingDateTop.value !== nextDate) bookingDateTop.value = nextDate;
-    const maskedDate = isoToMaskedDate(nextDate);
-    if (bookingDateMobile && source !== "mobile" && bookingDateMobile.value !== maskedDate) {
-      bookingDateMobile.value = maskedDate;
-    }
-    if (bookingDateMobilePicker && source !== "picker" && bookingDateMobilePicker.value !== nextDate) {
-      bookingDateMobilePicker.value = nextDate;
-    }
-    updateDateValidation();
-    syncSummaryLine();
-    syncBookingSummary();
-  };
-
-  const setTimeValue = (nextTime) => {
-    if (!nextTime || !bookingTime) return;
-    if (bookingTime.value !== nextTime) bookingTime.value = nextTime;
-    updateDateValidation();
-    syncSummaryLine();
-    syncBookingSummary();
-  };
-
-  const closeDateTimeSheet = () => {
-    dateTimeSheet?.classList.remove("is-open");
-    dateTimeSheet?.setAttribute("aria-hidden", "true");
-    if (!bookingPanel?.classList.contains("is-open")) setBackdropVisible(false);
-  };
-
-  const openDateTimeSheetPanel = () => {
-    if (!dateTimeSheet) return;
-    dateTimeSheet.classList.add("is-open");
-    dateTimeSheet.setAttribute("aria-hidden", "false");
-    setBackdropVisible(true);
-  };
-
-  const closeBookingPanel = () => {
-    bookingPanel?.classList.remove("is-open");
-    bookingPanel?.setAttribute("aria-hidden", "true");
-    hallMap?.classList.remove("is-blurred-strong");
-    hallMap?.classList.remove("is-booking");
-    hallMap?.classList.remove("is-typing");
-    if (!dateTimeSheet?.classList.contains("is-open")) setBackdropVisible(false);
-    selectedTableId = null;
-    selectedTableLabel = "";
-    syncBookingSummary();
-  };
-
-  const openBookingPanel = () => {
-    closeDateTimeSheet();
-    bookingPanel?.classList.add("is-open");
-    bookingPanel?.setAttribute("aria-hidden", "false");
-    hallMap?.classList.add("is-blurred-strong");
-    hallMap?.classList.add("is-booking");
-    setBackdropVisible(isMobileViewport());
-  };
-
-  const updateDateTimeLimits = () => {
-    if (!bookingDate || !bookingTime) return;
-    const now = new Date();
-    const today = toDateInput(now);
-    bookingDate.min = today;
-    if (bookingDateTop) bookingDateTop.min = today;
-    if (bookingDateMobilePicker) bookingDateMobilePicker.min = today;
-
-    if (!bookingDate.value) setDateValue(today, "booking");
-    if (!bookingDateTop?.value && bookingDateTop) bookingDateTop.value = bookingDate.value;
-    if (!bookingDateMobile?.value && bookingDateMobile) bookingDateMobile.value = isoToMaskedDate(bookingDate.value);
-    if (!bookingDateMobilePicker?.value && bookingDateMobilePicker) bookingDateMobilePicker.value = bookingDate.value;
-
-    if (bookingDate.value === today) {
-      bookingTime.min = toTimeInput(now);
-      if (!bookingTime.value || bookingTime.value < bookingTime.min) {
-        setTimeValue(toTimeInput(now));
-      }
-    } else {
-      bookingTime.min = "00:00";
-      if (!bookingTime.value) setTimeValue("12:00");
-    }
-
-    updateDateValidation();
-    syncSummaryLine();
-    syncBookingSummary();
-  };
-
-  const refreshAvailability = async () => {
-    if (!bookingDate?.value || !bookingTime?.value) return;
-    if (isSelectedDateTimeInPast()) {
-      setAllTablesReserved(true);
-      updateDateValidation();
-      return;
-    }
-    const params = new URLSearchParams({ date: bookingDate.value, time: bookingTime.value });
-    const response = await fetch(`/availability?${params.toString()}`);
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || !result.ok) return;
-
-    document.querySelectorAll(".table").forEach((table) => {
-      const id = Number(table.dataset.id);
-      if (result.reserved.includes(id)) {
-        table.classList.remove("table--free");
-        table.classList.add("table--reserved");
-      } else {
-        table.classList.remove("table--reserved");
-        table.classList.add("table--free");
-      }
-    });
-  };
-
-  const timeToMinutes = (value) => {
-    if (!value) return null;
-    const parts = value.split(":");
-    if (parts.length < 2) return null;
-    return Number(parts[0]) * 60 + Number(parts[1]);
-  };
-
-  const updatePastSlots = () => {
-    if (!bookingDate?.value) return;
-    const now = new Date();
-    const today = toDateInput(now);
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    timeScales.forEach((scaleNode) => {
-      scaleNode.querySelectorAll(".timeline__slot").forEach((slot) => {
-        const slotMinutes = timeToMinutes(slot.dataset.time);
-        const isPast =
-          bookingDate.value === today &&
-          slotMinutes !== null &&
-          slotMinutes < nowMinutes;
-        slot.classList.toggle("timeline__slot--past", isPast);
-        slot.dataset.past = isPast ? "1" : "0";
-      });
-    });
-  };
-
-  const markActiveTime = () => {
-    if (!bookingTime?.value) return;
-    const value = bookingTime.value;
-    timeScales.forEach((scaleNode) => {
-      const slots = scaleNode.querySelectorAll(".timeline__slot");
-      slots.forEach((slot) => {
-        slot.classList.toggle("is-active", slot.dataset.time === value);
-      });
-      const indicator = timelineIndicators.get(scaleNode);
-      if (!indicator) return;
-      const activeSlot = Array.from(slots).find((slot) => slot.dataset.time === value);
-      if (!activeSlot) return;
-      indicator.style.height = `${activeSlot.offsetHeight}px`;
-      indicator.style.transform = `translateY(${activeSlot.offsetTop}px)`;
-      indicator.style.opacity = "1";
-    });
-    syncSummaryLine();
-    syncBookingSummary();
-  };
-
-  const setTimeMood = () => {
-    if (!bookingTime?.value) return;
-    const hour = Number(bookingTime.value.split(":")[0]);
-    const hourColors = {
-      9: "#5C2A27",
-      10: "#63302B",
-      11: "#6A362F",
-      12: "#7A4033",
-      13: "#874836",
-      14: "#92503A",
-      15: "#9B583E",
-      16: "#8F4A36",
-      17: "#824132",
-      18: "#76382E",
-      19: "#6A312A",
-      20: "#5E2A24",
-      21: "#51231E",
-      22: "#441C18",
-    };
-    const clampedHour = Math.max(9, Math.min(22, hour));
-    const tone = hourColors[clampedHour] || hourColors[9];
-    const hexToRgb = (hex) => {
-      const normalized = hex.replace("#", "");
-      const value = Number.parseInt(normalized, 16);
-      const r = (value >> 16) & 255;
-      const g = (value >> 8) & 255;
-      const b = value & 255;
-      return `${r}, ${g}, ${b}`;
-    };
-    document.body.style.setProperty("--time-bg-color", tone);
-    document.body.style.setProperty("--time-bg-rgb", hexToRgb(tone));
-  };
-
-  const syncTimeFromScroll = (scaleNode) => {
-    if (!scaleNode || !bookingTime) return;
-    const slots = Array.from(scaleNode.querySelectorAll(".timeline__slot"));
-    const rect = scaleNode.getBoundingClientRect();
-    const center = rect.top + rect.height / 2;
-    let closest = null;
-    let closestDist = Infinity;
-    slots.forEach((slot) => {
-      const r = slot.getBoundingClientRect();
-      const dist = Math.abs(r.top + r.height / 2 - center);
-      if (dist < closestDist) {
-        closestDist = dist;
-        closest = slot;
-      }
-    });
-    if (closest) {
-      let target = closest;
-      if (target.dataset.past === "1") {
-        target = slots.find((slot) => slot.dataset.past !== "1") || closest;
-      }
-      if (bookingTime.value !== target.dataset.time) {
-        setTimeValue(target.dataset.time);
-        markActiveTime();
-        setTimeMood();
-        refreshAvailability();
-      }
-    }
-  };
-
-  document.querySelectorAll(".table").forEach((table) => {
-    const label = table.dataset.label;
-    const seats = table.dataset.seats;
-    const windowSide = table.dataset.window;
-    const isFreeNow = () => table.classList.contains("table--free");
-
-    table.addEventListener("mouseenter", () => {
-      if (isMobileViewport()) return;
-      const isFree = isFreeNow();
-      if (neon && hallMap) {
-        const mapRect = hallMap.getBoundingClientRect();
-        const rect = table.getBoundingClientRect();
-        const x = ((rect.left + rect.width / 2 - mapRect.left) / mapRect.width) * 100;
-        const y = ((rect.top + rect.height / 2 - mapRect.top) / mapRect.height) * 100;
-        neon.style.setProperty("--neon-x", `${x}%`);
-        neon.style.setProperty("--neon-y", `${y}%`);
-        neon.classList.toggle("is-red", !isFree);
-        neon.classList.add("is-visible");
-      }
-      tooltip.innerHTML = `
-        <strong>${label}</strong><br />
-        Мест: ${seats}<br />
-        У окна: ${windowSide}
-      `;
-      if (isFree) {
-        tooltip.classList.add("is-visible");
-        hallMap?.classList.add("is-blurred");
-        table.classList.add("table--hovered");
-      }
-    });
-
-    table.addEventListener("mousemove", (event) => {
-      if (isMobileViewport()) return;
-      tooltip.style.left = `${event.clientX}px`;
-      tooltip.style.top = `${event.clientY - 18}px`;
-    });
-
-    table.addEventListener("mouseleave", () => {
-      if (isMobileViewport()) return;
-      tooltip.classList.remove("is-visible");
-      hallMap?.classList.remove("is-blurred");
-      table.classList.remove("table--hovered");
-      neon?.classList.remove("is-visible");
-    });
-
-    table.addEventListener("click", () => {
-      if (!isFreeNow()) return;
-      selectedTableId = table.dataset.id;
-      selectedTableLabel = table.dataset.label || table.dataset.id;
-      bookingTableId.textContent = table.querySelector(".table__top")?.textContent || "";
-      bookingTableSeats.textContent = `${seats} места`;
-      bookingInfo.textContent = `Столик у окна: ${windowSide}`;
-      openBookingPanel();
-      tooltip.classList.remove("is-visible");
-      table.classList.add("table--hovered");
-      updateDateTimeLimits();
-      syncBookingSummary();
-      refreshAvailability();
-    });
-  });
-
-  bookingCancel?.addEventListener("click", closeBookingPanel);
-
-  bookingSubmit?.addEventListener("click", async () => {
-    if (!selectedTableId) return;
-    if (!isDateValid) {
-      bookingInfo.textContent = "Укажите корректную дату.";
-      return;
-    }
-    const dateValue = bookingDate?.value;
-    const timeValue = bookingTime?.value;
-    const nameValue = bookingName?.value?.trim();
-
-    if (!dateValue || !timeValue || !nameValue) {
-      bookingInfo.textContent = "Заполните дату, время и имя.";
-      return;
-    }
-
-    const now = new Date();
-    const selected = new Date(`${dateValue}T${timeValue}`);
-    if (selected < now) {
-      bookingInfo.textContent = "Время не может быть в прошлом.";
-      return;
-    }
-
-    bookingInfo.textContent = "Сохраняем бронь...";
-    const csrfToken = getCsrfToken();
-    const response = await fetch("/book", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
-      },
-      body: JSON.stringify({
-        table_id: Number(selectedTableId),
-        date: dateValue,
-        time: timeValue,
-        name: nameValue,
-      }),
-    });
-
-    const result = await response.json().catch(() => ({}));
-    if (response.status === 401) {
-      bookingInfo.textContent = "Войдите в аккаунт, чтобы забронировать.";
-      window.location.href = "/login";
-      return;
-    }
-    if (!response.ok) {
-      bookingInfo.textContent = result.error || "Не удалось сохранить бронь.";
-      return;
-    }
-
-    const table = document.querySelector(`.table[data-id="${selectedTableId}"]`);
-    if (table) {
-      table.classList.remove("table--free");
-      table.classList.add("table--reserved");
-    }
-    bookingInfo.textContent = "Бронь подтверждена.";
-    window.location.href = "/";
-  });
-
-  [bookingDate, bookingTime, bookingName].forEach((field) => {
-    if (!field) return;
-    field.addEventListener("focus", () => {
-      hallMap?.classList.add("is-typing");
-    });
-    field.addEventListener("blur", () => {
-      const active = document.activeElement;
-      const isInside = bookingPanel && active && bookingPanel.contains(active);
-      if (!isInside) hallMap?.classList.remove("is-typing");
-    });
-  });
-
-  bookingDate?.addEventListener("change", () => {
-    setDateValue(bookingDate.value, "booking");
-    updateDateTimeLimits();
-    updatePastSlots();
-    refreshAvailability();
-  });
-
-  bookingTime?.addEventListener("change", () => {
-    setTimeValue(bookingTime.value);
-    updateDateTimeLimits();
-    markActiveTime();
-    setTimeMood();
-    refreshAvailability();
-  });
-
-  bookingDateTop?.addEventListener("change", () => {
-    setDateValue(bookingDateTop.value, "top");
-    updateDateTimeLimits();
-    updatePastSlots();
-    refreshAvailability();
-  });
-
-  bookingDateMobile?.addEventListener("input", () => {
-    bookingDateMobile.value = applyDateMask(bookingDateMobile.value);
-    const parsedIso = maskedToIsoDate(bookingDateMobile.value);
-    if (parsedIso) {
-      setDateValue(parsedIso, "mobile");
-      updateDateTimeLimits();
-      updatePastSlots();
-      refreshAvailability();
-      return;
-    }
-    updateDateValidation({ candidateIso: null, rawMasked: bookingDateMobile.value });
-  });
-
-  bookingDateMobile?.addEventListener("blur", () => {
-    const parsedIso = maskedToIsoDate(bookingDateMobile.value);
-    if (parsedIso) {
-      setDateValue(parsedIso, "mobile");
-      return;
-    }
-    updateDateValidation({ candidateIso: null, rawMasked: bookingDateMobile.value });
-  });
-
-  bookingDateMobile?.addEventListener("focus", () => {
-    if (!isMobileViewport()) return;
-    if (!bookingDateMobilePicker) return;
-    try {
-      if (typeof bookingDateMobilePicker.showPicker === "function") {
-        bookingDateMobilePicker.showPicker();
-      } else {
-        bookingDateMobilePicker.click();
-      }
-    } catch {
-      bookingDateMobilePicker.click();
-    }
-  });
-
-  bookingDateMobilePicker?.addEventListener("change", () => {
-    const pickerDate = bookingDateMobilePicker.value;
-    if (!pickerDate) return;
-    setDateValue(pickerDate, "picker");
-    updateDateTimeLimits();
-    updatePastSlots();
-    refreshAvailability();
-  });
-
-  const bindScaleInteractions = (scaleNode) => {
-    if (!scaleNode) return;
-    scaleNode.addEventListener("scroll", () => {
-      window.clearTimeout(scaleNode._t);
-      scaleNode._t = window.setTimeout(() => syncTimeFromScroll(scaleNode), 80);
-    });
-    scaleNode.addEventListener("click", (event) => {
-      const slot = event.target.closest(".timeline__slot");
-      if (!slot || slot.dataset.past === "1") return;
-      setTimeValue(slot.dataset.time);
-      markActiveTime();
-      setTimeMood();
-      refreshAvailability();
-    });
-  };
-
-  bindScaleInteractions(timeScale);
-  bindScaleInteractions(timeScaleMobile);
-
-  openDateTimeSheet?.addEventListener("click", openDateTimeSheetPanel);
-  dateTimeClose?.addEventListener("click", closeDateTimeSheet);
-  dateTimeApply?.addEventListener("click", () => {
-    if (!updateDateValidation()) return;
-    closeDateTimeSheet();
-  });
-
-  sheetBackdrop?.addEventListener("click", () => {
-    if (dateTimeSheet?.classList.contains("is-open")) {
-      closeDateTimeSheet();
-      return;
-    }
-    if (bookingPanel?.classList.contains("is-open")) {
-      closeBookingPanel();
-    }
-  });
-
-  window.addEventListener("resize", () => {
-    if (!isMobileViewport()) {
-      closeDateTimeSheet();
-      setBackdropVisible(false);
-    } else if (bookingPanel?.classList.contains("is-open") || dateTimeSheet?.classList.contains("is-open")) {
-      setBackdropVisible(true);
-    }
-  });
-
-  updateDateTimeLimits();
-  syncSummaryLine();
-  syncBookingSummary();
-  refreshAvailability();
-  markActiveTime();
-  setTimeMood();
-  updatePastSlots();
-  if (bookingDateTop) bookingDateTop.value = bookingDate?.value || "";
-  if (bookingDateMobile) bookingDateMobile.value = isoToMaskedDate(bookingDate?.value || "");
-  if (bookingDateMobilePicker) bookingDateMobilePicker.value = bookingDate?.value || "";
-  updateDateValidation();
-};
-
-const setupOrderStatusBar = () => {
-  const bar = document.getElementById("orderStatusBar");
-  if (!bar) return;
-
-  const secondaryRow = document.getElementById("orderStatusSecondary");
-  const secondaryTextNode = document.getElementById("orderStatusSecondaryText");
-  const iconNode = document.getElementById("orderStatusIcon");
-  const titleNode = document.getElementById("orderStatusTitle");
-  const orderNode = document.getElementById("orderStatusOrder");
-  const moreNode = document.getElementById("orderStatusMore");
-  const textNode = document.getElementById("orderStatusText");
-  const timerNode = document.getElementById("orderStatusTimer");
-  const progressNode = document.getElementById("orderStatusProgress");
-  const expandedNode = document.getElementById("orderStatusExpanded");
-  const listNode = document.getElementById("orderStatusList");
-
-  const rawOrders = bar.dataset.orders || "[]";
-  let initialOrders = [];
-  try {
-    initialOrders = JSON.parse(rawOrders);
-  } catch {
-    initialOrders = [];
-  }
-  if (!Array.isArray(initialOrders) || !initialOrders.length) return;
-
-  const phasePriority = { served: 0, delivering: 1, preparing: 2 };
-  const phases = [
-    {
-      key: "preparing",
-      duration: 15 * 60,
-      icon: "/static/img/frying-pan-svgrepo-com.svg",
-      title: "Готовится",
-      primary: () => "Осталось",
-      secondary: (timer) => `Следующий заказ готовится • ${timer}`,
-      secondaryShort: (timer) => `Следующий: заказ готовится • ${timer}`,
-      rowTitle: "Готовится",
-    },
-    {
-      key: "delivering",
-      duration: 60,
-      icon: "/static/img/waiter.svg",
-      title: "Заказ несут",
-      primary: () => "Сейчас принесём",
-      secondary: (timer) => `Следующий: заказ несут • ${timer}`,
-      secondaryShort: (timer) => `Следующий: заказ несут • ${timer}`,
-      rowTitle: "Заказ несут",
-    },
-    {
-      key: "served",
-      duration: 60,
-      icon: "✓",
-      title: "Заказ выдан",
-      primary: () => "Можно забирать",
-      secondary: (timer) => `Следующий: заказ выдан • ${timer}`,
-      secondaryShort: (timer) => `Следующий: заказ выдан • ${timer}`,
-      rowTitle: "Заказ выдан",
-    },
-  ];
-  const totalDuration = phases.reduce((sum, phase) => sum + phase.duration, 0);
-  const phaseOffsets = [];
-  let offset = 0;
-  for (const phase of phases) {
-    phaseOffsets.push({ ...phase, start: offset, end: offset + phase.duration });
-    offset += phase.duration;
-  }
-
-  let isExpanded = false;
-  let lastPrimarySignature = "";
-  let timerId = null;
-
-  const formatTimer = (seconds) => {
-    const safe = Math.max(0, Math.floor(seconds));
-    const mm = String(Math.floor(safe / 60)).padStart(2, "0");
-    const ss = String(safe % 60).padStart(2, "0");
-    return `${mm}:${ss}`;
-  };
-
-  const resolveOrder = (order) => {
-    const cycleStartedAtMs = Date.parse(order?.cycle_started_at || "");
-    if (!Number.isFinite(cycleStartedAtMs)) return null;
-    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - cycleStartedAtMs) / 1000));
-    if (elapsedSeconds >= totalDuration) return null;
-
-    for (const phase of phaseOffsets) {
-      if (elapsedSeconds < phase.end) {
-        const phaseElapsed = elapsedSeconds - phase.start;
-        const remaining = Math.max(0, phase.duration - phaseElapsed);
-        const timer = formatTimer(remaining);
-        return {
-          orderId: order.order_id,
-          key: phase.key,
-          icon: phase.icon,
-          title: phase.title,
-          remainingSeconds: remaining,
-          timer,
-          primaryText: phase.primary(timer),
-          secondaryText: phase.secondary(timer),
-          secondaryShortText: phase.secondaryShort(timer),
-          rowText: `Заказ №${order.order_id} — ${phase.rowTitle} • ${timer}`,
-          progressRatio: phase.duration ? phaseElapsed / phase.duration : 1,
-        };
-      }
-    }
-    return null;
-  };
-
-  const resolveAllActive = () => {
-    const active = [];
-    for (const order of initialOrders) {
-      const state = resolveOrder(order);
-      if (state) active.push(state);
-    }
-    active.sort((a, b) => {
-      const phaseDiff = (phasePriority[a.key] ?? 99) - (phasePriority[b.key] ?? 99);
-      if (phaseDiff !== 0) return phaseDiff;
-      const remainDiff = a.remainingSeconds - b.remainingSeconds;
-      if (remainDiff !== 0) return remainDiff;
-      return (a.orderId || 0) - (b.orderId || 0);
-    });
-    return active;
-  };
-
-  const setExpanded = (nextExpanded) => {
-    isExpanded = Boolean(nextExpanded);
-    bar.classList.toggle("is-expanded", isExpanded);
-    bar.setAttribute("aria-expanded", isExpanded ? "true" : "false");
-    if (expandedNode) expandedNode.hidden = !isExpanded;
-  };
-
-  const toggleExpanded = () => {
-    if (!resolveAllActive().length) return;
-    setExpanded(!isExpanded);
-  };
-
-  bar.addEventListener("click", () => toggleExpanded());
-  bar.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    toggleExpanded();
-  });
-
-  const removeStatusBar = () => {
-    if (timerId) {
-      window.clearInterval(timerId);
-      timerId = null;
-    }
-    bar.classList.add("is-exiting");
-    const container = bar.closest(".order-status-section");
-    window.setTimeout(() => {
-      if (container) container.remove();
-    }, 260);
-  };
-
-  const renderExpandedList = (states) => {
-    if (!listNode) return;
-    const visible = states.slice(0, 3);
-    listNode.innerHTML = visible
-      .map((item) => `<div class="order-status-bar__row">${item.rowText}</div>`)
-      .join("");
-  };
-
-  const render = () => {
-    const active = resolveAllActive();
-    if (!active.length) {
-      removeStatusBar();
-      return false;
-    }
-
-    const primary = active[0];
-    const next = active[1] || null;
-    const moreCount = Math.max(0, active.length - 1);
-    const signature = `${primary.orderId}:${primary.key}`;
-
-    if (signature !== lastPrimarySignature) {
-      bar.classList.remove("is-phase-changing");
-      void bar.offsetWidth;
-      bar.classList.add("is-phase-changing");
-      window.setTimeout(() => bar.classList.remove("is-phase-changing"), 240);
-      lastPrimarySignature = signature;
-    }
-
-    bar.dataset.phase = primary.key;
-    if (iconNode) {
-      if (typeof primary.icon === "string" && primary.icon.startsWith("/static/")) {
-        iconNode.innerHTML = `<img src="${primary.icon}" alt="" />`;
-      } else {
-        iconNode.textContent = primary.icon;
-      }
-    }
-    if (titleNode) titleNode.textContent = primary.title;
-    if (orderNode) orderNode.textContent = `Заказ №${primary.orderId}`;
-    if (textNode) textNode.textContent = primary.primaryText;
-    if (timerNode) timerNode.textContent = primary.timer;
-    if (progressNode) {
-      progressNode.style.width = `${Math.max(0, Math.min(1, primary.progressRatio)) * 100}%`;
-      progressNode.classList.toggle("is-pulse", primary.key === "delivering");
-    }
-
-    if (secondaryRow && secondaryTextNode) {
-      if (next) {
-        secondaryRow.hidden = false;
-        secondaryTextNode.textContent = next.key === "preparing" ? next.secondaryText : next.secondaryShortText;
-      } else {
-        secondaryRow.hidden = true;
-      }
-    }
-
-    if (moreNode) {
-      if (moreCount > 0) {
-        moreNode.hidden = false;
-        moreNode.textContent = `+${moreCount}`;
-      } else {
-        moreNode.hidden = true;
-      }
-    }
-
-    renderExpandedList(active);
-    bar.querySelector(".order-status-bar__progress")?.setAttribute(
-      "aria-valuenow",
-      String(Math.round(Math.max(0, Math.min(1, primary.progressRatio)) * 100))
-    );
-    return true;
-  };
-
-  window.requestAnimationFrame(() => bar.classList.add("is-entered"));
-  if (!render()) return;
-  setExpanded(false);
-  timerId = window.setInterval(() => {
-    render();
-  }, 1000);
-
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) render();
-  });
-};
-
-const setupPointsBalanceCard = () => {
-  const balanceNode = document.getElementById("pointsBalanceValue");
-  if (!balanceNode) return;
-
-  const targetValue = Number.parseInt(balanceNode.dataset.value || "0", 10);
-  if (!Number.isFinite(targetValue) || targetValue < 0) return;
-
-  const formatPoints = (value) =>
-    new Intl.NumberFormat("ru-RU").format(value).replace(/\u00A0|\u202F/g, " ");
-
-  const applyValue = (value) => {
-    balanceNode.textContent = formatPoints(value);
-  };
-
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (reducedMotion || targetValue === 0) {
-    applyValue(targetValue);
-    balanceNode.classList.add("is-ready");
-    return;
-  }
-
-  const durationMs = 620;
-  const startedAt = performance.now();
-  const tick = (now) => {
-    const progress = Math.min(1, (now - startedAt) / durationMs);
-    const eased = 1 - (1 - progress) * (1 - progress);
-    applyValue(Math.round(targetValue * eased));
-    if (progress < 1) {
-      window.requestAnimationFrame(tick);
-    } else {
-      balanceNode.classList.add("is-ready");
-    }
-  };
-
-  applyValue(0);
-  window.requestAnimationFrame(tick);
-};
-// Page init: animations + interactions
+import { stagger, getCsrfToken } from "./modules/core.js";
+import { setupMenuHoverMood } from "./modules/menuHoverMood.js";
+import { setupBottomNavMotion } from "./modules/bottomNavMotion.js";
+import { setupTableTooltip } from "./modules/tableTooltip.js";
+import { setupOrderStatusBar } from "./modules/orderStatusBar.js";
+import { setupPointsBalanceCard } from "./modules/pointsBalanceCard.js";
 window.addEventListener("DOMContentLoaded", () => {
   stagger(".news-card", 140);
   stagger(".menu-card", 120);
@@ -1151,9 +21,15 @@ window.addEventListener("DOMContentLoaded", () => {
   const sortOptions = Array.from(document.querySelectorAll(".sort-option"));
   const sortValue = document.getElementById("sortValue");
   const cartDrawer = document.getElementById("cartDrawer");
+  const cartOverlay = document.getElementById("cartOverlay");
   const cartList = document.getElementById("cartList");
+  const cartEmpty = document.getElementById("cartEmpty");
   const cartTotal = document.getElementById("cartTotal");
   const cartCheckout = document.getElementById("cartCheckout");
+  const cartDrawerClose = document.getElementById("cartDrawerClose");
+  const cartDrawerHeader = cartDrawer?.querySelector(".cart-drawer__header");
+  const menuCartFab = document.getElementById("menuCartFab");
+  const menuCartFabBadge = document.getElementById("menuCartFabBadge");
   const checkoutForm = document.getElementById("checkoutForm");
   const checkoutItemsNode = document.getElementById("checkoutItems");
   const checkoutItemsTotal = document.getElementById("checkoutItemsTotal");
@@ -1291,6 +167,34 @@ window.addEventListener("DOMContentLoaded", () => {
       closeSortMenu();
     });
 
+    const isMenuMobileViewport = () => window.matchMedia("(max-width: 767px)").matches;
+    const collapseMobileMenuCards = (exceptCard = null) => {
+      if (!isMenuMobileViewport()) return;
+      menuCards.forEach((card) => {
+        if (exceptCard && card === exceptCard) return;
+        card.classList.remove("is-expanded");
+      });
+    };
+
+    menuList.addEventListener("click", (event) => {
+      if (!isMenuMobileViewport()) return;
+      const card = event.target.closest(".menu-card--menu");
+      if (!card || !menuList.contains(card)) return;
+
+      // Let cart button keep its own behavior without toggling card state.
+      if (event.target.closest(".add-button")) return;
+
+      const willExpand = !card.classList.contains("is-expanded");
+      collapseMobileMenuCards(willExpand ? card : null);
+      card.classList.toggle("is-expanded", willExpand);
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!isMenuMobileViewport()) return;
+      if (event.target.closest(".menu-card--menu")) return;
+      collapseMobileMenuCards();
+    });
+
     applyMenuControls(false);
   }
 
@@ -1303,6 +207,32 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   if (expiryInput) {
+    const validateExpiryInput = () => {
+      const raw = (expiryInput.value || "").trim();
+      if (!raw) {
+        expiryInput.setCustomValidity("");
+        return;
+      }
+      const match = raw.match(/^(\d{2})\/(\d{2})$/);
+      if (!match) {
+        expiryInput.setCustomValidity("Введите срок в формате MM/YY");
+        return;
+      }
+      const month = Number(match[1]);
+      const year = Number(match[2]);
+      if (month < 1 || month > 12) {
+        expiryInput.setCustomValidity("Месяц должен быть от 01 до 12");
+        return;
+      }
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
+      const currentYear = now.getFullYear() % 100;
+      if (year < currentYear || (year === currentYear && month < currentMonth)) {
+        expiryInput.setCustomValidity("Срок карты в прошлом");
+        return;
+      }
+      expiryInput.setCustomValidity("");
+    };
     expiryInput.addEventListener("input", () => {
       const digits = expiryInput.value.replace(/\D/g, "").slice(0, 4);
       if (digits.length >= 3) {
@@ -1310,6 +240,7 @@ window.addEventListener("DOMContentLoaded", () => {
       } else {
         expiryInput.value = digits;
       }
+      validateExpiryInput();
     });
     expiryInput.addEventListener("blur", () => {
       const digits = expiryInput.value.replace(/\D/g, "");
@@ -1318,16 +249,46 @@ window.addEventListener("DOMContentLoaded", () => {
         const year = digits.slice(2, 4);
         expiryInput.value = `${String(month).padStart(2, "0")}${year ? `/${year}` : ""}`;
       }
+      validateExpiryInput();
     });
   }
 
   if (holderInput) {
-    holderInput.addEventListener("input", () => {
-      const cleaned = holderInput.value
-        .replace(/[^A-Za-z\u0400-\u04FF\s-]/g, "")
+    const translitMap = {
+      "А": "A", "Б": "B", "В": "V", "Г": "G", "Д": "D",
+      "Е": "E", "Ё": "YO", "Ж": "ZH", "З": "Z", "И": "I",
+      "Й": "Y", "К": "K", "Л": "L", "М": "M", "Н": "N",
+      "О": "O", "П": "P", "Р": "R", "С": "S", "Т": "T",
+      "У": "U", "Ф": "F", "Х": "KH", "Ц": "TS", "Ч": "CH",
+      "Ш": "SH", "Щ": "SHCH", "Ъ": "", "Ы": "Y", "Ь": "",
+      "Э": "E", "Ю": "YU", "Я": "YA",
+      "а": "A", "б": "B", "в": "V", "г": "G", "д": "D",
+      "е": "E", "ё": "YO", "ж": "ZH", "з": "Z", "и": "I",
+      "й": "Y", "к": "K", "л": "L", "м": "M", "н": "N",
+      "о": "O", "п": "P", "р": "R", "с": "S", "т": "T",
+      "у": "U", "ф": "F", "х": "KH", "ц": "TS", "ч": "CH",
+      "ш": "SH", "щ": "SHCH", "ъ": "", "ы": "Y", "ь": "",
+      "э": "E", "ю": "YU", "я": "YA",
+    };
+    const normalizeHolder = (value, trimTail = false) => {
+      const transliterated = Array.from(String(value || ""))
+        .map((ch) => (Object.prototype.hasOwnProperty.call(translitMap, ch) ? translitMap[ch] : ch))
+        .join("");
+      let cleaned = transliterated
+        .toUpperCase()
+        .replace(/[^A-Z\s-]/g, "")
         .replace(/\s+/g, " ")
-        .trimStart();
-      holderInput.value = cleaned.toUpperCase();
+        .replace(/^\s+/, "");
+      if (trimTail) {
+        cleaned = cleaned.trim();
+      }
+      return cleaned.slice(0, 26);
+    };
+    holderInput.addEventListener("input", () => {
+      holderInput.value = normalizeHolder(holderInput.value, false);
+    });
+    holderInput.addEventListener("blur", () => {
+      holderInput.value = normalizeHolder(holderInput.value, true);
     });
   }
 
@@ -1353,8 +314,107 @@ window.addEventListener("DOMContentLoaded", () => {
       }))
       .filter((item) => item.qty > 0);
 
+  const menuMobileQuery = window.matchMedia("(max-width: 767px)");
+  const isMenuMobile = () => Boolean(menuMobileQuery.matches && menuList && cartDrawer);
+  const dragCloseRatio = 0.3;
+  let mobileCartOpen = false;
+  let mobileDragActive = false;
+  let mobileDragStartY = 0;
+  let mobileDragY = 0;
+  let mobileDrawerHeight = 0;
+
+  const syncFabState = (cartCount) => {
+    if (!menuCartFab || !menuCartFabBadge) return;
+    menuCartFabBadge.textContent = String(cartCount);
+    menuCartFabBadge.hidden = cartCount <= 0;
+    menuCartFab.setAttribute("aria-label", cartCount > 0 ? `Открыть корзину, товаров: ${cartCount}` : "Открыть корзину");
+  };
+
+  const closeMobileCart = () => {
+    if (!isMenuMobile() || !cartDrawer) return;
+    mobileCartOpen = false;
+    mobileDragActive = false;
+    mobileDragY = 0;
+    cartDrawer.classList.remove("is-open", "is-settle");
+    cartDrawer.classList.add("is-closing");
+    cartDrawer.classList.remove("is-dragging");
+    cartDrawer.style.transform = "";
+    cartDrawer.setAttribute("aria-hidden", "true");
+    cartOverlay?.classList.remove("is-open");
+    if (cartOverlay) {
+      cartOverlay.style.opacity = "";
+      cartOverlay.hidden = true;
+    }
+    document.body.classList.remove("menu-cart-open", "menu-cart-open-mobile");
+    if (menuCartFab) {
+      menuCartFab.setAttribute("aria-expanded", "false");
+      menuCartFab.classList.remove("is-hidden");
+    }
+    window.setTimeout(() => {
+      if (!mobileCartOpen && cartDrawer) {
+        cartDrawer.hidden = true;
+        cartDrawer.classList.remove("is-closing");
+      }
+    }, 220);
+  };
+
+  const openMobileCart = () => {
+    if (!isMenuMobile() || !cartDrawer) return;
+    if (cartDrawer._hideTimer) {
+      window.clearTimeout(cartDrawer._hideTimer);
+      cartDrawer._hideTimer = null;
+    }
+    mobileCartOpen = true;
+    mobileDragActive = false;
+    mobileDragY = 0;
+    cartDrawer.hidden = false;
+    cartDrawer.classList.remove("is-closing");
+    cartDrawer.classList.remove("is-dragging");
+    cartDrawer.style.transform = "";
+    cartDrawer.setAttribute("aria-hidden", "false");
+    if (cartOverlay) {
+      cartOverlay.style.opacity = "";
+      cartOverlay.hidden = false;
+      requestAnimationFrame(() => cartOverlay.classList.add("is-open"));
+    }
+    document.body.classList.add("menu-cart-open-mobile");
+    if (menuCartFab) {
+      menuCartFab.setAttribute("aria-expanded", "true");
+      menuCartFab.classList.add("is-hidden");
+    }
+    requestAnimationFrame(() => {
+      cartDrawer.classList.add("is-open", "is-settle");
+      window.setTimeout(() => cartDrawer.classList.remove("is-settle"), 120);
+    });
+  };
+
   const setDrawerState = (hasItems) => {
     if (!cartDrawer || !menuList) return;
+    if (isMenuMobile()) {
+      if (mobileCartOpen) {
+        cartDrawer.hidden = false;
+      } else {
+        cartDrawer.hidden = true;
+        cartDrawer.setAttribute("aria-hidden", "true");
+        cartDrawer.classList.remove("is-open", "is-settle", "is-closing");
+        cartOverlay?.classList.remove("is-open");
+        if (cartOverlay) cartOverlay.hidden = true;
+        document.body.classList.remove("menu-cart-open-mobile", "menu-cart-open");
+      }
+      return;
+    }
+
+    mobileCartOpen = false;
+    mobileDragActive = false;
+    mobileDragY = 0;
+    if (menuCartFab) {
+      menuCartFab.setAttribute("aria-expanded", "false");
+      menuCartFab.classList.remove("is-hidden");
+    }
+    cartOverlay?.classList.remove("is-open");
+    if (cartOverlay) cartOverlay.hidden = true;
+
+    const closeDurationMs = 360;
     if (hasItems) {
       if (cartDrawer._hideTimer) {
         window.clearTimeout(cartDrawer._hideTimer);
@@ -1378,13 +438,13 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     cartDrawer.classList.remove("is-open", "is-settle");
     cartDrawer.classList.add("is-closing");
-    document.body.classList.remove("menu-cart-open");
     cartDrawer._hideTimer = window.setTimeout(() => {
       cartDrawer.hidden = true;
       cartDrawer.setAttribute("aria-hidden", "true");
       cartDrawer.classList.remove("is-closing");
+      document.body.classList.remove("menu-cart-open");
       cartDrawer._hideTimer = null;
-    }, 230);
+    }, closeDurationMs);
   };
 
   const updateCartUI = (options = {}) => {
@@ -1395,6 +455,7 @@ window.addEventListener("DOMContentLoaded", () => {
     );
     const previousTotal = Number(cartTotal.textContent || 0);
     const cart = normalizeCart(loadCart());
+    const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
     const totalPrice = cart.reduce((sum, item) => sum + item.qty * item.price, 0);
 
     cartList.innerHTML = "";
@@ -1430,6 +491,12 @@ window.addEventListener("DOMContentLoaded", () => {
       cartList.appendChild(row);
     });
 
+    if (cartEmpty) {
+      cartEmpty.hidden = cart.length > 0;
+    }
+    if (cartCheckout) {
+      cartCheckout.disabled = cart.length === 0;
+    }
     cartTotal.textContent = String(totalPrice);
     if (previousTotal !== totalPrice) {
       cartTotal.closest(".cart-drawer__total")?.classList.add("is-pulse");
@@ -1437,6 +504,7 @@ window.addEventListener("DOMContentLoaded", () => {
         cartTotal.closest(".cart-drawer__total")?.classList.remove("is-pulse");
       }, 280);
     }
+    syncFabState(cartCount);
     setDrawerState(cart.length > 0);
     updateMenuButtons(cart);
   };
@@ -1521,6 +589,84 @@ window.addEventListener("DOMContentLoaded", () => {
       const price = Number(btn.dataset.price) || 0;
       addToCart(id, name, price);
     });
+  });
+
+  menuCartFab?.addEventListener("click", () => {
+    if (!isMenuMobile()) return;
+    if (mobileCartOpen) {
+      closeMobileCart();
+      return;
+    }
+    openMobileCart();
+  });
+
+  cartDrawerClose?.addEventListener("click", () => {
+    closeMobileCart();
+  });
+
+  cartOverlay?.addEventListener("click", () => {
+    closeMobileCart();
+  });
+
+  const onMobileDrawerTouchStart = (event) => {
+    if (!isMenuMobile() || !mobileCartOpen || !cartDrawer) return;
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    mobileDragActive = true;
+    mobileDragStartY = touch.clientY;
+    mobileDragY = 0;
+    mobileDrawerHeight = cartDrawer.getBoundingClientRect().height || 0;
+    cartDrawer.classList.add("is-dragging");
+  };
+
+  const onMobileDrawerTouchMove = (event) => {
+    if (!mobileDragActive || !cartDrawer) return;
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    const delta = touch.clientY - mobileDragStartY;
+    mobileDragY = Math.max(0, delta);
+    cartDrawer.style.transform = `translateY(${mobileDragY}px)`;
+    if (cartOverlay && mobileDrawerHeight > 0) {
+      const progress = Math.max(0, Math.min(1, mobileDragY / (mobileDrawerHeight * 0.9)));
+      cartOverlay.style.opacity = String(1 - progress);
+    }
+    if (mobileDragY > 0) {
+      event.preventDefault();
+    }
+  };
+
+  const onMobileDrawerTouchEnd = () => {
+    if (!mobileDragActive || !cartDrawer) return;
+    mobileDragActive = false;
+    const threshold = mobileDrawerHeight * dragCloseRatio;
+    cartDrawer.classList.remove("is-dragging");
+    if (mobileDragY >= threshold) {
+      cartDrawer.style.transform = "";
+      closeMobileCart();
+      return;
+    }
+    cartDrawer.style.transform = "";
+    if (cartOverlay) {
+      cartOverlay.style.opacity = "";
+    }
+    mobileDragY = 0;
+  };
+
+  if (cartDrawerHeader) {
+    cartDrawerHeader.addEventListener("touchstart", onMobileDrawerTouchStart, { passive: true });
+    cartDrawerHeader.addEventListener("touchmove", onMobileDrawerTouchMove, { passive: false });
+    cartDrawerHeader.addEventListener("touchend", onMobileDrawerTouchEnd);
+    cartDrawerHeader.addEventListener("touchcancel", onMobileDrawerTouchEnd);
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !mobileCartOpen) return;
+    closeMobileCart();
+  });
+
+  menuMobileQuery.addEventListener("change", () => {
+    mobileCartOpen = false;
+    setDrawerState(normalizeCart(loadCart()).length > 0);
   });
 
   cartCheckout?.addEventListener("click", () => {
@@ -1873,3 +1019,4 @@ window.addEventListener("DOMContentLoaded", () => {
 
   updateCartUI();
 });
+

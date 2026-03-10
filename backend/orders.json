@@ -448,5 +448,173 @@
       "last4": "4141",
       "expiry": "12/42"
     }
+  },
+  {
+    "id": 14,
+    "user_id": 1,
+    "status": "preparing",
+    "created_at": "2026-03-10T16:42:26",
+    "items": [
+      {
+        "id": 2,
+        "name": "Рыба ФАБ",
+        "price": 440,
+        "qty": 1,
+        "photo": "menu_items/ФАБ-1500/photo.png"
+      },
+      {
+        "id": 1,
+        "name": "Пирог Мина",
+        "price": 390,
+        "qty": 1,
+        "photo": "menu_items/пирог_мина/photo.png"
+      }
+    ],
+    "items_total": 830,
+    "points_applied": 0,
+    "payable_total": 830,
+    "bonus_earned": 41,
+    "comment": "",
+    "serving": {
+      "label": "К началу брони",
+      "mode": "booking_start"
+    },
+    "booking": {
+      "table_id": 13,
+      "date": "2026-03-10",
+      "time": "19:00",
+      "status": "Active"
+    },
+    "payment_card": {
+      "brand": "MIR",
+      "last4": "3131",
+      "expiry": "12/31"
+    }
+  },
+  {
+    "id": 15,
+    "user_id": 1,
+    "status": "preparing",
+    "created_at": "2026-03-10T18:15:32",
+    "items": [
+      {
+        "id": 2,
+        "name": "Рыба ФАБ",
+        "price": 440,
+        "qty": 1,
+        "photo": "menu_items/ФАБ-1500/photo.png"
+      },
+      {
+        "id": 1,
+        "name": "Пирог Мина",
+        "price": 390,
+        "qty": 1,
+        "photo": "menu_items/пирог_мина/photo.png"
+      }
+    ],
+    "items_total": 830,
+    "points_applied": 0,
+    "payable_total": 830,
+    "bonus_earned": 41,
+    "comment": "",
+    "serving": {
+      "label": "К началу брони",
+      "mode": "booking_start"
+    },
+    "booking": {
+      "table_id": 13,
+      "date": "2026-03-10",
+      "time": "19:00",
+      "status": "Active"
+    },
+    "payment_card": {
+      "brand": "МИР",
+      "last4": "4141",
+      "expiry": "12/42"
+    }
+  },
+  {
+    "id": 16,
+    "user_id": 1,
+    "status": "preparing",
+    "created_at": "2026-03-10T18:32:48",
+    "items": [
+      {
+        "id": 2,
+        "name": "Рыба ФАБ",
+        "price": 440,
+        "qty": 1,
+        "photo": "menu_items/ФАБ-1500/photo.png"
+      },
+      {
+        "id": 1,
+        "name": "Пирог Мина",
+        "price": 390,
+        "qty": 1,
+        "photo": "menu_items/пирог_мина/photo.png"
+      }
+    ],
+    "items_total": 830,
+    "points_applied": 0,
+    "payable_total": 830,
+    "bonus_earned": 41,
+    "comment": "",
+    "serving": {
+      "label": "К началу брони",
+      "mode": "booking_start"
+    },
+    "booking": {
+      "table_id": 13,
+      "date": "2026-03-10",
+      "time": "19:00",
+      "status": "Active"
+    },
+    "payment_card": {
+      "brand": "МИР",
+      "last4": "4141",
+      "expiry": "12/42"
+    }
+  },
+  {
+    "id": 17,
+    "user_id": 1,
+    "status": "preparing",
+    "created_at": "2026-03-10T19:06:30",
+    "items": [
+      {
+        "id": 1,
+        "name": "Пирог Мина",
+        "price": 390,
+        "qty": 1,
+        "photo": "menu_items/пирог_мина/photo.png"
+      },
+      {
+        "id": 2,
+        "name": "Рыба ФАБ",
+        "price": 440,
+        "qty": 3,
+        "photo": "menu_items/ФАБ-1500/photo.png"
+      }
+    ],
+    "items_total": 1710,
+    "points_applied": 0,
+    "payable_total": 1710,
+    "bonus_earned": 85,
+    "comment": "",
+    "serving": {
+      "label": "К началу брони",
+      "mode": "booking_start"
+    },
+    "booking": {
+      "table_id": 10,
+      "date": "2026-03-10",
+      "time": "19:30",
+      "status": "Active"
+    },
+    "payment_card": {
+      "brand": "МИР",
+      "last4": "4141",
+      "expiry": "12/42"
+    }
   }
 ]
