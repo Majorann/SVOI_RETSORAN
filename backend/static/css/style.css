@@ -590,6 +590,7 @@ a {
 .secondary-card--points {
   display: block;
   min-height: 132px;
+  overflow: hidden;
 }
 
 .secondary-card--delivery {
@@ -603,17 +604,64 @@ a {
   content: "";
   position: absolute;
   inset: 0;
-  background:
-    linear-gradient(180deg, rgba(20, 15, 12, 0), rgba(20, 15, 12, 0.08)),
-    url("/static/img/truck.svg") right -6px center / 94% auto no-repeat;
-  opacity: 0.76;
+  background: linear-gradient(180deg, rgba(20, 15, 12, 0), rgba(20, 15, 12, 0.08));
+  opacity: 0;
   pointer-events: none;
+  z-index: 0;
 }
 
 .secondary-card__content--delivery {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   max-width: 64%;
+}
+
+.delivery-scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.delivery-scene__svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.delivery-scene .truck {
+  transform-box: fill-box;
+  transform-origin: 74% 88%;
+}
+
+.delivery-scene .truck-img {
+  image-rendering: pixelated;
+}
+
+.delivery-scene .wind-line {
+  stroke: rgba(240, 213, 191, 0.94);
+  stroke-width: 3;
+  stroke-linecap: round;
+  opacity: 0;
+}
+
+body.page-index .secondary-card--delivery:hover .delivery-scene .truck {
+  animation: deliveryCardTruckShake 520ms ease-in-out infinite;
+}
+
+body.page-index .secondary-card--delivery:hover .delivery-scene .wind-line {
+  animation: deliveryCardWind 760ms linear infinite;
+}
+
+body.page-index .secondary-card--delivery:hover .delivery-scene .w2 {
+  animation-delay: 130ms;
+}
+
+body.page-index .secondary-card--delivery:hover .delivery-scene .w3 {
+  animation-delay: 260ms;
 }
 
 .secondary-card__content {
@@ -662,7 +710,7 @@ a {
   padding: 0;
   font-size: clamp(68px, 12vw, 88px);
   font-weight: 800;
-  line-height: 0.95;
+  line-height: 1.02;
   letter-spacing: 0.02em;
   color: var(--accent);
   white-space: nowrap;
@@ -670,6 +718,8 @@ a {
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
+  position: relative;
+  z-index: 2;
 }
 
 .secondary-card__icon--points {
@@ -682,6 +732,9 @@ a {
   align-self: center;
   background: transparent;
   border: none;
+  margin-left: 4px;
+  position: relative;
+  z-index: 1;
 }
 
 .secondary-card__icon--coins {
@@ -693,6 +746,8 @@ a {
   align-self: center;
   background: transparent;
   border: none;
+  position: relative;
+  z-index: 1;
 }
 
 .secondary-card__icon--points img {
@@ -759,6 +814,21 @@ a {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+@keyframes deliveryCardTruckShake {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  20% { transform: translate(0.5px, -0.5px) rotate(-0.6deg); }
+  40% { transform: translate(1px, 0.3px) rotate(0.5deg); }
+  60% { transform: translate(0.4px, -0.7px) rotate(-0.5deg); }
+  80% { transform: translate(0.8px, 0.2px) rotate(0.4deg); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+
+@keyframes deliveryCardWind {
+  0% { transform: translateX(0); opacity: 0; }
+  18% { opacity: 0.8; }
+  100% { transform: translateX(-34px); opacity: 0; }
 }
 
 @media (max-width: 560px) {
@@ -856,7 +926,7 @@ a {
     max-width: calc(100% - 92px);
     font-size: clamp(34px, 9.6vw, 54px);
     letter-spacing: 0.01em;
-    line-height: 0.9;
+    line-height: 1;
     overflow: visible;
     text-overflow: clip;
     z-index: 1;
@@ -867,14 +937,14 @@ a {
     font-size: clamp(30px, 8.6vw, 50px);
   }
 
-  body.page-index .secondary-card--delivery::before {
-    background-size: 96% auto;
-    background-position: right -8px center;
-    opacity: 0.74;
-  }
-
   body.page-index .secondary-card__content--delivery {
     max-width: 62%;
+  }
+
+  body.page-index .delivery-scene {
+    inset: 0;
+    width: 100%;
+    height: 100%;
   }
 }
 
@@ -2151,9 +2221,9 @@ body.page-menu .menu-top__ghost {
 }
 
 .menu-card__title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 8px;
   margin-top: -2px;
 }
@@ -2166,6 +2236,8 @@ body.page-menu .menu-top__ghost {
   margin: 0;
   font-size: 18px;
   line-height: 1.1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .menu-card__lore {
@@ -2183,6 +2255,7 @@ body.page-menu .menu-top__ghost {
   align-items: flex-end;
   justify-content: flex-end;
   gap: 6px;
+  margin-top: auto;
 }
 
 .menu-card__bottom .price {
@@ -2193,16 +2266,18 @@ body.page-menu .menu-top__ghost {
 
 .menu-type {
   flex-shrink: 0;
-  max-width: 120px;
+  max-width: 138px;
   padding: 3px 8px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgb(216, 163, 127);
   font-size: 11px;
   line-height: 1.2;
-  text-align: left;
+  text-align: center;
   color: #fff;
-  white-space: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .menu-type--закуски { color: #fff; }
@@ -3278,6 +3353,32 @@ body.mood-night { --mood-tint: rgba(20, 30, 60, 0.18); }
   text-align: center;
 }
 
+.auth__card .primary-action {
+  position: relative;
+  border: 1px solid rgba(218, 119, 86, 0.78);
+  box-shadow:
+    0 0 0 1px rgba(218, 119, 86, 0.34),
+    0 0 16px rgba(218, 119, 86, 0.48),
+    0 0 34px rgba(218, 119, 86, 0.3),
+    0 10px 18px rgba(11, 8, 7, 0.34);
+}
+
+.auth__card .primary-action:hover {
+  box-shadow:
+    0 0 0 1px rgba(218, 119, 86, 0.44),
+    0 0 20px rgba(218, 119, 86, 0.58),
+    0 0 42px rgba(218, 119, 86, 0.36),
+    0 12px 20px rgba(11, 8, 7, 0.38);
+}
+
+.auth__card .primary-action:active {
+  box-shadow:
+    0 0 0 1px rgba(218, 119, 86, 0.32),
+    0 0 14px rgba(218, 119, 86, 0.42),
+    0 0 24px rgba(218, 119, 86, 0.24),
+    0 8px 14px rgba(11, 8, 7, 0.34);
+}
+
 /* Layered menu card: background image layer + content layer */
 .menu .menu-card.menu-card--menu {
   position: relative;
@@ -3378,9 +3479,9 @@ body.mood-night { --mood-tint: rgba(20, 30, 60, 0.18); }
 }
 
 .menu .menu-card.menu-card--menu .menu-card__title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 8px;
   margin-left: -8px;
 }
@@ -3892,6 +3993,20 @@ h3 {
   outline-offset: 1px;
 }
 
+.field input.is-phone-valid {
+  border-color: rgba(94, 127, 99, 0.78);
+  box-shadow:
+    0 0 0 1px rgba(94, 127, 99, 0.32),
+    0 0 10px rgba(94, 127, 99, 0.22);
+}
+
+.field input.is-phone-valid:focus {
+  outline-color: rgba(94, 127, 99, 0.82);
+  box-shadow:
+    0 0 0 1px rgba(94, 127, 99, 0.4),
+    0 0 14px rgba(94, 127, 99, 0.28);
+}
+
 .timeline {
   background: rgba(33, 28, 24, 0.9);
   border: 1px solid #4a3e36;
@@ -4080,12 +4195,12 @@ body.mood-night { --mood-tint: rgba(70, 56, 46, 0.24); }
 
 .filter-item--салаты,
 .menu-type--салаты {
-  color: var(--status-green);
+  color: #fff;
 }
 
 .filter-item--алкогольные-напитки,
 .menu-type--алкогольные-напитки {
-  color: var(--status-red);
+  color: #fff;
 }
 
 .booking__table-top {

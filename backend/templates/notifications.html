@@ -27,7 +27,7 @@
       <div class="notice">
         <div class="notice__title">Бронь подтверждена</div>
         <div class="notice__meta">
-          Стол №{{ booking.table_id }} · {{ booking.date }} · {{ booking.time }}
+          Стол №{{ booking.table_id }} · {{ booking.date_display }} · {{ booking.time }}
         </div>
         <div class="notice__text">Ждём вас!</div>
       </div>
@@ -37,6 +37,9 @@
         <div class="notice__title">{{ order.get("status_title", "Заказ готовится") }}</div>
         <div class="notice__meta">
           Заказ №{{ order.get("id") }} · Стол №{{ order.get("booking", {}).get("table_id") or "—" }}
+        </div>
+        <div class="notice__meta">
+          Дата: {{ order.get("booking", {}).get("date_display") or order.get("created_at_display") }}
         </div>
         <div class="notice__text">{{ order.get("status_text", "Осталось") }}: {{ order.get("status_remaining_mmss", "00:00") }}</div>
         <div class="notice__meta">Сумма: {{ order.get("payable_total") or order.get("items_total") }} ₽</div>

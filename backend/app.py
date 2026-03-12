@@ -19,7 +19,7 @@ from routes.auth_routes import login_route, register_route, logout_route
 from routes.booking_routes import (
     availability_route,
     book_table_route,
-    cancel_booking_route,
+    cancel_booking_with_orders_route,
     reserve_route,
 )
 from routes.profile_routes import add_card_route, delete_card_route, profile_route
@@ -77,6 +77,7 @@ from config import (
     MENU_META_NAME,
     MENU_PHOTO_NAMES,
     NEWS_CARDS,
+    POPULAR_MENU_LIMIT,
     ORDERS_PATH,
     ORDER_STATUS_STEPS,
     PROMO_ITEMS_PATH,
@@ -95,18 +96,41 @@ def env_bool(name: str, default: bool) -> bool:
         return default
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
+
+def env_str(name: str, default: str) -> str:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip()
+
 app = Flask(__name__)
 app.permanent_session_lifetime = timedelta(days=30)
 # Секрет для сессий (в проде заменить)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "replace-me-in-production")
+app.secret_key = os.getenv(
+    "FLASK_SECRET_KEY",
+    "ueW2Td8Y-PNMoNazTFEkVLUDxqIEoyzN66MtcjACM5d7AxkZYaYDL9RtFEF5F2vedmzvzJ-P6vGflZYxfzu7EA",
+)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# На hosted-платформах (в т.ч. HF Spaces в iframe) Lax может блокировать сессию.
+is_hf_space = bool(os.getenv("SPACE_ID") or os.getenv("HF_SPACE_ID"))
+default_samesite = "None" if is_hf_space else "Lax"
+session_samesite = env_str("SESSION_COOKIE_SAMESITE", default_samesite)
+app.config["SESSION_COOKIE_SAMESITE"] = session_samesite
 app.config["SESSION_COOKIE_SECURE"] = env_bool("SESSION_COOKIE_SECURE", True)
+app.config["SESSION_COOKIE_PARTITIONED"] = env_bool("SESSION_COOKIE_PARTITIONED", is_hf_space)
 app.config["PREFERRED_URL_SCHEME"] = "https"
 if env_bool("TRUST_PROXY_HEADERS", True):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 _PROCESS_LOCKS = {}
 _PROCESS_LOCKS_GUARD = threading.RLock()
+
+print(
+    "[storage] users={0} bookings={1} orders={2}".format(
+        USERS_PATH,
+        BOOKINGS_PATH,
+        ORDERS_PATH,
+    )
+)
 
 
 @contextmanager
@@ -186,6 +210,7 @@ def index():
         get_user_preparing_orders,
         list_active_order_statuses,
         load_users,
+        POPULAR_MENU_LIMIT,
     )
 
 
@@ -198,6 +223,26 @@ def api_order_statuses():
         {
             "ok": True,
             "order_statuses": list_active_order_statuses(user_id),
+            "server_time": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+
+
+@app.get("/debug/storage")
+def debug_storage():
+    users = load_users()
+    bookings = load_bookings_raw()
+    orders = load_orders()
+    return jsonify(
+        {
+            "ok": True,
+            "users_path": str(USERS_PATH),
+            "bookings_path": str(BOOKINGS_PATH),
+            "orders_path": str(ORDERS_PATH),
+            "users_count": len(users),
+            "bookings_count": len(bookings),
+            "orders_count": len(orders),
+            "last_user_id": users[-1].get("id") if users else None,
             "server_time": datetime.now().isoformat(timespec="seconds"),
         }
     )
@@ -391,21 +436,19 @@ def load_menu_items():
 
 
 def load_promo_items():
-    # Загружаем promo из static/promo_items/<slug>/item.txt (+ optional photo.png)
+    # Загружаем promo из static/promo_items/**/item.txt (включая вложенные папки)
     items = []
     if not PROMO_ITEMS_PATH.exists():
         return items
 
-    for item_dir in sorted(PROMO_ITEMS_PATH.iterdir()):
-        if not item_dir.is_dir():
-            continue
-        meta_path = item_dir / PROMO_META_NAME
+    meta_paths = sorted(PROMO_ITEMS_PATH.rglob(PROMO_META_NAME))
+    for meta_path in meta_paths:
+        item_dir = meta_path.parent
+        relative_slug = item_dir.relative_to(PROMO_ITEMS_PATH).as_posix()
         photo_name = resolve_photo_name(item_dir, PROMO_PHOTO_NAMES)
-        if not meta_path.exists():
-            continue
 
         meta = parse_menu_meta(meta_path)
-        promo_item = parse_promo_item(meta, item_dir.name, photo_name)
+        promo_item = parse_promo_item(meta, relative_slug, photo_name)
         if promo_item is None:
             continue
         if not promo_item.get("active", True):
@@ -443,6 +486,11 @@ def resolve_photo_name(item_dir: Path, photo_names):
     for photo_name in photo_names:
         if (item_dir / photo_name).exists():
             return photo_name
+    # Фолбэк: подхватываем любое изображение в папке, если нет стандартного photo.*
+    for extension in ("*.webp", "*.png", "*.jpg", "*.jpeg"):
+        candidates = sorted(item_dir.glob(extension))
+        if candidates:
+            return candidates[0].name
     return None
 
 
@@ -674,7 +722,15 @@ def release_table():
 
 @app.post("/bookings/cancel")
 def cancel_booking():
-    return cancel_booking_route(load_bookings, save_bookings, json_file_lock, BOOKINGS_PATH)
+    return cancel_booking_with_orders_route(
+        load_bookings,
+        save_bookings,
+        json_file_lock,
+        BOOKINGS_PATH,
+        load_orders,
+        save_orders,
+        ORDERS_PATH,
+    )
 
 
 @app.post("/cards/add")

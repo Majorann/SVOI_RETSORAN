@@ -18,7 +18,7 @@
     {% endif %}
     <label class="field">
       <span>Номер телефона</span>
-      <input type="tel" name="phone" placeholder="+7 (999) 000-00-00" required />
+      <input type="tel" name="phone" placeholder="+7 999 000-00-00" value="{{ form_phone or '' }}" inputmode="tel" autocomplete="tel" required />
     </label>
     <label class="field">
       <span>Пароль</span>

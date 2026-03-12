@@ -34,6 +34,11 @@ def parse_iso_datetime_value(value):
         return None
 
 
+def is_cancelled_order(order):
+    status_value = str((order or {}).get("status") or "").strip().lower()
+    return status_value in {"cancelled", "canceled"}
+
+
 def compute_serve_datetime_value(order, booking_dt, parse_datetime_fn):
     serving = order.get("serving") or {}
     mode = serving.get("mode")
@@ -143,6 +148,7 @@ def build_order_status_timeline_value(order, now, order_status_steps, parse_iso_
             "cycle_ends_at": cycle_end.isoformat(timespec="seconds"),
             "eta_total_seconds": eta_total_seconds,
             "eta_remaining_seconds": eta_remaining,
+            "time_to_target_seconds": eta_remaining,
         }
 
     steps_index = {
@@ -155,18 +161,21 @@ def build_order_status_timeline_value(order, now, order_status_steps, parse_iso_
 
     booking = order.get("booking") or {}
     booking_dt = parse_datetime_value(booking.get("date"), booking.get("time"))
-    if booking_dt and booking_dt > now:
-        cook_start = booking_dt - timedelta(seconds=cooking_seconds + delivering_seconds)
-        delivering_start = booking_dt - timedelta(seconds=delivering_seconds)
-        delivered_start = booking_dt
-        cycle_end = delivered_start + timedelta(seconds=delivered_seconds)
+    if booking_dt:
+        serve_dt = compute_serve_datetime_value(order, booking_dt, parse_datetime_value) or booking_dt
+        if serve_dt < booking_dt:
+            serve_dt = booking_dt
 
-        if created_at < cook_start and now < cook_start:
+        planned_cook_start = serve_dt - timedelta(seconds=cooking_seconds + delivering_seconds)
+        cook_start = max(created_at, planned_cook_start)
+        delivering_start = cook_start + timedelta(seconds=cooking_seconds)
+        delivered_start = delivering_start + timedelta(seconds=delivering_seconds)
+        cycle_end = delivered_start + timedelta(seconds=delivered_seconds)
+        target_remaining_seconds = max(0, int((delivered_start - now).total_seconds()))
+
+        if now < cook_start:
             waiting_duration = max(1, int((cook_start - created_at).total_seconds()))
-            waiting_elapsed = min(
-                waiting_duration,
-                max(0, int((now - created_at).total_seconds())),
-            )
+            waiting_elapsed = min(waiting_duration, max(0, int((now - created_at).total_seconds())))
             waiting_remaining = max(0, int((cook_start - now).total_seconds()))
             return {
                 "order_id": order.get("id"),
@@ -180,6 +189,7 @@ def build_order_status_timeline_value(order, now, order_status_steps, parse_iso_
                 "phase_started_at": created_at.isoformat(timespec="seconds"),
                 "phase_ends_at": cook_start.isoformat(timespec="seconds"),
                 "cycle_ends_at": cycle_end.isoformat(timespec="seconds"),
+                "time_to_target_seconds": target_remaining_seconds,
             }
 
         if now < delivering_start:
@@ -208,10 +218,11 @@ def build_order_status_timeline_value(order, now, order_status_steps, parse_iso_
             "phase_remaining_seconds": phase_remaining,
             "phase_duration_seconds": phase_duration,
             "phase_progress_ratio": (phase_elapsed / phase_duration),
-            "cycle_started_at": phase_start.isoformat(timespec="seconds"),
+            "cycle_started_at": cook_start.isoformat(timespec="seconds"),
             "phase_started_at": phase_start.isoformat(timespec="seconds"),
             "phase_ends_at": phase_end.isoformat(timespec="seconds"),
             "cycle_ends_at": cycle_end.isoformat(timespec="seconds"),
+            "time_to_target_seconds": target_remaining_seconds,
         }
 
     total_duration = sum(step["duration_seconds"] for step in order_status_steps)
@@ -239,6 +250,13 @@ def build_order_status_timeline_value(order, now, order_status_steps, parse_iso_
     cycle_end = created_at + timedelta(seconds=total_duration)
     phase_start = created_at + timedelta(seconds=phase_start_offset)
     phase_end = phase_start + timedelta(seconds=phase_duration)
+    serving_start_offset = 0
+    for step in order_status_steps:
+        if step.get("key") == "served":
+            break
+        serving_start_offset += int(step.get("duration_seconds", 0) or 0)
+    serving_start = created_at + timedelta(seconds=serving_start_offset)
+    time_to_target_seconds = max(0, int((serving_start - now).total_seconds()))
 
     return {
         "order_id": order.get("id"),
@@ -252,11 +270,15 @@ def build_order_status_timeline_value(order, now, order_status_steps, parse_iso_
         "phase_started_at": phase_start.isoformat(timespec="seconds"),
         "phase_ends_at": phase_end.isoformat(timespec="seconds"),
         "cycle_ends_at": cycle_end.isoformat(timespec="seconds"),
+        "time_to_target_seconds": time_to_target_seconds,
     }
 
 
 def get_user_preparing_orders_value(user_id, load_orders_fn, build_timeline_fn):
-    orders = [o for o in load_orders_fn() if o.get("user_id") == user_id]
+    orders = [
+        o for o in load_orders_fn()
+        if o.get("user_id") == user_id and not is_cancelled_order(o)
+    ]
     now = datetime.now()
     active_orders = []
     for order in orders:
@@ -317,7 +339,10 @@ def get_user_preparing_orders_value(user_id, load_orders_fn, build_timeline_fn):
 
 def list_active_order_statuses_value(user_id, load_orders_fn, build_timeline_fn):
     now = datetime.now()
-    orders = [o for o in load_orders_fn() if o.get("user_id") == user_id]
+    orders = [
+        o for o in load_orders_fn()
+        if o.get("user_id") == user_id and not is_cancelled_order(o)
+    ]
     active = []
     phase_priority = {
         "served": 0,
@@ -338,6 +363,7 @@ def list_active_order_statuses_value(user_id, load_orders_fn, build_timeline_fn)
 
     active.sort(
         key=lambda item: (
+            int(item.get("time_to_target_seconds", 0) or 0),
             phase_priority.get(item.get("phase"), 99),
             int(item.get("phase_remaining_seconds", 0) or 0),
             item.get("created_at", ""),

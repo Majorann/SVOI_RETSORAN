@@ -1,15 +1,62 @@
+import os
+import shutil
 from pathlib import Path
 
 
-BOOKINGS_PATH = Path(__file__).with_name("bookings.json")
-USERS_PATH = Path(__file__).with_name("users.json")
-ORDERS_PATH = Path(__file__).with_name("orders.json")
-MENU_ITEMS_PATH = Path(__file__).with_name("static") / "menu_items"
-PROMO_ITEMS_PATH = Path(__file__).with_name("static") / "promo_items"
+BASE_DIR = Path(__file__).resolve().parent
+
+
+def _resolve_data_dir() -> Path:
+    # Priority: explicit env -> HF persistent volume -> local backend dir.
+    raw = (os.getenv("APP_DATA_DIR") or os.getenv("DATA_DIR") or "").strip()
+    if raw:
+        target = Path(raw)
+    elif Path("/data").exists():
+        target = Path("/data")
+    else:
+        target = BASE_DIR
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        probe = target / ".write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return target
+    except OSError:
+        fallback = BASE_DIR
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
+def _ensure_seed_file(data_dir: Path, filename: str) -> Path:
+    dst = data_dir / filename
+    if dst.exists():
+        return dst
+    src = BASE_DIR / filename
+    try:
+        if src.exists():
+            shutil.copy2(src, dst)
+        else:
+            dst.write_text("[]", encoding="utf-8")
+        return dst
+    except OSError:
+        # Final safety: always keep app bootable even if data dir isn't writable.
+        fallback = BASE_DIR / filename
+        if not fallback.exists():
+            fallback.write_text("[]", encoding="utf-8")
+        return fallback
+
+
+DATA_DIR = _resolve_data_dir()
+BOOKINGS_PATH = _ensure_seed_file(DATA_DIR, "bookings.json")
+USERS_PATH = _ensure_seed_file(DATA_DIR, "users.json")
+ORDERS_PATH = _ensure_seed_file(DATA_DIR, "orders.json")
+MENU_ITEMS_PATH = BASE_DIR / "static" / "menu_items"
+PROMO_ITEMS_PATH = BASE_DIR / "static" / "promo_items"
 
 BOOKING_DURATION_MINUTES = 60
 
 NEWS_CARDS = []
+POPULAR_MENU_LIMIT = 10
 
 MENU_PHOTO_NAMES = ("photo.png", "photo.webp")
 MENU_META_NAME = "item.txt"
