@@ -118,3 +118,69 @@ def cancel_booking_route(load_bookings, save_bookings, json_file_lock, bookings_
         if removed:
             save_bookings(remaining)
     return redirect(url_for("index"))
+
+
+def cancel_booking_with_orders_route(
+    load_bookings,
+    save_bookings,
+    json_file_lock,
+    bookings_path,
+    load_orders,
+    save_orders,
+    orders_path,
+):
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login"))
+
+    table_id = request.form.get("table_id", type=int)
+    date_str = request.form.get("date")
+    time_str = request.form.get("time")
+    if not table_id or not date_str or not time_str:
+        return redirect(url_for("index"))
+
+    booking_removed = False
+    with json_file_lock(bookings_path):
+        bookings = load_bookings()
+        remaining_bookings = []
+        for booking in bookings:
+            if (
+                not booking_removed
+                and booking.get("user_id") == user_id
+                and booking.get("table_id") == table_id
+                and booking.get("date") == date_str
+                and booking.get("time") == time_str
+            ):
+                booking_removed = True
+                continue
+            remaining_bookings.append(booking)
+        if booking_removed:
+            save_bookings(remaining_bookings)
+
+    # Keep order state consistent with booking cancellation.
+    if booking_removed:
+        with json_file_lock(orders_path):
+            orders = load_orders()
+            changed = False
+            cancelled_at = datetime.now().isoformat(timespec="seconds")
+            for order in orders:
+                if order.get("user_id") != user_id:
+                    continue
+                if str(order.get("order_type") or "").strip().lower() == "delivery":
+                    continue
+                status_value = str(order.get("status") or "").strip().lower()
+                if status_value in {"cancelled", "canceled"}:
+                    continue
+                booking = order.get("booking") or {}
+                if (
+                    booking.get("table_id") == table_id
+                    and booking.get("date") == date_str
+                    and booking.get("time") == time_str
+                ):
+                    order["status"] = "cancelled"
+                    order["cancelled_at"] = cancelled_at
+                    changed = True
+            if changed:
+                save_orders(orders)
+
+    return redirect(url_for("index"))

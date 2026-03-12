@@ -107,6 +107,25 @@
         <p class="secondary-card__title">Доставка</p>
         <p class="secondary-card__text">Привезем быстро</p>
       </div>
+      <div class="delivery-scene" aria-hidden="true">
+        <svg class="delivery-scene__svg" viewBox="0 0 260 120" xmlns="http://www.w3.org/2000/svg">
+          <g class="wind">
+            <line class="wind-line w1" x1="58" y1="52" x2="94" y2="52" />
+            <line class="wind-line w2" x1="38" y1="66" x2="84" y2="66" />
+            <line class="wind-line w3" x1="48" y1="80" x2="90" y2="80" />
+          </g>
+          <g class="truck">
+            <image
+              class="truck-img"
+              x="20"
+              y="-40"
+              width="200"
+              height="200"
+              href="{{ url_for('static', filename='img/truck.svg') }}"
+            />
+          </g>
+        </svg>
+      </div>
     </a>
   </div>
 </section>
@@ -122,7 +141,7 @@
       <div class="booking-card">
         <div>
           <p class="booking-card__title">Стол №{{ booking.table_id }}</p>
-          <p class="booking-card__meta">{{ booking.date }} · {{ booking.time }}</p>
+          <p class="booking-card__meta">{{ booking.date_display or booking.date }} · {{ booking.time }}</p>
         </div>
         <div class="booking-card__actions">
           <a class="booking-card__action" href="{{ url_for('menu') }}">Меню</a>
@@ -152,7 +171,7 @@
       {% else %}
       <article class="news-card" role="listitem">
       {% endif %}
-        <div class="news-card__image"{% if card.photo %} style="background-image: url('{{ url_for('static', filename=card.photo) }}');"{% endif %}>
+        <div class="news-card__image"{% if card.photo %} style='background-image: url("{{ url_for("static", filename=card.photo) }}");'{% endif %}>
           <span class="news-card__accent">{{ card.accent }}</span>
         </div>
         <div class="news-card__body">
@@ -176,7 +195,7 @@
   <div class="menu">
     {% for dish in menu %}
       <a class="menu-card" href="{{ url_for('menu_item', item_id=dish.id) }}">
-        <div class="menu-card__media" style="background-image: url('{{ url_for('static', filename=dish.photo) }}');"></div>
+        <div class="menu-card__media" style='background-image: url("{{ url_for("static", filename=dish.photo) }}");'></div>
         <div class="menu-card__content">
           <div class="menu-card__title-row">
             <h3>{{ dish.name }}</h3>

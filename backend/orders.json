@@ -1028,5 +1028,167 @@
     "delivery_comment": "",
     "delivery_address": "ул. Шиллера 4б, д. 4б; кв./офис 5, этаж 3, домофон 5б",
     "delivery_eta_minutes": 20
+  },
+  {
+    "id": 29,
+    "user_id": 1,
+    "status": "preparing",
+    "created_at": "2026-03-12T16:00:52",
+    "items": [
+      {
+        "id": 303,
+        "name": "Дар бурмалды",
+        "price": 342,
+        "qty": 1,
+        "photo": "menu_items/Дар бурмалды/file_0000000068a472439ba6480ac6280a88.webp"
+      },
+      {
+        "id": 53,
+        "name": "Ледяной 200-й",
+        "price": 290,
+        "qty": 1,
+        "photo": "menu_items/Граната мороженое/granatasrag.webp"
+      }
+    ],
+    "items_total": 632,
+    "points_applied": 0,
+    "payable_total": 632,
+    "bonus_earned": 31,
+    "comment": "",
+    "serving": {
+      "label": "К началу брони",
+      "mode": "booking_start"
+    },
+    "booking": {
+      "table_id": 13,
+      "date": "2026-03-12",
+      "time": "16:30",
+      "status": "Active"
+    },
+    "payment_card": {
+      "brand": "МИР",
+      "last4": "4141",
+      "expiry": "12/42"
+    }
+  },
+  {
+    "id": 30,
+    "user_id": 1,
+    "status": "cancelled",
+    "created_at": "2026-03-12T16:39:31",
+    "items": [
+      {
+        "id": 144,
+        "name": "Каша патриот",
+        "price": 390,
+        "qty": 1,
+        "photo": "menu_items/Каша патриот/KASHA.webp"
+      },
+      {
+        "id": 303,
+        "name": "Дар бурмалды",
+        "price": 342,
+        "qty": 1,
+        "photo": "menu_items/Дар бурмалды/file_0000000068a472439ba6480ac6280a88.webp"
+      },
+      {
+        "id": 13,
+        "name": "Арсенал",
+        "price": 280,
+        "qty": 1,
+        "photo": "menu_items/Арсенал/Arsen.webp"
+      }
+    ],
+    "items_total": 1012,
+    "points_applied": 0,
+    "payable_total": 1012,
+    "bonus_earned": 50,
+    "comment": "",
+    "serving": {
+      "label": "К началу брони",
+      "mode": "booking_start"
+    },
+    "booking": {
+      "table_id": 13,
+      "date": "2026-03-12",
+      "time": "17:00",
+      "status": "Active"
+    },
+    "payment_card": {
+      "brand": "МИР",
+      "last4": "4141",
+      "expiry": "12/42"
+    },
+    "cancelled_at": "2026-03-12T16:41:59"
+  },
+  {
+    "id": 31,
+    "user_id": 1,
+    "status": "preparing",
+    "created_at": "2026-03-12T16:42:35",
+    "items": [
+      {
+        "id": 303,
+        "name": "Дар бурмалды",
+        "price": 342,
+        "qty": 1,
+        "photo": "menu_items/Дар бурмалды/file_0000000068a472439ba6480ac6280a88.webp"
+      }
+    ],
+    "items_total": 342,
+    "points_applied": 0,
+    "payable_total": 342,
+    "bonus_earned": 17,
+    "comment": "",
+    "serving": {
+      "label": "К началу брони",
+      "mode": "booking_start"
+    },
+    "booking": {
+      "table_id": 13,
+      "date": "2026-03-12",
+      "time": "17:00",
+      "status": "Active"
+    },
+    "payment_card": {
+      "brand": "МИР",
+      "last4": "4141",
+      "expiry": "12/42"
+    }
+  },
+  {
+    "id": 32,
+    "user_id": 1,
+    "order_type": "delivery",
+    "status": "cooking",
+    "created_at": "2026-03-12T17:06:54",
+    "items": [
+      {
+        "id": 22,
+        "name": "Сладкий надзор",
+        "photo": "menu_items/Сладкий надзор/ChatGPT-Image-12-мар.-2026-г._-15_53_53.webp",
+        "price": 404,
+        "qty": 1
+      }
+    ],
+    "items_total": 404,
+    "points_applied": 0,
+    "payable_total": 404,
+    "bonus_earned": 0,
+    "comment": "",
+    "serving": {},
+    "booking": {},
+    "payment_card": {},
+    "delivery_name": "Андрей",
+    "delivery_phone": "+79637371588",
+    "delivery_street": "Шиллера 4б",
+    "delivery_house": "4б",
+    "delivery_apartment": "5",
+    "delivery_entrance": "",
+    "delivery_floor": "3",
+    "delivery_intercom": "5б",
+    "delivery_comment": "",
+    "delivery_address": "ул. Шиллера 4б, д. 4б; кв./офис 5, этаж 3, домофон 5б",
+    "delivery_eta_minutes": 20
   }
 ]

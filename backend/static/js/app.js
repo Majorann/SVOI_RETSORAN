@@ -52,6 +52,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const cardNumberInput = document.querySelector('input[name="card_number"]');
   const expiryInput = document.querySelector('input[name="expiry"]');
   const holderInput = document.querySelector('input[name="holder"]');
+  const phoneInputs = Array.from(document.querySelectorAll('input[name="phone"]'));
   if (menuList && menuCards.length) {
     const sortLabels = {
       popular: "По популярности",
@@ -293,6 +294,73 @@ window.addEventListener("DOMContentLoaded", () => {
     });
     holderInput.addEventListener("blur", () => {
       holderInput.value = normalizeHolder(holderInput.value, true);
+    });
+  }
+
+  if (phoneInputs.length) {
+    const formatPhone = (value) => {
+      const raw = String(value || "").trim();
+      let digits = String(value || "").replace(/\D/g, "");
+      if (!digits) return "+7";
+
+      if (digits.startsWith("8") && digits.length >= 11) {
+        digits = digits.slice(1);
+      } else if (digits.startsWith("7") && (digits.length >= 11 || raw.startsWith("+7"))) {
+        digits = digits.slice(1);
+      }
+      const local = digits.slice(0, 10);
+
+      let result = "+7";
+      if (local.length > 0) result += ` ${local.slice(0, 3)}`;
+      if (local.length > 3) result += ` ${local.slice(3, 6)}`;
+      if (local.length > 6) result += `-${local.slice(6, 8)}`;
+      if (local.length > 8) result += `-${local.slice(8, 10)}`;
+      return result;
+    };
+
+    const enforcePhoneMask = (input) => {
+      input.value = formatPhone(input.value);
+      input.setCustomValidity("");
+    };
+
+    const syncPhoneVisualState = (input) => {
+      const digits = input.value.replace(/\D/g, "");
+      const isValidPhone = digits.length === 11 && digits.startsWith("7");
+      input.classList.toggle("is-phone-valid", isValidPhone);
+      return isValidPhone;
+    };
+
+    phoneInputs.forEach((input) => {
+      enforcePhoneMask(input);
+      syncPhoneVisualState(input);
+      input.addEventListener("focus", () => {
+        if (!input.value.trim()) input.value = "+7";
+        syncPhoneVisualState(input);
+      });
+      input.addEventListener("keydown", (event) => {
+        const start = input.selectionStart ?? 0;
+        const end = input.selectionEnd ?? start;
+        const touchesPrefix = start <= 2;
+        const deletesAll = start === 0 && end >= input.value.length;
+        if ((event.key === "Backspace" || event.key === "Delete") && (touchesPrefix || deletesAll)) {
+          event.preventDefault();
+          input.value = formatPhone(input.value);
+          input.setSelectionRange(2, 2);
+          syncPhoneVisualState(input);
+        }
+      });
+      input.addEventListener("input", () => {
+        enforcePhoneMask(input);
+        syncPhoneVisualState(input);
+      });
+      input.addEventListener("blur", () => {
+        if (!syncPhoneVisualState(input)) {
+          input.setCustomValidity("Введите номер в формате +7 999 000-00-00");
+        } else {
+          input.setCustomValidity("");
+        }
+        input.reportValidity();
+      });
     });
   }
 

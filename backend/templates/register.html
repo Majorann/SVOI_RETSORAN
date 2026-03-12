@@ -18,11 +18,11 @@
     {% endif %}
     <label class="field">
       <span>Имя</span>
-      <input type="text" name="name" placeholder="Ваше имя" required />
+      <input type="text" name="name" placeholder="Ваше имя" value="{{ form_name or '' }}" required />
     </label>
     <label class="field">
       <span>Номер телефона</span>
-      <input type="tel" name="phone" placeholder="+7 (999) 000-00-00" required />
+      <input type="tel" name="phone" placeholder="+7 999 000-00-00" value="{{ form_phone or '' }}" inputmode="tel" autocomplete="tel" required />
     </label>
     <label class="field">
       <span>Пароль</span>

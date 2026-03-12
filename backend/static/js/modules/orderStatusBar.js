@@ -171,6 +171,12 @@ const formatLongTimer = (seconds) => {
   return `${hh}:${mm}:${ss}`;
 };
 
+const parseIsoToMs = (value) => {
+  if (!value) return null;
+  const ts = Date.parse(String(value));
+  return Number.isFinite(ts) ? ts : null;
+};
+
 const pickRandomPhrase = (stageKey, previousPhrase) => {
   const pool = PHRASE_POOLS[stageKey] || [];
   if (!pool.length) return "";
@@ -373,12 +379,32 @@ const setupOrderStatusBar = () => {
     const elapsedFromSnapshot = Math.max(0, Math.floor((Date.now() - statusesSnapshotAtMs) / 1000));
     const rawRemainingSeconds = Math.max(0, Number(order?.phase_remaining_seconds) || 0);
     const rawEtaRemainingSeconds = Math.max(0, Number(order?.eta_remaining_seconds) || 0);
-    const remainingSeconds = Math.max(0, rawRemainingSeconds - elapsedFromSnapshot);
-    const etaRemainingSeconds = Math.max(0, rawEtaRemainingSeconds - elapsedFromSnapshot);
+    const remainingFromSnapshot = Math.max(0, rawRemainingSeconds - elapsedFromSnapshot);
+    const etaFromSnapshot = Math.max(0, rawEtaRemainingSeconds - elapsedFromSnapshot);
+    const phaseEndMs = parseIsoToMs(order?.phase_ends_at);
+    const phaseRemainingByDeadline = phaseEndMs === null
+      ? null
+      : Math.max(0, Math.ceil((phaseEndMs - Date.now()) / 1000));
+    const cycleStartMs = parseIsoToMs(order?.cycle_started_at);
+    const etaTotalSeconds = Number(order?.eta_total_seconds);
+    const etaEndMs = (cycleStartMs !== null && Number.isFinite(etaTotalSeconds))
+      ? cycleStartMs + (etaTotalSeconds * 1000)
+      : null;
+    const etaRemainingByDeadline = etaEndMs === null
+      ? null
+      : Math.max(0, Math.ceil((etaEndMs - Date.now()) / 1000));
+    const remainingSeconds = phaseRemainingByDeadline ?? remainingFromSnapshot;
+    const etaRemainingSeconds = etaRemainingByDeadline ?? etaFromSnapshot;
     const phaseProgress = Number(order?.phase_progress_ratio);
     const phaseRatio = Number.isFinite(phaseProgress)
       ? Math.max(0, Math.min(1, phaseProgress))
       : 0;
+    const backendTargetSecondsRaw = Number(order?.time_to_target_seconds);
+    const backendTargetSeconds = Number.isFinite(backendTargetSecondsRaw)
+      ? Math.max(0, Math.floor(backendTargetSecondsRaw) - elapsedFromSnapshot)
+      : null;
+    const fallbackTargetSeconds = flow === "delivery" ? etaRemainingSeconds : remainingSeconds;
+    const timeToTargetSeconds = backendTargetSeconds ?? fallbackTargetSeconds;
 
     const timer = phaseDef.stageKey === "waiting"
       ? formatLongTimer(remainingSeconds)
@@ -400,6 +426,7 @@ const setupOrderStatusBar = () => {
       icon: phaseDef.icon,
       timer,
       remainingSeconds,
+      timeToTargetSeconds,
       progressRatio: resolveProgressRatio(phaseDef.stageKey, phaseRatio),
       rowText: `Заказ №${orderId} — ${phaseDef.stageLabel} • ${rowTimer}`,
     };
@@ -413,6 +440,8 @@ const setupOrderStatusBar = () => {
     }
 
     active.sort((a, b) => {
+      const targetDiff = a.timeToTargetSeconds - b.timeToTargetSeconds;
+      if (targetDiff !== 0) return targetDiff;
       const phaseDiff = (STAGE_PRIORITY[a.stageKey] ?? 99) - (STAGE_PRIORITY[b.stageKey] ?? 99);
       if (phaseDiff !== 0) return phaseDiff;
       const remainingDiff = a.remainingSeconds - b.remainingSeconds;
