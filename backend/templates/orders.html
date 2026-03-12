@@ -1,9 +1,9 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block body_class %}page-orders{% endblock %}
 {% block content %}
 <header class="top">
   <div class="brand">
-    <div class="brand__mark">С</div>
+    <div class="brand__mark"><img class="brand__mark-img" src="{{ url_for('static', filename='img/orelll.svg') }}" alt="" aria-hidden="true" /></div>
     <div>
       <p class="brand__name">История заказов</p>
       <p class="brand__tag">Оплаченные заказы</p>
@@ -45,3 +45,4 @@
   {% endif %}
 </section>
 {% endblock %}
+

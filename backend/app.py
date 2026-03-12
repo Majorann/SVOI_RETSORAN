@@ -171,10 +171,12 @@ def keep_user_session():
     if not user_id:
         return
     session.permanent = True
-    if session.get("user_name"):
-        return
     user = next((u for u in load_users() if u.get("id") == user_id), None)
-    if user:
+    if not user:
+        # Do not hard-drop session on a single miss.
+        # A concurrent JSON write may produce a transient empty read.
+        return
+    if not session.get("user_name"):
         session["user_name"] = user.get("name")
 
 

@@ -3,7 +3,7 @@
 {% block content %}
 <header class="top">
   <div class="brand">
-    <div class="brand__mark">С</div>
+    <div class="brand__mark"><img class="brand__mark-img" src="{{ url_for('static', filename='img/orelll.svg') }}" alt="" aria-hidden="true" /></div>
     <div>
       <p class="brand__name">Свои</p>
       <p class="brand__tag">Домашний ресторан</p>
@@ -60,14 +60,10 @@
         <div class="order-status-bar__progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-label="Order status progress">
           <span id="orderStatusProgress">
             <span class="loop-wrapper" id="deliveryProgressLoop" aria-hidden="true">
-              <span class="mountain"></span>
-              <span class="hill"></span>
-              <span class="tree"></span>
-              <span class="tree"></span>
-              <span class="tree"></span>
-              <span class="rock"></span>
-              <span class="truck"></span>
-              <span class="wheels"></span>
+              <span class="delivery-progress-wind w1"></span>
+              <span class="delivery-progress-wind w2"></span>
+              <span class="delivery-progress-wind w3"></span>
+              <img class="delivery-progress-truck" src="{{ url_for('static', filename='img/truck2.svg') }}" alt="" />
             </span>
           </span>
         </div>
@@ -229,3 +225,4 @@
   </a>
 </nav>
 {% endblock %}
+

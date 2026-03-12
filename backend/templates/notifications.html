@@ -3,7 +3,7 @@
 {% block content %}
 <header class="top">
   <div class="brand">
-    <div class="brand__mark">С</div>
+    <div class="brand__mark"><img class="brand__mark-img" src="{{ url_for('static', filename='img/orelll.svg') }}" alt="" aria-hidden="true" /></div>
     <div>
       <p class="brand__name">Уведомления</p>
       <p class="brand__tag">Ваши брони</p>
@@ -36,10 +36,10 @@
       <div class="notice">
         <div class="notice__title">{{ order.get("status_title", "Заказ готовится") }}</div>
         <div class="notice__meta">
-          Заказ №{{ order.get("id") }} · Стол №{{ order.get("booking", {}).get("table_id") or "—" }}
+          Заказ №{{ order.get("id") }} · {{ order.get("notice_place") or ("Стол №" ~ (order.get("booking", {}).get("table_id") or "—")) }}
         </div>
         <div class="notice__meta">
-          Дата: {{ order.get("booking", {}).get("date_display") or order.get("created_at_display") }}
+          Дата: {{ order.get("notice_date_display") or order.get("created_at_display") }} · {{ order.get("notice_time_display") or "—" }}
         </div>
         <div class="notice__text">{{ order.get("status_text", "Осталось") }}: {{ order.get("status_remaining_mmss", "00:00") }}</div>
         <div class="notice__meta">Сумма: {{ order.get("payable_total") or order.get("items_total") }} ₽</div>
@@ -79,3 +79,4 @@
   </a>
 </nav>
 {% endblock %}
+

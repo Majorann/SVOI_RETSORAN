@@ -79,6 +79,13 @@ const setupTableTooltip = () => {
   let selectedTableLabel = "";
   let isDateValid = true;
 
+  const clearHoveredTables = (exceptTable = null) => {
+    document.querySelectorAll(".table.table--hovered").forEach((tableNode) => {
+      if (exceptTable && tableNode === exceptTable) return;
+      tableNode.classList.remove("table--hovered");
+    });
+  };
+
   const setBackdropVisible = (isVisible) => {
     if (!sheetBackdrop) return;
     sheetBackdrop.hidden = !isVisible;
@@ -205,6 +212,7 @@ const setupTableTooltip = () => {
     hallMap?.classList.remove("is-blurred-strong");
     hallMap?.classList.remove("is-booking");
     hallMap?.classList.remove("is-typing");
+    clearHoveredTables();
     if (!dateTimeSheet?.classList.contains("is-open")) setBackdropVisible(false);
     selectedTableId = null;
     selectedTableLabel = "";
@@ -426,6 +434,7 @@ const setupTableTooltip = () => {
 
     table.addEventListener("click", () => {
       if (!isFreeNow()) return;
+      clearHoveredTables(table);
       selectedTableId = table.dataset.id;
       selectedTableLabel = table.dataset.label || table.dataset.id;
       bookingTableId.textContent = table.querySelector(".table__top")?.textContent || "";
@@ -637,5 +646,4 @@ const setupTableTooltip = () => {
   updateDateValidation();
 };
 export { setupTableTooltip };
-
 
