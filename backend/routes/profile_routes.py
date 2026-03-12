@@ -61,6 +61,9 @@ def profile_route(load_users, load_bookings):
     user_name = session.get("user_name")
     error = request.args.get("error")
     user_record = next((u for u in load_users() if u.get("id") == user_id), None)
+    if not user_record:
+        session.clear()
+        return redirect(url_for("login", error="Сессия устарела. Войдите снова."))
     user = {
         "name": user_name or (user_record or {}).get("name") or "Имя пользователя",
         "avatar": None,
@@ -105,7 +108,8 @@ def add_card_route(load_users, save_users, json_file_lock, users_path):
         users = load_users()
         user_record = next((u for u in users if u.get("id") == user_id), None)
         if not user_record:
-            return redirect(url_for("profile", error="User not found."))
+            session.clear()
+            return redirect(url_for("login", error="Сессия устарела. Войдите снова."))
 
         cards = user_record.get("cards", [])
         for card in cards:
@@ -139,7 +143,8 @@ def delete_card_route(load_users, save_users, json_file_lock, users_path):
         users = load_users()
         user_record = next((u for u in users if u.get("id") == user_id), None)
         if not user_record:
-            return redirect(url_for("profile", error="User not found."))
+            session.clear()
+            return redirect(url_for("login", error="Сессия устарела. Войдите снова."))
 
         cards = list(user_record.get("cards", []))
         removed_index = None

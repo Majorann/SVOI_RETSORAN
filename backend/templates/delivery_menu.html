@@ -1,10 +1,10 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block body_class %}page-delivery-menu{% endblock %}
 {% block content %}
 <header class="top menu-top">
   <a class="icon-button menu-top__back" href="{{ url_for('index') }}" aria-label="Назад на главную">←</a>
   <div class="brand">
-    <div class="brand__mark">С</div>
+    <div class="brand__mark"><img class="brand__mark-img" src="{{ url_for('static', filename='img/orelll.svg') }}" alt="" aria-hidden="true" /></div>
     <div>
       <p class="brand__name">Доставка</p>
       <p class="brand__tag">Выберите блюда и оформите доставку</p>
@@ -77,3 +77,4 @@
   </a>
 </nav>
 {% endblock %}
+

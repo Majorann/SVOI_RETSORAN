@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import json
+import os
 
 
 def _read_json_list(path):
@@ -15,7 +16,10 @@ def _read_json_list(path):
 
 
 def _write_json_list(path, items):
-    path.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    payload = json.dumps(items, ensure_ascii=False, indent=2)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(payload, encoding="utf-8")
+    os.replace(tmp_path, path)
 
 
 def load_bookings_raw(bookings_path):

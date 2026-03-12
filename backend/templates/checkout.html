@@ -1,9 +1,9 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block body_class %}page-checkout page-checkout-payment{% endblock %}
 {% block content %}
 <header class="top checkout-head" id="checkoutHead">
   <div class="brand">
-    <div class="brand__mark">С</div>
+    <div class="brand__mark"><img class="brand__mark-img" src="{{ url_for('static', filename='img/orelll.svg') }}" alt="" aria-hidden="true" /></div>
     <div>
       <p class="brand__name">Перейти к оплате</p>
       <p class="brand__tag">Проверьте детали заказа перед оплатой</p>
@@ -161,3 +161,4 @@
   </a>
 </nav>
 {% endblock %}
+

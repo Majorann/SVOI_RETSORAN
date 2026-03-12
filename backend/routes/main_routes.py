@@ -14,6 +14,16 @@ def _format_date_ddmmyy(value):
         return str(value)
     return f"{day.zfill(2)}.{month.zfill(2)}.{year[-2:]}"
 
+def _format_time_hhmm(value):
+    if not value:
+        return "—"
+    text = str(value).strip()
+    if "T" in text:
+        text = text.split("T", 1)[1]
+    if len(text) >= 5 and text[2] == ":":
+        return text[:5]
+    return "—"
+
 
 _POPULAR_ROTATION_SEED = secrets.token_hex(8)
 
@@ -117,7 +127,22 @@ def notifications_route(load_bookings, get_user_preparing_orders):
         booking = dict(item.get("booking") or {})
         booking["date_display"] = _format_date_ddmmyy(booking.get("date"))
         item["booking"] = booking
-        item["created_at_display"] = _format_date_ddmmyy(str(item.get("created_at", "")).split("T")[0])
+        created_at_raw = str(item.get("created_at", "") or "")
+        created_date_raw = created_at_raw.split("T", 1)[0] if created_at_raw else ""
+        created_date_display = _format_date_ddmmyy(created_date_raw)
+        created_time_display = _format_time_hhmm(created_at_raw)
+        is_delivery = str(item.get("order_type") or "").strip().lower() == "delivery"
+
+        if is_delivery:
+            item["notice_place"] = "Доставка"
+            item["notice_date_display"] = created_date_display
+            item["notice_time_display"] = created_time_display
+        else:
+            item["notice_place"] = f"Стол №{booking.get('table_id') or '—'}"
+            item["notice_date_display"] = booking.get("date_display") or created_date_display
+            item["notice_time_display"] = booking.get("time") or created_time_display
+
+        item["created_at_display"] = created_date_display
         preparing_orders_view.append(item)
 
     return render_template(
