@@ -173,7 +173,11 @@ const formatLongTimer = (seconds) => {
 
 const parseIsoToMs = (value) => {
   if (!value) return null;
-  const ts = Date.parse(String(value));
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
+  const normalized = hasTimezone ? raw : `${raw}Z`;
+  const ts = Date.parse(normalized);
   return Number.isFinite(ts) ? ts : null;
 };
 
@@ -375,6 +379,7 @@ const setupOrderStatusBar = () => {
     const backendPhase = String(order?.phase || "");
     const phaseDef = PHASE_DEFS[flow]?.[backendPhase];
     if (!Number.isFinite(orderId) || !phaseDef) return null;
+    if (flow === "delivery" && phaseDef.stageKey === "delivery_delivered") return null;
 
     const elapsedFromSnapshot = Math.max(0, Math.floor((Date.now() - statusesSnapshotAtMs) / 1000));
     const rawRemainingSeconds = Math.max(0, Number(order?.phase_remaining_seconds) || 0);

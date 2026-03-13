@@ -1,10 +1,27 @@
-from datetime import datetime, timedelta
+import os
+from datetime import datetime, timedelta, timezone
 import json
+from zoneinfo import ZoneInfo
+
+
+def _resolve_app_timezone():
+    tz_name = (os.getenv("APP_TIMEZONE") or "Europe/Kaliningrad").strip()
+    try:
+        return ZoneInfo(tz_name)
+    except Exception:
+        return timezone.utc
+
+
+APP_TIMEZONE = _resolve_app_timezone()
+UTC = timezone.utc
 
 
 def parse_datetime_value(date_str, time_str):
     try:
-        return datetime.fromisoformat(f"{date_str}T{time_str}")
+        local_naive = datetime.fromisoformat(f"{date_str}T{time_str}")
+        local_aware = local_naive.replace(tzinfo=APP_TIMEZONE)
+        utc_aware = local_aware.astimezone(UTC)
+        return utc_aware.replace(tzinfo=None)
     except (TypeError, ValueError):
         return None
 
@@ -29,7 +46,10 @@ def parse_iso_datetime_value(value):
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            return parsed
+        return parsed.astimezone(UTC).replace(tzinfo=None)
     except (TypeError, ValueError):
         return None
 
@@ -285,6 +305,8 @@ def get_user_preparing_orders_value(user_id, load_orders_fn, build_timeline_fn):
         timeline = build_timeline_fn(order, now)
         if timeline is None:
             continue
+        if timeline.get("order_type") == "delivery" and timeline.get("phase") == "delivered":
+            continue
 
         order_type = timeline.get("order_type", "dine_in")
         phase = timeline.get("phase")
@@ -357,6 +379,8 @@ def list_active_order_statuses_value(user_id, load_orders_fn, build_timeline_fn)
     for order in orders:
         timeline = build_timeline_fn(order, now)
         if timeline is None:
+            continue
+        if timeline.get("order_type") == "delivery" and timeline.get("phase") == "delivered":
             continue
         timeline["created_at"] = order.get("created_at", "")
         active.append(timeline)
