@@ -44,17 +44,47 @@ from routes.main_routes import (
     points_route,
     reviews_route,
 )
-from storage.json_store import (
-    load_bookings as store_load_bookings,
-    load_bookings_raw as store_load_bookings_raw,
-    load_orders as store_load_orders,
-    load_users as store_load_users,
-    next_order_id as store_next_order_id,
-    next_user_id as store_next_user_id,
-    save_bookings as store_save_bookings,
-    save_orders as store_save_orders,
-    save_users as store_save_users,
-)
+if (os.getenv("DATABASE_URL") or "").strip():
+    try:
+        from storage.pg_store import (
+            load_bookings as store_load_bookings,
+            load_bookings_raw as store_load_bookings_raw,
+            load_orders as store_load_orders,
+            load_users as store_load_users,
+            next_order_id as store_next_order_id,
+            next_user_id as store_next_user_id,
+            save_bookings as store_save_bookings,
+            save_orders as store_save_orders,
+            save_users as store_save_users,
+        )
+        ACTIVE_STORAGE = "postgres"
+    except Exception as exc:
+        print(f"[storage] postgres init failed ({exc}), fallback=json")
+        from storage.json_store import (
+            load_bookings as store_load_bookings,
+            load_bookings_raw as store_load_bookings_raw,
+            load_orders as store_load_orders,
+            load_users as store_load_users,
+            next_order_id as store_next_order_id,
+            next_user_id as store_next_user_id,
+            save_bookings as store_save_bookings,
+            save_orders as store_save_orders,
+            save_users as store_save_users,
+        )
+        ACTIVE_STORAGE = "json"
+else:
+    from storage.json_store import (
+        load_bookings as store_load_bookings,
+        load_bookings_raw as store_load_bookings_raw,
+        load_orders as store_load_orders,
+        load_users as store_load_users,
+        next_order_id as store_next_order_id,
+        next_user_id as store_next_user_id,
+        save_bookings as store_save_bookings,
+        save_orders as store_save_orders,
+        save_users as store_save_users,
+    )
+    ACTIVE_STORAGE = "json"
 from services.business_logic import (
     build_order_status_timeline_value,
     compute_serve_datetime_value,
@@ -103,6 +133,17 @@ def env_str(name: str, default: str) -> str:
         return default
     return value.strip()
 
+
+def env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value.strip())
+    except (TypeError, ValueError):
+        return default
+
+
 app = Flask(__name__)
 app.permanent_session_lifetime = timedelta(days=30)
 # Секрет для сессий (в проде заменить)
@@ -123,9 +164,14 @@ if env_bool("TRUST_PROXY_HEADERS", True):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 _PROCESS_LOCKS = {}
 _PROCESS_LOCKS_GUARD = threading.RLock()
+_ORDER_PRUNE_LOCK = threading.RLock()
+_LAST_ORDER_PRUNE_AT = 0.0
+ORDER_RETENTION_DAYS = max(0, env_int("ORDER_RETENTION_DAYS", 7))
+ORDER_PRUNE_INTERVAL_SECONDS = max(15, env_int("ORDER_PRUNE_INTERVAL_SECONDS", 60))
 
 print(
-    "[storage] users={0} bookings={1} orders={2}".format(
+    "[storage] backend={0} users={1} bookings={2} orders={3}".format(
+        ACTIVE_STORAGE,
         USERS_PATH,
         BOOKINGS_PATH,
         ORDERS_PATH,
@@ -167,10 +213,17 @@ def json_file_lock(path: Path, timeout_seconds: float = 5.0, poll_interval: floa
 
 @app.before_request
 def keep_user_session():
+    if request.endpoint == "static":
+        return
+
     user_id = session.get("user_id")
     if not user_id:
         return
+
     session.permanent = True
+    if session.get("user_name"):
+        return
+
     user = next((u for u in load_users() if u.get("id") == user_id), None)
     if not user:
         # Do not hard-drop session on a single miss.
@@ -238,6 +291,7 @@ def debug_storage():
     return jsonify(
         {
             "ok": True,
+            "storage_backend": ACTIVE_STORAGE,
             "users_path": str(USERS_PATH),
             "bookings_path": str(BOOKINGS_PATH),
             "orders_path": str(ORDERS_PATH),
@@ -619,11 +673,56 @@ def save_bookings(bookings):
 
 
 def load_orders():
-    return store_load_orders(ORDERS_PATH)
+    orders = store_load_orders(ORDERS_PATH)
+    return prune_orders(orders)
 
 
 def save_orders(orders):
     store_save_orders(ORDERS_PATH, orders)
+
+
+def prune_orders(orders):
+    global _LAST_ORDER_PRUNE_AT
+    if ORDER_RETENTION_DAYS <= 0:
+        return orders
+
+    now_monotonic = time.monotonic()
+    with _ORDER_PRUNE_LOCK:
+        if now_monotonic - _LAST_ORDER_PRUNE_AT < ORDER_PRUNE_INTERVAL_SECONDS:
+            return orders
+        _LAST_ORDER_PRUNE_AT = now_monotonic
+
+    now_dt = datetime.now()
+    retention_delta = timedelta(days=ORDER_RETENTION_DAYS)
+    cleaned = []
+    changed = False
+
+    for order in orders:
+        if not isinstance(order, dict):
+            changed = True
+            continue
+
+        created_at = parse_iso_datetime_value(order.get("created_at"))
+        if created_at is None:
+            cleaned.append(order)
+            continue
+
+        timeline = build_order_status_timeline_value(order, now_dt, ORDER_STATUS_STEPS, parse_iso_datetime_value)
+        is_active = timeline is not None
+        is_fresh = (now_dt - created_at) <= retention_delta
+
+        if is_active or is_fresh:
+            cleaned.append(order)
+            continue
+        changed = True
+
+    if changed:
+        try:
+            store_save_orders(ORDERS_PATH, cleaned)
+        except Exception:
+            return orders
+        return cleaned
+    return orders
 
 
 def load_users():

@@ -62,8 +62,23 @@ def profile_route(load_users, load_bookings):
     error = request.args.get("error")
     user_record = next((u for u in load_users() if u.get("id") == user_id), None)
     if not user_record:
-        session.clear()
-        return redirect(url_for("login", error="Сессия устарела. Войдите снова."))
+        # Avoid hard logout on a transient storage miss (e.g. temporary DB hiccup).
+        if not user_name:
+            session.clear()
+            return redirect(url_for("login", error="Сессия устарела. Войдите снова."))
+        return render_template(
+            "profile.html",
+            user={
+                "name": user_name,
+                "avatar": None,
+                "balance": 0,
+                "cards": [],
+            },
+            cards=[],
+            bookings=[],
+            is_authenticated=True,
+            payment_error="Профиль временно недоступен, обновите страницу.",
+        )
     user = {
         "name": user_name or (user_record or {}).get("name") or "Имя пользователя",
         "avatar": None,
