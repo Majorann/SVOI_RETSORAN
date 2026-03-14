@@ -58,11 +58,20 @@ from storage.json_store import (
 
 ACTIVE_STORAGE = "json"
 _pg_store_module = None
-if (os.getenv("DATABASE_URL") or "").strip():
+_DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
+if _DATABASE_URL:
     try:
         from storage import pg_store as _pg_store_module
     except Exception as exc:
-        print(f"[storage] postgres import failed ({exc}), fallback=json")
+        raise RuntimeError(f"Postgres storage import failed: {exc}") from exc
+
+_redis_module = None
+_REDIS_URL = (os.getenv("REDIS_URL") or "").strip()
+if _REDIS_URL:
+    try:
+        import redis as _redis_module
+    except Exception as exc:
+        print(f"[cache] redis import failed ({exc}), menu cache disabled")
 from services.business_logic import (
     build_order_status_timeline_value,
     compute_serve_datetime_value,
@@ -110,16 +119,18 @@ def _activate_postgres_storage():
     global store_save_orders
     global store_save_users
 
-    if _pg_store_module is None:
+    if not _DATABASE_URL:
         return
+
+    if _pg_store_module is None:
+        raise RuntimeError("DATABASE_URL is set, but postgres storage is unavailable")
 
     try:
         # Validate the actual connection during app startup so the first request
         # does not crash when DATABASE_URL exists but is invalid/unreachable.
         _pg_store_module.load_users(USERS_PATH)
     except Exception as exc:
-        print(f"[storage] postgres connect failed ({exc}), fallback=json")
-        return
+        raise RuntimeError(f"Postgres connect failed during startup: {exc}") from exc
 
     store_load_bookings = _pg_store_module.load_bookings
     store_load_bookings_raw = _pg_store_module.load_bookings_raw
@@ -133,7 +144,16 @@ def _activate_postgres_storage():
     ACTIVE_STORAGE = "postgres"
 
 
+def _assert_storage_configuration():
+    if _DATABASE_URL and ACTIVE_STORAGE != "postgres":
+        raise RuntimeError("DATABASE_URL is set, but backend is not using Postgres")
+
+    if not _DATABASE_URL and ACTIVE_STORAGE != "json":
+        raise RuntimeError("DATABASE_URL is not set, but backend is not using JSON storage")
+
+
 _activate_postgres_storage()
+_assert_storage_configuration()
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -188,6 +208,11 @@ DB_KEEPALIVE_ENABLED = env_bool("DB_KEEPALIVE_ENABLED", True)
 DB_KEEPALIVE_INTERVAL_SECONDS = max(60, env_int("DB_KEEPALIVE_INTERVAL_SECONDS", 600))
 _DB_KEEPALIVE_STARTED = False
 _DB_KEEPALIVE_LOCK = threading.Lock()
+MENU_CACHE_ENABLED = env_bool("MENU_CACHE_ENABLED", True)
+MENU_CACHE_TTL_SECONDS = max(30, env_int("MENU_CACHE_TTL_SECONDS", 600))
+MENU_CACHE_KEY = env_str("MENU_CACHE_KEY", "menu:items:v1")
+_REDIS_CLIENT = None
+_REDIS_CLIENT_LOCK = threading.Lock()
 
 print(
     "[storage] backend={0} users={1} bookings={2} orders={3}".format(
@@ -231,6 +256,84 @@ def start_db_keepalive():
                 DB_KEEPALIVE_INTERVAL_SECONDS
             )
         )
+
+
+def get_redis_client():
+    global _REDIS_CLIENT
+    if not MENU_CACHE_ENABLED or not _REDIS_URL or _redis_module is None:
+        return None
+
+    with _REDIS_CLIENT_LOCK:
+        if _REDIS_CLIENT is not None:
+            return _REDIS_CLIENT
+        try:
+            client = _redis_module.Redis.from_url(
+                _REDIS_URL,
+                decode_responses=True,
+                socket_connect_timeout=5,
+                socket_timeout=5,
+            )
+            client.ping()
+        except Exception as exc:
+            print(f"[cache] redis connect failed ({exc}), menu cache disabled")
+            return None
+        _REDIS_CLIENT = client
+        print(
+            "[cache] redis menu cache enabled ttl={0}s key={1}".format(
+                MENU_CACHE_TTL_SECONDS,
+                MENU_CACHE_KEY,
+            )
+        )
+        return _REDIS_CLIENT
+
+
+def load_menu_items_from_disk():
+    items = []
+    if not MENU_ITEMS_PATH.exists():
+        return items
+
+    for item_dir in sorted(MENU_ITEMS_PATH.iterdir()):
+        if not item_dir.is_dir():
+            continue
+        meta_path = item_dir / MENU_META_NAME
+        photo_name = resolve_photo_name(item_dir, MENU_PHOTO_NAMES)
+        if not meta_path.exists() or not photo_name:
+            continue
+
+        meta = parse_menu_meta(meta_path)
+        menu_item = parse_menu_item(meta, item_dir.name, photo_name)
+        if menu_item is None:
+            continue
+        items.append(menu_item)
+
+    items.sort(key=lambda item: item["id"])
+    return items
+
+
+def load_menu_items():
+    client = get_redis_client()
+    if client is not None:
+        try:
+            cached_payload = client.get(MENU_CACHE_KEY)
+            if cached_payload:
+                items = json.loads(cached_payload)
+                if isinstance(items, list):
+                    return items
+        except Exception as exc:
+            print(f"[cache] redis menu read failed ({exc}), fallback=disk")
+
+    items = load_menu_items_from_disk()
+
+    if client is not None:
+        try:
+            client.setex(
+                MENU_CACHE_KEY,
+                MENU_CACHE_TTL_SECONDS,
+                json.dumps(items, ensure_ascii=False),
+            )
+        except Exception as exc:
+            print(f"[cache] redis menu write failed ({exc})")
+    return items
 
 
 @contextmanager
@@ -519,30 +622,6 @@ def book_table():
         json_file_lock,
         BOOKINGS_PATH,
     )
-
-
-def load_menu_items():
-    # Загружаем блюда из static/menu_items/<slug>/item.txt + photo.png
-    items = []
-    if not MENU_ITEMS_PATH.exists():
-        return items
-
-    for item_dir in sorted(MENU_ITEMS_PATH.iterdir()):
-        if not item_dir.is_dir():
-            continue
-        meta_path = item_dir / MENU_META_NAME
-        photo_name = resolve_photo_name(item_dir, MENU_PHOTO_NAMES)
-        if not meta_path.exists() or not photo_name:
-            continue
-
-        meta = parse_menu_meta(meta_path)
-        menu_item = parse_menu_item(meta, item_dir.name, photo_name)
-        if menu_item is None:
-            continue
-        items.append(menu_item)
-
-    items.sort(key=lambda item: item["id"])
-    return items
 
 
 def load_promo_items():

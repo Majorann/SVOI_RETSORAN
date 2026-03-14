@@ -107,6 +107,13 @@ python app.py
 - `static/js/modules/orderStatusBar.js` — логика стадий заказа, таймеры, фразы и анимации now bar.
 - `static/js/modules/pointsBalanceCard.js` — анимация/адаптация карточки баллов.
 
+## Хранилища
+
+- Если `DATABASE_URL` не задан, backend работает на локальных JSON-файлах.
+- Если `DATABASE_URL` задан, backend работает только через Postgres и не откатывается на JSON.
+- При недоступности Postgres приложение завершается на старте, чтобы не было скрытого расхождения данных между двумя хранилищами.
+- Меню может дополнительно кэшироваться в Redis, если задан `REDIS_URL`.
+
 ## Хранилища (JSON)
 
 ### bookings.json
@@ -149,12 +156,24 @@ python app.py
 - Флаг secure-cookie: `SESSION_COOKIE_SECURE` (env)
 - Keepalive для Postgres/Neon: `DB_KEEPALIVE_ENABLED=true/false` (env)
 - Интервал keepalive в секундах: `DB_KEEPALIVE_INTERVAL_SECONDS` (env, минимум `60`, по умолчанию `600`)
+- URL Redis для кэша меню: `REDIS_URL` (env)
+- Включение кэша меню: `MENU_CACHE_ENABLED=true/false` (env)
+- TTL кэша меню в Redis: `MENU_CACHE_TTL_SECONDS` (env, минимум `30`, по умолчанию `600`)
+- Ключ Redis для меню: `MENU_CACHE_KEY` (env, по умолчанию `menu:items:v1`)
 
 ## Postgres / Neon keepalive
 
 - Если активен `DATABASE_URL` и backend работает через Postgres, приложение поднимает фоновый keepalive-поток.
-- Keepalive делает `SELECT 1` через заданный интервал, чтобы соединение не простаивало слишком долго.
-- При обрыве соединения выполняется переподключение, ошибка логируется, но Flask-приложение не падает.
+- Keepalive делает регулярный пустой ping-запрос `SELECT 1`, чтобы Neon не засыпал от простоя.
+- При обрыве соединения keepalive пытается переподключиться.
+- Если Postgres недоступен на старте, приложение сразу завершается, а не переключается на JSON.
+
+## Redis-кэш меню
+
+- Если задан `REDIS_URL`, backend пытается использовать Redis только как кэш меню.
+- Меню всё так же собирается из `static/menu_items/*`, но результат сохраняется в Redis на заданный TTL.
+- При недоступности Redis приложение не падает: меню просто читается напрямую из файлов.
+- Кэш работает только на сервере и не влияет на производительность устройств пользователей.
 
 ## Безопасность и валидация
 
