@@ -15,15 +15,21 @@ window.addEventListener("DOMContentLoaded", () => {
   setupOrderStatusBar();
   setupDeliveryFlow();
 
-  const menuList = document.querySelector(".menu");
+  const menuViewport = document.getElementById("menuViewport");
+  const menuList = document.getElementById("menuList") || document.querySelector(".menu");
   const menuCards = Array.from(document.querySelectorAll(".menu-card--menu"));
   const categoryChips = Array.from(document.querySelectorAll(".menu-chip"));
+  const typeToggle = document.getElementById("typeToggle");
+  const typeMenu = document.getElementById("typeMenu");
+  const typeOptions = Array.from(document.querySelectorAll(".filter-option"));
+  const typeValue = document.getElementById("typeValue");
   const sortToggle = document.getElementById("sortToggle");
   const sortMenu = document.getElementById("sortMenu");
   const sortOptions = Array.from(document.querySelectorAll(".sort-option"));
   const sortValue = document.getElementById("sortValue");
   const cartDrawer = document.getElementById("cartDrawer");
   const cartOverlay = document.getElementById("cartOverlay");
+  const cartOverlayHint = document.getElementById("cartOverlayHint");
   const cartList = document.getElementById("cartList");
   const cartEmpty = document.getElementById("cartEmpty");
   const cartTotal = document.getElementById("cartTotal");
@@ -61,11 +67,17 @@ window.addEventListener("DOMContentLoaded", () => {
     };
     let activeCategory = "all";
     let activeSort = "popular";
+    let isMenuTransitionRunning = false;
+    let pendingCategory = null;
     const normalizeType = (value) =>
       String(value || "")
         .toLowerCase()
         .replace(/\s+/g, " ")
         .trim();
+    const categoryOrder = categoryChips.map((chip) => chip.dataset.type || "all");
+    const categoryLabels = new Map(
+      categoryChips.map((chip) => [chip.dataset.type || "all", chip.textContent.trim() || "Все"])
+    );
 
     const getNumber = (value) => {
       const parsed = Number(value);
@@ -94,62 +106,175 @@ window.addEventListener("DOMContentLoaded", () => {
       sortMenu?.setAttribute("aria-hidden", "true");
     };
 
+    const closeTypeMenu = () => {
+      typeMenu?.classList.remove("is-open");
+      typeToggle?.setAttribute("aria-expanded", "false");
+      typeMenu?.setAttribute("aria-hidden", "true");
+    };
+
     const openSortMenu = () => {
+      closeTypeMenu();
       sortMenu?.classList.add("is-open");
       sortToggle?.setAttribute("aria-expanded", "true");
       sortMenu?.setAttribute("aria-hidden", "false");
     };
 
-    const applyMenuControls = (animate = true) => {
-      menuList.classList.toggle("menu--updating", animate);
-      const run = () => {
-        const selectedType = normalizeType(activeCategory);
-        const filtered = menuCards
-          .filter((card) => {
-            if (selectedType === "all") return true;
-            return normalizeType(card.dataset.type) === selectedType;
-          })
-          .sort(compareCards);
+    const openTypeMenu = () => {
+      closeSortMenu();
+      typeMenu?.classList.add("is-open");
+      typeToggle?.setAttribute("aria-expanded", "true");
+      typeMenu?.setAttribute("aria-hidden", "false");
+    };
 
-        menuCards.forEach((card) => {
-          card.hidden = true;
-          card.style.display = "none";
-          card.classList.remove("menu-card--reveal");
-        });
-        filtered.forEach((card, index) => {
-          card.hidden = false;
-          card.style.display = "";
-          menuList.appendChild(card);
-          if (animate) {
-            card.style.animationDelay = `${index * 28}ms`;
-            card.classList.add("menu-card--reveal");
-          }
-        });
+    const getFilteredCards = (category) => {
+      const selectedType = normalizeType(category);
+      return menuCards
+        .filter((card) => {
+          if (selectedType === "all") return true;
+          return normalizeType(card.dataset.type) === selectedType;
+        })
+        .sort(compareCards);
+    };
 
-        if (sortValue) {
-          sortValue.textContent = sortLabels[activeSort] || sortLabels.popular;
-        }
-        categoryChips.forEach((chip) => {
-          chip.classList.toggle("is-active", chip.dataset.type === activeCategory);
-        });
-        sortOptions.forEach((option) => {
-          option.classList.toggle("is-active", option.dataset.sort === activeSort);
-        });
-        if (animate) {
-          window.setTimeout(() => menuList.classList.remove("menu--updating"), 190);
-        }
-      };
-      if (animate) {
-        window.setTimeout(run, 70);
-      } else {
-        run();
+    const syncMenuControls = () => {
+      if (sortValue) {
+        sortValue.textContent = sortLabels[activeSort] || sortLabels.popular;
       }
+      if (typeValue) {
+        typeValue.textContent = categoryLabels.get(activeCategory) || "Все";
+      }
+      categoryChips.forEach((chip) => {
+        chip.classList.toggle("is-active", chip.dataset.type === activeCategory);
+      });
+      typeOptions.forEach((option) => {
+        option.classList.toggle("is-active", option.dataset.type === activeCategory);
+      });
+      sortOptions.forEach((option) => {
+        option.classList.toggle("is-active", option.dataset.sort === activeSort);
+      });
+    };
+
+    const renderMenuCards = (cards, animate = true) => {
+      menuCards.forEach((card) => {
+        card.hidden = true;
+        card.style.display = "none";
+        card.style.animationDelay = "";
+        card.classList.remove("menu-card--reveal", "is-expanded");
+      });
+
+      cards.forEach((card, index) => {
+        card.hidden = false;
+        card.style.display = "";
+        menuList.appendChild(card);
+        if (animate) {
+          card.style.animationDelay = `${index * 28}ms`;
+          card.classList.add("menu-card--reveal");
+        }
+      });
+    };
+
+    const finishMenuTransition = (outgoingLayer) => {
+      outgoingLayer?.remove();
+      menuList.classList.remove(
+        "menu--transition-layer",
+        "menu--incoming",
+        "menu--from-left",
+        "menu--from-right"
+      );
+      if (menuViewport) {
+        menuViewport.classList.remove("is-animating");
+        menuViewport.style.height = "";
+      }
+      isMenuTransitionRunning = false;
+
+      if (pendingCategory && pendingCategory !== activeCategory) {
+        const nextCategory = pendingCategory;
+        pendingCategory = null;
+        activateCategory(nextCategory);
+      } else {
+        pendingCategory = null;
+      }
+    };
+
+    const animateCategoryTransition = (nextCategory) => {
+      if (!menuViewport) {
+        activeCategory = nextCategory;
+        renderMenuCards(getFilteredCards(activeCategory), true);
+        syncMenuControls();
+        return;
+      }
+
+      const currentIndex = Math.max(0, categoryOrder.indexOf(activeCategory));
+      const nextIndex = Math.max(0, categoryOrder.indexOf(nextCategory));
+      const direction = nextIndex >= currentIndex ? "forward" : "backward";
+      const currentCards = Array.from(menuList.children).filter((card) => !card.hidden);
+      const nextCards = getFilteredCards(nextCategory);
+      const outgoingLayer = menuList.cloneNode(false);
+      const currentHeight = menuList.offsetHeight;
+
+      isMenuTransitionRunning = true;
+      activeCategory = nextCategory;
+      syncMenuControls();
+
+      outgoingLayer.id = "";
+      outgoingLayer.className = `${menuList.className} menu--transition-layer menu--outgoing ${
+        direction === "forward" ? "menu--to-left" : "menu--to-right"
+      }`;
+      currentCards.forEach((card) => {
+        outgoingLayer.appendChild(card.cloneNode(true));
+      });
+
+      menuViewport.classList.add("is-animating");
+      menuViewport.appendChild(outgoingLayer);
+      renderMenuCards(nextCards, false);
+      menuViewport.style.height = `${Math.max(currentHeight, menuList.offsetHeight)}px`;
+      menuList.classList.add(
+        "menu--transition-layer",
+        "menu--incoming",
+        direction === "forward" ? "menu--from-right" : "menu--from-left"
+      );
+
+      requestAnimationFrame(() => {
+        const onTransitionEnd = () => {
+          menuList.removeEventListener("animationend", onTransitionEnd);
+          renderMenuCards(nextCards, true);
+          finishMenuTransition(outgoingLayer);
+        };
+        menuList.addEventListener("animationend", onTransitionEnd);
+      });
+    };
+
+    const activateCategory = (nextCategory) => {
+      const normalizedNextCategory = nextCategory || "all";
+      if (normalizedNextCategory === activeCategory) return;
+      if (isMenuTransitionRunning) {
+        pendingCategory = normalizedNextCategory;
+        return;
+      }
+      animateCategoryTransition(normalizedNextCategory);
+    };
+
+    const applyMenuControls = (animate = true) => {
+      renderMenuCards(getFilteredCards(activeCategory), animate);
+      syncMenuControls();
     };
 
     categoryChips.forEach((chip) => {
       chip.addEventListener("click", () => {
-        activeCategory = chip.dataset.type || "all";
-        applyMenuControls(true);
+        closeTypeMenu();
+        activateCategory(chip.dataset.type || "all");
+      });
+    });
+
+    typeToggle?.addEventListener("click", () => {
+      if (!typeMenu?.classList.contains("is-open")) openTypeMenu();
+      else closeTypeMenu();
+    });
+
+    typeOptions.forEach((option) => {
+      option.addEventListener("click", () => {
+        closeTypeMenu();
+        activateCategory(option.dataset.type || "all");
       });
     });
 
@@ -170,6 +295,12 @@ window.addEventListener("DOMContentLoaded", () => {
       if (!sortMenu || !sortToggle) return;
       if (sortMenu.contains(event.target) || sortToggle.contains(event.target)) return;
       closeSortMenu();
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!typeMenu || !typeToggle) return;
+      if (typeMenu.contains(event.target) || typeToggle.contains(event.target)) return;
+      closeTypeMenu();
     });
 
     const isMenuMobileViewport = () => window.matchMedia("(max-width: 767px)").matches;
@@ -394,6 +525,43 @@ window.addEventListener("DOMContentLoaded", () => {
   let mobileDragStartY = 0;
   let mobileDragY = 0;
   let mobileDrawerHeight = 0;
+  const mobileCartHintMinGap = 88;
+  let mobileCartHintHideTimer = null;
+
+  const hideMobileCartHint = () => {
+    if (!cartOverlayHint) return;
+    cartOverlayHint.classList.remove("is-visible");
+    if (mobileCartHintHideTimer) {
+      window.clearTimeout(mobileCartHintHideTimer);
+    }
+    mobileCartHintHideTimer = window.setTimeout(() => {
+      if (!cartOverlayHint.classList.contains("is-visible")) {
+        cartOverlayHint.hidden = true;
+        cartOverlayHint.style.top = "";
+      }
+      mobileCartHintHideTimer = null;
+    }, 260);
+  };
+
+  const updateMobileCartHint = () => {
+    if (!cartOverlayHint || !isMenuMobile() || !mobileCartOpen || !cartDrawer || cartDrawer.hidden) {
+      hideMobileCartHint();
+      return;
+    }
+    const drawerRect = cartDrawer.getBoundingClientRect();
+    const topGap = Math.max(0, drawerRect.top);
+    if (topGap < mobileCartHintMinGap) {
+      hideMobileCartHint();
+      return;
+    }
+    if (mobileCartHintHideTimer) {
+      window.clearTimeout(mobileCartHintHideTimer);
+      mobileCartHintHideTimer = null;
+    }
+    cartOverlayHint.hidden = false;
+    cartOverlayHint.style.top = `${Math.round(topGap / 2)}px`;
+    requestAnimationFrame(() => cartOverlayHint.classList.add("is-visible"));
+  };
 
   const syncFabState = (cartCount) => {
     if (!menuCartFab || !menuCartFabBadge) return;
@@ -417,6 +585,7 @@ window.addEventListener("DOMContentLoaded", () => {
       cartOverlay.style.opacity = "";
       cartOverlay.hidden = true;
     }
+    hideMobileCartHint();
     document.body.classList.remove("menu-cart-open", "menu-cart-open-mobile");
     if (menuCartFab) {
       menuCartFab.setAttribute("aria-expanded", "false");
@@ -457,6 +626,7 @@ window.addEventListener("DOMContentLoaded", () => {
     requestAnimationFrame(() => {
       cartDrawer.classList.add("is-open", "is-settle");
       window.setTimeout(() => cartDrawer.classList.remove("is-settle"), 120);
+      window.setTimeout(updateMobileCartHint, 220);
     });
   };
 
@@ -471,6 +641,7 @@ window.addEventListener("DOMContentLoaded", () => {
         cartDrawer.classList.remove("is-open", "is-settle", "is-closing");
         cartOverlay?.classList.remove("is-open");
         if (cartOverlay) cartOverlay.hidden = true;
+        hideMobileCartHint();
         document.body.classList.remove("menu-cart-open-mobile", "menu-cart-open");
       }
       return;
@@ -485,6 +656,7 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     cartOverlay?.classList.remove("is-open");
     if (cartOverlay) cartOverlay.hidden = true;
+    hideMobileCartHint();
 
     const closeDurationMs = 360;
     if (hasItems) {
@@ -578,6 +750,7 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     syncFabState(cartCount);
     setDrawerState(cart.length > 0);
+    updateMobileCartHint();
     updateMenuButtons(cart);
   };
 
@@ -698,6 +871,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const delta = touch.clientY - mobileDragStartY;
     mobileDragY = Math.max(0, delta);
     cartDrawer.style.transform = `translateY(${mobileDragY}px)`;
+    updateMobileCartHint();
     if (cartOverlay && mobileDrawerHeight > 0) {
       const progress = Math.max(0, Math.min(1, mobileDragY / (mobileDrawerHeight * 0.9)));
       cartOverlay.style.opacity = String(1 - progress);
@@ -722,6 +896,7 @@ window.addEventListener("DOMContentLoaded", () => {
       cartOverlay.style.opacity = "";
     }
     mobileDragY = 0;
+    updateMobileCartHint();
   };
 
   if (cartDrawerHeader) {
@@ -738,7 +913,12 @@ window.addEventListener("DOMContentLoaded", () => {
 
   menuMobileQuery.addEventListener("change", () => {
     mobileCartOpen = false;
+    hideMobileCartHint();
     setDrawerState(normalizeCart(loadCart()).length > 0);
+  });
+
+  window.addEventListener("resize", () => {
+    updateMobileCartHint();
   });
 
   cartCheckout?.addEventListener("click", () => {

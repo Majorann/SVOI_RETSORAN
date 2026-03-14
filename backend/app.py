@@ -44,47 +44,25 @@ from routes.main_routes import (
     points_route,
     reviews_route,
 )
+from storage.json_store import (
+    load_bookings as store_load_bookings,
+    load_bookings_raw as store_load_bookings_raw,
+    load_orders as store_load_orders,
+    load_users as store_load_users,
+    next_order_id as store_next_order_id,
+    next_user_id as store_next_user_id,
+    save_bookings as store_save_bookings,
+    save_orders as store_save_orders,
+    save_users as store_save_users,
+)
+
+ACTIVE_STORAGE = "json"
+_pg_store_module = None
 if (os.getenv("DATABASE_URL") or "").strip():
     try:
-        from storage.pg_store import (
-            load_bookings as store_load_bookings,
-            load_bookings_raw as store_load_bookings_raw,
-            load_orders as store_load_orders,
-            load_users as store_load_users,
-            next_order_id as store_next_order_id,
-            next_user_id as store_next_user_id,
-            save_bookings as store_save_bookings,
-            save_orders as store_save_orders,
-            save_users as store_save_users,
-        )
-        ACTIVE_STORAGE = "postgres"
+        from storage import pg_store as _pg_store_module
     except Exception as exc:
-        print(f"[storage] postgres init failed ({exc}), fallback=json")
-        from storage.json_store import (
-            load_bookings as store_load_bookings,
-            load_bookings_raw as store_load_bookings_raw,
-            load_orders as store_load_orders,
-            load_users as store_load_users,
-            next_order_id as store_next_order_id,
-            next_user_id as store_next_user_id,
-            save_bookings as store_save_bookings,
-            save_orders as store_save_orders,
-            save_users as store_save_users,
-        )
-        ACTIVE_STORAGE = "json"
-else:
-    from storage.json_store import (
-        load_bookings as store_load_bookings,
-        load_bookings_raw as store_load_bookings_raw,
-        load_orders as store_load_orders,
-        load_users as store_load_users,
-        next_order_id as store_next_order_id,
-        next_user_id as store_next_user_id,
-        save_bookings as store_save_bookings,
-        save_orders as store_save_orders,
-        save_users as store_save_users,
-    )
-    ACTIVE_STORAGE = "json"
+        print(f"[storage] postgres import failed ({exc}), fallback=json")
 from services.business_logic import (
     build_order_status_timeline_value,
     compute_serve_datetime_value,
@@ -118,6 +96,44 @@ from config import (
     WALLS,
 )
 from models import MenuItem, PromoItem
+
+
+def _activate_postgres_storage():
+    global ACTIVE_STORAGE
+    global store_load_bookings
+    global store_load_bookings_raw
+    global store_load_orders
+    global store_load_users
+    global store_next_order_id
+    global store_next_user_id
+    global store_save_bookings
+    global store_save_orders
+    global store_save_users
+
+    if _pg_store_module is None:
+        return
+
+    try:
+        # Validate the actual connection during app startup so the first request
+        # does not crash when DATABASE_URL exists but is invalid/unreachable.
+        _pg_store_module.load_users(USERS_PATH)
+    except Exception as exc:
+        print(f"[storage] postgres connect failed ({exc}), fallback=json")
+        return
+
+    store_load_bookings = _pg_store_module.load_bookings
+    store_load_bookings_raw = _pg_store_module.load_bookings_raw
+    store_load_orders = _pg_store_module.load_orders
+    store_load_users = _pg_store_module.load_users
+    store_next_order_id = _pg_store_module.next_order_id
+    store_next_user_id = _pg_store_module.next_user_id
+    store_save_bookings = _pg_store_module.save_bookings
+    store_save_orders = _pg_store_module.save_orders
+    store_save_users = _pg_store_module.save_users
+    ACTIVE_STORAGE = "postgres"
+
+
+_activate_postgres_storage()
 
 
 def env_bool(name: str, default: bool) -> bool:
