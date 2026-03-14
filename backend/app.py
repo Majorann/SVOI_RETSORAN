@@ -243,14 +243,11 @@ DB_KEEPALIVE_INTERVAL_SECONDS = max(60, env_int("DB_KEEPALIVE_INTERVAL_SECONDS",
 _DB_KEEPALIVE_STARTED = False
 _DB_KEEPALIVE_LOCK = threading.Lock()
 DEBUG_STORAGE_ENABLED = env_bool("DEBUG_STORAGE_ENABLED", False)
-MOBILE_REQUEST_LOGGING_ENABLED = env_bool("MOBILE_REQUEST_LOGGING_ENABLED", True)
-MOBILE_REQUEST_LOG_DIR = Path(__file__).resolve().parent / "mobile_request_logs"
 MENU_CACHE_ENABLED = env_bool("MENU_CACHE_ENABLED", True)
 MENU_CACHE_TTL_SECONDS = max(30, env_int("MENU_CACHE_TTL_SECONDS", 600))
 MENU_CACHE_KEY = env_str("MENU_CACHE_KEY", "menu:items:v1")
 _REDIS_CLIENT = None
 _REDIS_CLIENT_LOCK = threading.Lock()
-_MOBILE_LOG_LOCK = threading.Lock()
 
 print(
     "[storage] backend={0} users={1} bookings={2} orders={3}".format(
@@ -415,62 +412,6 @@ def storage_write_lock(path: Path, timeout_seconds: float = 5.0, poll_interval: 
         return
     yield
 
-
-def is_mobile_request():
-    sec_ch_mobile = (request.headers.get("Sec-CH-UA-Mobile") or "").strip()
-    if sec_ch_mobile == "?1":
-        return True
-
-    user_agent = (request.headers.get("User-Agent") or "").lower()
-    mobile_markers = (
-        "android",
-        "iphone",
-        "ipad",
-        "ipod",
-        "mobile",
-        "opera mini",
-        "windows phone",
-        "blackberry",
-    )
-    return any(marker in user_agent for marker in mobile_markers)
-
-
-def write_mobile_request_log(response):
-    if not MOBILE_REQUEST_LOGGING_ENABLED:
-        return response
-    if request.endpoint == "static":
-        return response
-    if not is_mobile_request():
-        return response
-
-    try:
-        MOBILE_REQUEST_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        log_path = MOBILE_REQUEST_LOG_DIR / f"mobile-requests-{date.today().isoformat()}.log"
-        log_entry = {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "method": request.method,
-            "path": request.path,
-            "query_string": request.query_string.decode("utf-8", errors="replace"),
-            "status_code": response.status_code,
-            "remote_addr": request.headers.get("X-Forwarded-For") or request.remote_addr,
-            "user_agent": request.headers.get("User-Agent", ""),
-            "origin": request.headers.get("Origin", ""),
-            "referer": request.headers.get("Referer", ""),
-            "host": request.host,
-            "storage_backend": ACTIVE_STORAGE,
-            "session_user_id": session.get("user_id"),
-            "has_session_cookie": bool(request.cookies.get(app.config.get("SESSION_COOKIE_NAME", "session"))),
-            "content_type": request.content_type or "",
-            "form_keys": sorted(request.form.keys()),
-            "json_keys": sorted((request.get_json(silent=True) or {}).keys()) if request.is_json else [],
-        }
-        with _MOBILE_LOG_LOCK:
-            with log_path.open("a", encoding="utf-8") as log_file:
-                log_file.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-    except Exception as exc:
-        print(f"[mobile-log] write failed ({exc})")
-    return response
-
 @app.before_request
 def keep_user_session():
     if request.endpoint == "static":
@@ -513,11 +454,6 @@ def validate_csrf_token():
     if request.is_json:
         return jsonify({"ok": False, "error": "CSRF token is missing or invalid."}), 400
     return redirect(url_for("index"))
-
-
-@app.after_request
-def log_mobile_requests(response):
-    return write_mobile_request_log(response)
 
 @app.route("/")
 def index():
