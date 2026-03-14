@@ -147,6 +147,14 @@ python app.py
 - Стены: `WALLS` в `config.py` + координаты в `style.css`
 - Секрет сессии: `FLASK_SECRET_KEY` (env)
 - Флаг secure-cookie: `SESSION_COOKIE_SECURE` (env)
+- Keepalive для Postgres/Neon: `DB_KEEPALIVE_ENABLED=true/false` (env)
+- Интервал keepalive в секундах: `DB_KEEPALIVE_INTERVAL_SECONDS` (env, минимум `60`, по умолчанию `600`)
+
+## Postgres / Neon keepalive
+
+- Если активен `DATABASE_URL` и backend работает через Postgres, приложение поднимает фоновый keepalive-поток.
+- Keepalive делает `SELECT 1` через заданный интервал, чтобы соединение не простаивало слишком долго.
+- При обрыве соединения выполняется переподключение, ошибка логируется, но Flask-приложение не падает.
 
 ## Безопасность и валидация
 
@@ -251,4 +259,3 @@ active=true
 Важно:
 - Файлы `users.json`, `bookings.json`, `orders.json` в Render живут на эфемерной файловой системе.
 - Для учебного проекта это нормально, но данные могут сбрасываться при пересборке/рестарте.
-

@@ -184,6 +184,10 @@ _ORDER_PRUNE_LOCK = threading.RLock()
 _LAST_ORDER_PRUNE_AT = 0.0
 ORDER_RETENTION_DAYS = max(0, env_int("ORDER_RETENTION_DAYS", 7))
 ORDER_PRUNE_INTERVAL_SECONDS = max(15, env_int("ORDER_PRUNE_INTERVAL_SECONDS", 60))
+DB_KEEPALIVE_ENABLED = env_bool("DB_KEEPALIVE_ENABLED", True)
+DB_KEEPALIVE_INTERVAL_SECONDS = max(60, env_int("DB_KEEPALIVE_INTERVAL_SECONDS", 600))
+_DB_KEEPALIVE_STARTED = False
+_DB_KEEPALIVE_LOCK = threading.Lock()
 
 print(
     "[storage] backend={0} users={1} bookings={2} orders={3}".format(
@@ -193,6 +197,40 @@ print(
         ORDERS_PATH,
     )
 )
+
+
+def _db_keepalive_loop():
+    while True:
+        time.sleep(DB_KEEPALIVE_INTERVAL_SECONDS)
+        if ACTIVE_STORAGE != "postgres" or _pg_store_module is None:
+            continue
+        try:
+            _pg_store_module.ping()
+            print("[storage] postgres keepalive ok")
+        except Exception as exc:
+            print(f"[storage] postgres keepalive failed ({exc})")
+
+
+def start_db_keepalive():
+    global _DB_KEEPALIVE_STARTED
+    if not DB_KEEPALIVE_ENABLED or ACTIVE_STORAGE != "postgres" or _pg_store_module is None:
+        return
+
+    with _DB_KEEPALIVE_LOCK:
+        if _DB_KEEPALIVE_STARTED:
+            return
+        worker = threading.Thread(
+            target=_db_keepalive_loop,
+            name="postgres-keepalive",
+            daemon=True,
+        )
+        worker.start()
+        _DB_KEEPALIVE_STARTED = True
+        print(
+            "[storage] postgres keepalive started interval={0}s".format(
+                DB_KEEPALIVE_INTERVAL_SECONDS
+            )
+        )
 
 
 @contextmanager
@@ -858,6 +896,9 @@ def add_card():
 @app.post("/cards/delete")
 def delete_card():
     return delete_card_route(load_users, save_users, json_file_lock, USERS_PATH)
+
+
+start_db_keepalive()
 
 
 if __name__ == "__main__":

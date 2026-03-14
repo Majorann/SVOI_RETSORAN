@@ -1,5 +1,17 @@
 # История изменений
 
+## 14.03.2026
+
+### Надёжность Postgres / Neon
+- Добавлен фоновый keepalive для Postgres/Neon в `backend/app.py`:
+  - запускается только при активном `DATABASE_URL`;
+  - периодически пингует БД через `SELECT 1`;
+  - не роняет приложение при временной ошибке соединения.
+- В `backend/storage/pg_store.py` добавлены `ping()` и сброс stale-соединения с переподключением.
+- В `backend/README.md` задокументированы env-параметры:
+  - `DB_KEEPALIVE_ENABLED`
+  - `DB_KEEPALIVE_INTERVAL_SECONDS`
+
 ## 11.02.2026
 
 ### Редизайн UI (тёплая тёмная тема)

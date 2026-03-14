@@ -33,6 +33,17 @@ def _get_conn():
     return conn
 
 
+def _reset_conn():
+    conn = getattr(_LOCAL, "conn", None)
+    if conn is None:
+        return
+    try:
+        conn.close()
+    except Exception:
+        pass
+    _LOCAL.conn = None
+
+
 def _ensure_schema():
     global _SCHEMA_READY
     if _SCHEMA_READY:
@@ -139,3 +150,19 @@ def next_order_id(orders):
     if not orders:
         return 1
     return max(o.get("id", 0) for o in orders) + 1
+
+
+def ping():
+    try:
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        return True
+    except Exception:
+        _reset_conn()
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        return True
