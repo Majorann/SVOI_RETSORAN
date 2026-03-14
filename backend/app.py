@@ -341,7 +341,49 @@ def load_menu_items_from_disk():
             continue
         items.append(menu_item)
 
+    items = ensure_unique_menu_item_ids(items)
     items.sort(key=lambda item: item["id"])
+    return items
+
+
+def ensure_unique_menu_item_ids(items):
+    used_ids = set()
+    max_id = max(
+        (
+            item_id
+            for item in items
+            for item_id in [item.get("id")]
+            if isinstance(item_id, int) and item_id > 0
+        ),
+        default=0,
+    )
+
+    for item in items:
+        item_id = item.get("id")
+        if isinstance(item_id, int) and item_id > 0 and item_id not in used_ids:
+            used_ids.add(item_id)
+            continue
+
+        new_id = max_id + 1
+        while new_id in used_ids:
+            new_id += 1
+
+        if isinstance(item_id, int) and item_id > 0:
+            message = "[menu] duplicate item id detected for '{0}': {1} -> {2}"
+        else:
+            message = "[menu] invalid item id detected for '{0}': {1} -> {2}"
+
+        print(
+            message.format(
+                item.get("name", "unknown"),
+                item_id,
+                new_id,
+            )
+        )
+        item["id"] = new_id
+        used_ids.add(new_id)
+        max_id = new_id
+
     return items
 
 
@@ -731,10 +773,15 @@ def resolve_photo_name(item_dir: Path, photo_names):
 
 def parse_menu_item(meta: dict, slug: str, photo_name: str):
     try:
-        item_id = int(meta.get("id", ""))
         price = int(meta.get("price", ""))
     except ValueError:
         return None
+    try:
+        item_id = int(meta.get("id", ""))
+        if item_id <= 0:
+            item_id = None
+    except ValueError:
+        item_id = None
     try:
         popularity = int(meta.get("popularity", meta.get("orders_count", "0")))
     except ValueError:
