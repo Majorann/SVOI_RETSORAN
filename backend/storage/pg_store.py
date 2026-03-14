@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 from datetime import datetime, timedelta
 
 import psycopg
@@ -10,6 +11,20 @@ _SCHEMA_LOCK = threading.Lock()
 _LOCAL = threading.local()
 
 
+def _env_int(name, default):
+    value = (os.getenv(name) or "").strip()
+    if not value:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+DB_OPERATION_RETRIES = max(1, _env_int("DB_OPERATION_RETRIES", 3))
+DB_RETRY_DELAY_SECONDS = max(1, _env_int("DB_RETRY_DELAY_SECONDS", 2))
+
+
 def _database_url():
     url = (os.getenv("DATABASE_URL") or "").strip()
     if not url:
@@ -18,7 +33,7 @@ def _database_url():
 
 
 def _connect():
-    return psycopg.connect(_database_url(), autocommit=True, connect_timeout=5)
+    return psycopg.connect(_database_url(), autocommit=True, connect_timeout=10)
 
 
 def _get_conn():
@@ -75,29 +90,49 @@ def _ensure_schema():
         _SCHEMA_READY = True
 
 
+def _run_db_operation(operation):
+    last_error = None
+    for attempt in range(DB_OPERATION_RETRIES):
+        try:
+            return operation()
+        except Exception as exc:
+            last_error = exc
+            _reset_conn()
+            if attempt == DB_OPERATION_RETRIES - 1:
+                break
+            time.sleep(DB_RETRY_DELAY_SECONDS)
+    raise last_error
+
+
 def _load_state(key):
-    _ensure_schema()
-    conn = _get_conn()
-    with conn.cursor() as cur:
-        cur.execute("SELECT state_value FROM app_state WHERE state_key = %s", (key,))
-        row = cur.fetchone()
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT state_value FROM app_state WHERE state_key = %s", (key,))
+            return cur.fetchone()
+
+    row = _run_db_operation(operation)
     value = row[0] if row else []
     return value if isinstance(value, list) else []
 
 
 def _save_state(key, items):
-    _ensure_schema()
-    conn = _get_conn()
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO app_state(state_key, state_value, updated_at)
-            VALUES (%s, %s::jsonb, NOW())
-            ON CONFLICT (state_key)
-            DO UPDATE SET state_value = EXCLUDED.state_value, updated_at = NOW()
-            """,
-            (key, psycopg.types.json.Jsonb(items)),
-        )
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO app_state(state_key, state_value, updated_at)
+                VALUES (%s, %s::jsonb, NOW())
+                ON CONFLICT (state_key)
+                DO UPDATE SET state_value = EXCLUDED.state_value, updated_at = NOW()
+                """,
+                (key, psycopg.types.json.Jsonb(items)),
+            )
+
+    _run_db_operation(operation)
 
 
 def load_bookings_raw(_bookings_path):
@@ -153,16 +188,11 @@ def next_order_id(orders):
 
 
 def ping():
-    try:
+    def operation():
         conn = _get_conn()
         with conn.cursor() as cur:
             cur.execute("SELECT 1")
             cur.fetchone()
         return True
-    except Exception:
-        _reset_conn()
-        conn = _get_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1")
-            cur.fetchone()
-        return True
+
+    return _run_db_operation(operation)

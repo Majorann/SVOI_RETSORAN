@@ -107,6 +107,23 @@ from config import (
 from models import MenuItem, PromoItem
 
 
+def _env_int_early(name: str, default: int) -> int:
+    value = (os.getenv(name) or "").strip()
+    if not value:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+POSTGRES_STARTUP_RETRIES = max(1, _env_int_early("POSTGRES_STARTUP_RETRIES", 4))
+POSTGRES_STARTUP_RETRY_DELAY_SECONDS = max(
+    1,
+    _env_int_early("POSTGRES_STARTUP_RETRY_DELAY_SECONDS", 3),
+)
+
+
 def _activate_postgres_storage():
     global ACTIVE_STORAGE
     global store_load_bookings
@@ -125,12 +142,29 @@ def _activate_postgres_storage():
     if _pg_store_module is None:
         raise RuntimeError("DATABASE_URL is set, but postgres storage is unavailable")
 
-    try:
-        # Validate the actual connection during app startup so the first request
-        # does not crash when DATABASE_URL exists but is invalid/unreachable.
-        _pg_store_module.load_users(USERS_PATH)
-    except Exception as exc:
-        raise RuntimeError(f"Postgres connect failed during startup: {exc}") from exc
+    last_error = None
+    for attempt in range(POSTGRES_STARTUP_RETRIES):
+        try:
+            # Neon may need a few seconds to wake up on a cold start.
+            _pg_store_module.load_users(USERS_PATH)
+            last_error = None
+            break
+        except Exception as exc:
+            last_error = exc
+            if attempt == POSTGRES_STARTUP_RETRIES - 1:
+                break
+            print(
+                "[storage] postgres startup retry {0}/{1} failed ({2}), waiting {3}s".format(
+                    attempt + 1,
+                    POSTGRES_STARTUP_RETRIES,
+                    exc,
+                    POSTGRES_STARTUP_RETRY_DELAY_SECONDS,
+                )
+            )
+            time.sleep(POSTGRES_STARTUP_RETRY_DELAY_SECONDS)
+
+    if last_error is not None:
+        raise RuntimeError(f"Postgres connect failed during startup: {last_error}") from last_error
 
     store_load_bookings = _pg_store_module.load_bookings
     store_load_bookings_raw = _pg_store_module.load_bookings_raw
@@ -208,6 +242,7 @@ DB_KEEPALIVE_ENABLED = env_bool("DB_KEEPALIVE_ENABLED", True)
 DB_KEEPALIVE_INTERVAL_SECONDS = max(60, env_int("DB_KEEPALIVE_INTERVAL_SECONDS", 600))
 _DB_KEEPALIVE_STARTED = False
 _DB_KEEPALIVE_LOCK = threading.Lock()
+DEBUG_STORAGE_ENABLED = env_bool("DEBUG_STORAGE_ENABLED", False)
 MENU_CACHE_ENABLED = env_bool("MENU_CACHE_ENABLED", True)
 MENU_CACHE_TTL_SECONDS = max(30, env_int("MENU_CACHE_TTL_SECONDS", 600))
 MENU_CACHE_KEY = env_str("MENU_CACHE_KEY", "menu:items:v1")
@@ -368,6 +403,15 @@ def json_file_lock(path: Path, timeout_seconds: float = 5.0, poll_interval: floa
             except FileNotFoundError:
                 pass
 
+
+@contextmanager
+def storage_write_lock(path: Path, timeout_seconds: float = 5.0, poll_interval: float = 0.05):
+    if ACTIVE_STORAGE == "json":
+        with json_file_lock(path, timeout_seconds=timeout_seconds, poll_interval=poll_interval):
+            yield
+        return
+    yield
+
 @app.before_request
 def keep_user_session():
     if request.endpoint == "static":
@@ -442,6 +486,8 @@ def api_order_statuses():
 
 @app.get("/debug/storage")
 def debug_storage():
+    if not DEBUG_STORAGE_ENABLED:
+        return render_template("placeholder.html", title="Страница не найдена"), 404
     users = load_users()
     bookings = load_bookings_raw()
     orders = load_orders()
@@ -494,7 +540,7 @@ def delivery_checkout():
 @app.post("/delivery/confirm")
 def delivery_confirm():
     return delivery_confirm_route(
-        json_file_lock,
+        storage_write_lock,
         ORDERS_PATH,
         load_orders,
         next_order_id,
@@ -529,7 +575,7 @@ def register():
         save_users,
         next_user_id,
         hash_password,
-        json_file_lock,
+        storage_write_lock,
         USERS_PATH,
     )
 
@@ -602,7 +648,7 @@ def payment_confirm():
     return payment_confirm_route(
         latest_user_booking_status,
         load_users,
-        json_file_lock,
+        storage_write_lock,
         ORDERS_PATH,
         load_orders,
         next_order_id,
@@ -619,7 +665,7 @@ def book_table():
         load_bookings,
         save_bookings,
         overlaps_booking,
-        json_file_lock,
+        storage_write_lock,
         BOOKINGS_PATH,
     )
 
@@ -959,7 +1005,7 @@ def cancel_booking():
     return cancel_booking_with_orders_route(
         load_bookings,
         save_bookings,
-        json_file_lock,
+        storage_write_lock,
         BOOKINGS_PATH,
         load_orders,
         save_orders,
@@ -969,12 +1015,12 @@ def cancel_booking():
 
 @app.post("/cards/add")
 def add_card():
-    return add_card_route(load_users, save_users, json_file_lock, USERS_PATH)
+    return add_card_route(load_users, save_users, storage_write_lock, USERS_PATH)
 
 
 @app.post("/cards/delete")
 def delete_card():
-    return delete_card_route(load_users, save_users, json_file_lock, USERS_PATH)
+    return delete_card_route(load_users, save_users, storage_write_lock, USERS_PATH)
 
 
 start_db_keepalive()
