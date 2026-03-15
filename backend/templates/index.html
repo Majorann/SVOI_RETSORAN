@@ -11,10 +11,13 @@
 </header>
 
 <div class="index-side-human" aria-hidden="true">
-  <img src="{{ url_for('static', filename='img/human1_general.webp') }}" alt="" />
+  <img src="{{ url_for('static', filename='img/person3.svg') }}" alt="" />
 </div>
 
 <section class="section hero">
+  <div class="hero__table" aria-hidden="true">
+    <img src="{{ url_for('static', filename='img/table.svg') }}" alt="" />
+  </div>
   <p class="hero__eyebrow">Сервис бронирования</p>
   <h1 class="hero__title">Уютный столик в пару касаний</h1>
   <p class="hero__text">Выберите время, место в зале и подтвердите бронь онлайн без звонка.</p>
@@ -161,23 +164,26 @@
   </div>
   <div class="news" role="list">
     {% for card in news %}
-      {% if card.link %}
-      <a class="news-card" role="listitem" href="{{ card.link }}" target="_blank" rel="noopener noreferrer">
-      {% else %}
-      <article class="news-card" role="listitem">
-      {% endif %}
-        <div class="news-card__image"{% if card.photo %} style='background-image: url("{{ url_for("static", filename=card.photo) }}");'{% endif %}>
+      <article
+        class="news-card{% if card.link %} news-card--linked{% endif %}"
+        role="listitem"
+        tabindex="0"
+        aria-expanded="false"
+        {% if card.link %}data-link="{{ card.link }}"{% endif %}
+      >
+        <div class="news-card__image">
+          {% if card.photo %}
+          <img class="news-card__img" src="{{ url_for('static', filename=card.photo) }}" alt="" loading="lazy" />
+          {% endif %}
           <span class="news-card__accent">{{ card.accent }}</span>
         </div>
-        <div class="news-card__body">
-          <h3>{{ card.title }}</h3>
-          <p>{{ card.text }}</p>
+        <div class="news-card__details">
+          <div class="news-card__body">
+            <h3>{{ card.title }}</h3>
+            <p class="news-card__text">{{ card.text }}</p>
+          </div>
         </div>
-      {% if card.link %}
-      </a>
-      {% else %}
       </article>
-      {% endif %}
     {% endfor %}
   </div>
 </section>

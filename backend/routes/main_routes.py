@@ -1,5 +1,4 @@
 from flask import redirect, render_template, session, url_for
-import hashlib
 import secrets
 
 
@@ -25,13 +24,19 @@ def _format_time_hhmm(value):
     return "—"
 
 
-_POPULAR_ROTATION_SEED = secrets.token_hex(8)
+_POPULAR_ROTATOR = secrets.SystemRandom()
 
 
-def _rotation_key(item):
-    item_id = str(item.get("id", ""))
-    digest = hashlib.sha256(f"{_POPULAR_ROTATION_SEED}:{item_id}".encode("utf-8")).hexdigest()
-    return digest
+def _pick_popular_items(items, limit):
+    pool = list(items or [])
+    if not pool:
+        return []
+    safe_limit = max(1, int(limit or 1))
+    if len(pool) <= safe_limit:
+        return pool[:safe_limit]
+    if len(pool) <= 10:
+        return pool[:safe_limit]
+    return _POPULAR_ROTATOR.sample(pool, safe_limit)
 
 
 def index_route(
@@ -57,14 +62,9 @@ def index_route(
     all_menu_items = load_menu_items()
     limit = max(1, int(popular_menu_limit or 3))
     featured_items = [item for item in all_menu_items if item.get("featured")]
-    if len(featured_items) > limit:
-        featured_items = sorted(featured_items, key=_rotation_key)
-    popular_menu = featured_items[:limit]
+    popular_menu = _pick_popular_items(featured_items, limit)
     if not popular_menu:
-        fallback_items = all_menu_items
-        if len(fallback_items) > limit:
-            fallback_items = sorted(fallback_items, key=_rotation_key)
-        popular_menu = fallback_items[:limit]
+        popular_menu = _pick_popular_items(all_menu_items, limit)
     if user_id:
         bookings = [b for b in bookings if b.get("user_id") == user_id]
         preparing_orders = get_user_preparing_orders(user_id)

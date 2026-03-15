@@ -9,6 +9,8 @@ class MenuItem:
     type: str
     price: int
     photo: str
+    portion_label: str = ""
+    portion_tone_rgb: str = ""
     popularity: int = 0
     featured: bool = False
 

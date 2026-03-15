@@ -15,6 +15,112 @@ window.addEventListener("DOMContentLoaded", () => {
   setupOrderStatusBar();
   setupDeliveryFlow();
 
+  const newsCards = Array.from(document.querySelectorAll(".news-card"));
+  if (newsCards.length) {
+    const newsAnimationTimers = new WeakMap();
+    const newsTouchQuery = window.matchMedia("(hover: none) and (pointer: coarse)");
+    const isTouchNewsMode = () => newsTouchQuery.matches;
+    const syncNewsCardMetrics = () => {
+      newsCards.forEach((card) => {
+        const text = card.querySelector(".news-card__text");
+        const details = card.querySelector(".news-card__details");
+        const wasExpanded = card.classList.contains("is-expanded");
+        card.classList.remove("is-expanded");
+        const collapsedHeight = details ? details.scrollHeight : 0;
+
+        card.classList.add("is-expanded");
+        const expandedHeight = details ? details.scrollHeight : collapsedHeight;
+
+        card.classList.toggle("is-expanded", wasExpanded);
+        card.style.setProperty("--news-details-collapsed-height", `${collapsedHeight}px`);
+        card.style.setProperty("--news-details-expanded-height", `${expandedHeight}px`);
+        if (text) {
+          card.style.setProperty("--news-text-expanded-height", `${text.scrollHeight}px`);
+        }
+      });
+    };
+    const clearNewsTimer = (card) => {
+      const timerId = newsAnimationTimers.get(card);
+      if (timerId) {
+        window.clearTimeout(timerId);
+        newsAnimationTimers.delete(card);
+      }
+    };
+    const pulseNewsState = (card, stateClass, durationMs) => {
+      clearNewsTimer(card);
+      card.classList.remove("is-expanding", "is-collapsing");
+      if (!stateClass) return;
+      card.classList.add(stateClass);
+      const timerId = window.setTimeout(() => {
+        card.classList.remove(stateClass);
+        newsAnimationTimers.delete(card);
+      }, durationMs);
+      newsAnimationTimers.set(card, timerId);
+    };
+    const setNewsExpanded = (card, expanded) => {
+      if (expanded) {
+        card.classList.remove("is-collapsing");
+        pulseNewsState(card, "is-expanding", 340);
+      } else {
+        card.classList.remove("is-expanding");
+        pulseNewsState(card, "is-collapsing", 240);
+      }
+      card.classList.toggle("is-expanded", expanded);
+      card.setAttribute("aria-expanded", expanded ? "true" : "false");
+    };
+
+    const collapseNewsCards = () => {
+      newsCards.forEach((card) => {
+        setNewsExpanded(card, false);
+      });
+    };
+
+    newsCards.forEach((card) => {
+      card.addEventListener("click", (event) => {
+        const cardLink = card.dataset.link;
+        if (cardLink) {
+          window.location.href = cardLink;
+          return;
+        }
+        if (!isTouchNewsMode()) return;
+        const willExpand = !card.classList.contains("is-expanded");
+        setNewsExpanded(card, willExpand);
+      });
+
+      card.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        const cardLink = card.dataset.link;
+        if (cardLink) {
+          window.location.href = cardLink;
+          return;
+        }
+        if (!isTouchNewsMode()) return;
+        const willExpand = !card.classList.contains("is-expanded");
+        setNewsExpanded(card, willExpand);
+      });
+    });
+
+    document.addEventListener("click", (event) => {
+      if (event.target.closest(".news-card")) return;
+      collapseNewsCards();
+    });
+
+    syncNewsCardMetrics();
+    window.addEventListener("resize", syncNewsCardMetrics);
+    const syncNewsInteractionMode = () => {
+      if (!isTouchNewsMode()) {
+        collapseNewsCards();
+      }
+    };
+    if (typeof newsTouchQuery.addEventListener === "function") {
+      newsTouchQuery.addEventListener("change", syncNewsInteractionMode);
+    } else if (typeof newsTouchQuery.addListener === "function") {
+      newsTouchQuery.addListener(syncNewsInteractionMode);
+    }
+    window.addEventListener("resize", syncNewsInteractionMode);
+  }
+
   const menuViewport = document.getElementById("menuViewport");
   const menuList = document.getElementById("menuList") || document.querySelector(".menu");
   const menuCards = Array.from(document.querySelectorAll(".menu-card--menu"));
@@ -59,6 +165,28 @@ window.addEventListener("DOMContentLoaded", () => {
   const expiryInput = document.querySelector('input[name="expiry"]');
   const holderInput = document.querySelector('input[name="holder"]');
   const phoneInputs = Array.from(document.querySelectorAll('input[name="phone"]'));
+  const desktopMenuHands = document.querySelector(".menu-side-hands");
+
+  const syncDesktopMenuHands = () => {
+    if (!desktopMenuHands || !document.body.classList.contains("page-menu")) return;
+    if (window.innerWidth < 1180) {
+      desktopMenuHands.style.removeProperty("left");
+      desktopMenuHands.style.removeProperty("width");
+      return;
+    }
+
+    const dpr = Math.max(window.devicePixelRatio || 1, 1);
+    const zoomFactor = Math.min(Math.max((dpr - 1) / 1, 0), 1);
+    const widthPx = Math.round(1700 - zoomFactor * 180);
+    const leftPercent = 52 + zoomFactor * 4;
+    const leftOffsetPx = 260 + zoomFactor * 120;
+
+    desktopMenuHands.style.width = `${widthPx}px`;
+    desktopMenuHands.style.left = `calc(${leftPercent}% + ${leftOffsetPx}px)`;
+  };
+
+  syncDesktopMenuHands();
+  window.addEventListener("resize", syncDesktopMenuHands);
   if (menuList && menuCards.length) {
     const sortLabels = {
       popular: "По популярности",

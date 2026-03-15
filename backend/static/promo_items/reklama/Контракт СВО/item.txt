@@ -1,0 +1,6 @@
+﻿id=1
+class=reklama
+text=Подпиши контракт!
+link=https://www.gosuslugi.ru/life/details/sign_up_volunteer
+priority=10
+active=true
