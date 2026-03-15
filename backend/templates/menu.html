@@ -17,6 +17,7 @@
   <div class="brand__mark menu-top__mark"><img class="brand__mark-img" src="{{ url_for('static', filename='img/orelll.svg') }}" alt="" aria-hidden="true" /></div>
   <div class="menu-top__heading">
     <p class="brand__name menu-top__title">{% if delivery_mode %}Меню доставки{% else %}Меню{% endif %}</p>
+    <img class="menu-top__hands" src="{{ url_for('static', filename='img/hands.svg') }}" alt="" aria-hidden="true" />
   </div>
   <span class="menu-top__ghost" aria-hidden="true"></span>
 </header>
@@ -106,6 +107,9 @@
     {% for item in items %}
       <article class="menu-card menu-card--menu" data-type="{{ item.type }}" data-price="{{ item.price }}" data-popularity="{{ item.popularity or item.orders_count or 0 }}" style="--dish-photo: url('{{ url_for('static', filename=item.photo) }}');">
         <div class="menu-card__media" style="background-image: var(--dish-photo);">
+          {% if item.portion_label %}
+          <span class="menu-card__portion menu-card__portion--media"{% if item.portion_tone_rgb %} style="--portion-dot-rgb: {{ item.portion_tone_rgb }};"{% endif %}>{{ item.portion_label }}</span>
+          {% endif %}
         </div>
         <div class="menu-card__content">
           <div class="menu-card__text">
@@ -116,7 +120,9 @@
             <p class="menu-card__lore">{{ item.lore }}</p>
             <div class="menu-card__bottom">
               <span class="price">{{ item.price }} ₽</span>
-              <button class="add-button" type="button" data-id="{{ item.id }}" data-name="{{ item.name }}" data-price="{{ item.price }}" data-photo="{{ item.photo }}">В корзину</button>
+              <div class="menu-card__cta-group">
+                <button class="add-button" type="button" data-id="{{ item.id }}" data-name="{{ item.name }}" data-price="{{ item.price }}" data-photo="{{ item.photo }}">В корзину</button>
+              </div>
             </div>
           </div>
         </div>
@@ -125,6 +131,10 @@
   </div>
   </div>
 </section>
+</div>
+
+<div class="menu-side-hands" aria-hidden="true">
+  <img src="{{ url_for('static', filename='img/hands.svg') }}" alt="" />
 </div>
 
 <button

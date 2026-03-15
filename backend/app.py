@@ -11,6 +11,7 @@ from contextlib import contextmanager
 import json
 import hashlib
 import os
+import re
 import secrets
 import threading
 import time
@@ -736,6 +737,19 @@ def load_promo_items():
     return items
 
 
+def is_placeholder_promo(meta: dict) -> bool:
+    item_class = (meta.get("class", "") or "").strip().lower()
+    if item_class == "reklama":
+        text = (meta.get("text", "") or "").strip()
+        link = (meta.get("link", "") or "").strip()
+        return text == "Текст рекламного блока." and link == "https://example.com"
+    if item_class == "akciya":
+        name = (meta.get("name", "") or "").strip()
+        lore = (meta.get("lore", "") or "").strip()
+        return name == "Название акции" and lore == "Описание акции и условия."
+    return False
+
+
 def parse_menu_meta(meta_path: Path):
     # Формат item.txt: key=value, пустые строки и # комментарии игнорируются
     data = {}
@@ -771,6 +785,58 @@ def resolve_photo_name(item_dir: Path, photo_names):
     return None
 
 
+def normalize_portion_label(raw_value: str) -> str:
+    value = (raw_value or "").strip()
+    if not value:
+        return ""
+
+    numeric_match = re.fullmatch(r"(\d{2,4})(?:[.,]\d+)?", value)
+    if numeric_match:
+        return f"{numeric_match.group(1)} г"
+
+    unit_match = re.fullmatch(r"(\d{2,4})(?:[.,]\d+)?\s*(г|гр|g|мл|ml)", value, re.IGNORECASE)
+    if unit_match:
+        unit = unit_match.group(2).lower()
+        normalized_unit = "мл" if unit in {"ml", "мл"} else "г"
+        return f"{unit_match.group(1)} {normalized_unit}"
+
+    return value
+
+
+def resolve_menu_portion_label(meta: dict) -> str:
+    for key in ("portion", "weight", "grams", "gram", "volume", "serving", "yield"):
+        value = normalize_portion_label(meta.get(key, ""))
+        if value:
+            return value
+    return ""
+
+
+def extract_portion_amount(portion_label: str) -> float | None:
+    match = re.search(r"(\d{2,4})(?:[.,]\d+)?", portion_label or "")
+    if not match:
+        return None
+    try:
+        return float(match.group(1).replace(",", "."))
+    except ValueError:
+        return None
+
+
+def build_portion_tone_rgb(portion_label: str) -> str:
+    amount = extract_portion_amount(portion_label)
+    if amount is None:
+        return "194, 168, 144"
+
+    # Smoothly shift from creamy coffee to terracotta orange as the portion grows.
+    min_amount = 160.0
+    max_amount = 420.0
+    t = max(0.0, min(1.0, (amount - min_amount) / (max_amount - min_amount)))
+
+    start = (194, 168, 144)
+    end = (214, 112, 74)
+    rgb = tuple(round(start[i] + (end[i] - start[i]) * t) for i in range(3))
+    return f"{rgb[0]}, {rgb[1]}, {rgb[2]}"
+
+
 def parse_menu_item(meta: dict, slug: str, photo_name: str):
     try:
         price = int(meta.get("price", ""))
@@ -795,6 +861,8 @@ def parse_menu_item(meta: dict, slug: str, photo_name: str):
 
     featured_value = meta.get("featured", "false").lower()
     featured = featured_value in {"1", "true", "yes", "y", "on"}
+    portion_label = resolve_menu_portion_label(meta)
+    portion_tone_rgb = build_portion_tone_rgb(portion_label) if portion_label else ""
     item = MenuItem(
         id=item_id,
         name=name,
@@ -802,6 +870,8 @@ def parse_menu_item(meta: dict, slug: str, photo_name: str):
         type=dish_type,
         price=price,
         photo=f"menu_items/{slug}/{photo_name}",
+        portion_label=portion_label,
+        portion_tone_rgb=portion_tone_rgb,
         popularity=popularity,
         featured=featured,
     )
@@ -816,6 +886,8 @@ def parse_promo_item(meta: dict, slug: str, photo_name):
 
     item_class = (meta.get("class", "") or "").strip().lower()
     if item_class not in {"reklama", "akciya"}:
+        return None
+    if is_placeholder_promo(meta):
         return None
 
     try:
