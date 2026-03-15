@@ -16,7 +16,14 @@
   </a>
   <div class="brand__mark menu-top__mark"><img class="brand__mark-img" src="{{ url_for('static', filename='img/orelll.svg') }}" alt="" aria-hidden="true" /></div>
   <div class="menu-top__heading">
-    <p class="brand__name menu-top__title">{% if delivery_mode %}Меню доставки{% else %}Меню{% endif %}</p>
+    <p class="brand__name menu-top__title">
+      {% if delivery_mode %}
+      <span class="menu-top__title-line">МЕНЮ</span>
+      <span class="menu-top__title-line">ДОСТАВКИ</span>
+      {% else %}
+      Меню
+      {% endif %}
+    </p>
     <img class="menu-top__hands" src="{{ url_for('static', filename='img/hands.svg') }}" alt="" aria-hidden="true" />
   </div>
   <span class="menu-top__ghost" aria-hidden="true"></span>
