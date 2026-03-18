@@ -11,6 +11,7 @@
 </section>
 <script>
   const nextUrl = {{ next_url|tojson }};
+  const tokenAuthEnabled = {{ auth_token_enabled|tojson }};
   const authStorageKey = window.__AUTH_STORAGE_KEY || "auth_token";
   const authQueryParam = window.__AUTH_QUERY_PARAM || "auth_token";
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
@@ -34,8 +35,13 @@
   const token = (() => {
     try {
       if (tokenFromHash) {
-        window.localStorage.setItem(authStorageKey, tokenFromHash);
+        if (tokenAuthEnabled) {
+          window.localStorage.setItem(authStorageKey, tokenFromHash);
+        }
         return tokenFromHash;
+      }
+      if (!tokenAuthEnabled) {
+        return "";
       }
       return window.localStorage.getItem(authStorageKey) || "";
     } catch (error) {
@@ -44,7 +50,10 @@
     }
   })();
 
-  if (!token) {
+  if (!tokenAuthEnabled) {
+    setStatus("Токеновый мост отключён. Открываем страницу через cookie-сессию.");
+    window.setTimeout(redirectToNext, 50);
+  } else if (!token) {
     setStatus("Не удалось получить токен входа. Откройте вход заново.");
   } else {
     setStatus("Сохраняем сессию...");

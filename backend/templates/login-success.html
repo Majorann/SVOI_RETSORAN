@@ -10,15 +10,17 @@
   </div>
 </section>
 <script>
+  const authMode = {{ auth_mode|tojson }};
+  const tokenAuthEnabled = {{ auth_token_enabled|tojson }};
   try {
-    if ({{ auth_token|tojson }}) {
+    if (tokenAuthEnabled && {{ auth_token|tojson }}) {
       window.localStorage.setItem({{ auth_storage_key|tojson }}, {{ auth_token|tojson }});
     }
   } catch (error) {
     console.warn("Failed to store auth token", error);
   }
   const nextUrl = new URL({{ redirect_url|tojson }}, window.location.origin);
-  if ({{ auth_token|tojson }}) {
+  if (authMode === "token" && {{ auth_token|tojson }}) {
     nextUrl.searchParams.set({{ auth_query_param|tojson }}, {{ auth_token|tojson }});
   }
   window.setTimeout(function () {

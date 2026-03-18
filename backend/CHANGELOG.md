@@ -841,3 +841,82 @@
 ### Документация
 - В `README.md` зафиксировано текущее состояние токен-авторизации, first-load гидрации главной и оптимизаций frontend/backend.
 - В конец `README.md` добавлен отдельный план постепенного перехода обратно на cookie-session через режимы `token / hybrid / session`.
+
+## 18.03.2026 (2)
+
+### Авторизация: cookie-first с режимами миграции
+- В `backend/app.py` внедрена режимная auth-политика через `AUTH_MODE`:
+  - `token` сохраняет legacy token-only поведение;
+  - `hybrid` делает cookie/session основным механизмом и оставляет токен только как fallback;
+  - `session` полностью отключает legacy token-sync.
+- Добавлен отдельный signed `auth_session` cookie:
+  - cookie выставляется сервером после логина/регистрации и на последующих авторизованных ответах;
+  - на первом запросе backend может восстановить Flask session из `auth_session` без query-параметров и без промежуточной страницы;
+  - если cookie невалиден или пользователь по нему не найден, cookie очищается сервером.
+- Это переводит прод на cookie-first схему без немедленного удаления рабочего token fallback.
+
+### Backend: безопасная совместимость с текущим продом
+- Восстановление авторизации на `before_request` переработано:
+  - сначала используется `auth_session` cookie;
+  - только затем, если режим разрешает, проверяется legacy `auth_token`.
+- В `AUTH_MODE=session` endpoint `POST /api/auth/session` отключается и больше не используется как часть нормального auth-flow.
+- Глобальный after-request sync теперь управляет `auth_session` cookie:
+  - при наличии авторизованной server-side session cookie продлевается;
+  - при logout или инвалидном состоянии cookie очищается.
+- Redirect propagation `auth_token` ограничен только режимом `AUTH_MODE=token`, чтобы в `hybrid/session` больше не размазывать токен по URL.
+
+### Frontend: отказ от token-as-primary
+- `backend/static/js/modules/authToken.js` переписан под режимы авторизации:
+  - в `token` сохранены декорирование ссылок, форм и `Authorization` для fetch;
+  - в `hybrid` токен больше не протаскивается по навигации, но может тихо поднять session через same-origin `POST /api/auth/session`, если это нужно старому клиенту;
+  - в `session` token bridge не используется как auth-механизм.
+- В `backend/templates/base.html` убран ранний redirect с добавлением `auth_token` для `hybrid/session`:
+  - он остаётся только в чистом legacy `token` режиме.
+- Шаблоны `login-success.html` и `auth-bridge.html` переведены на mode-aware поведение:
+  - токен сохраняется и пробрасывается в URL только там, где это действительно разрешено конфигом.
+
+### First-load и страницы пользователя
+- Cookie-first восстановление сделано так, чтобы первый заход на главную, профиль, checkout, бронь и доставку не зависел от query/form токена.
+- `GET /api/index-summary` и `GET /api/order-statuses` сохраняют роль страховочной hydration-догрузки:
+  - это уменьшает риск пустого first-render даже в переходный период `hybrid`.
+- В `hybrid` старые клиенты с `localStorage`-токеном продолжают работать, но новые переходы уже идут по нормальной cookie/session схеме.
+
+### Hugging Face Spaces / proxy / cookies
+- В лог старта теперь явно выводятся:
+  - `auth_mode`;
+  - текущий `auth_session_cookie`;
+  - активные cookie-флаги для hosted-окружения.
+- Зафиксирован рабочий продовый профиль для HF Spaces:
+  - `SESSION_COOKIE_SECURE=true`;
+  - `SESSION_COOKIE_SAMESITE=None`;
+  - `SESSION_COOKIE_PARTITIONED=true`;
+  - `TRUST_PROXY_HEADERS=true`;
+  - `PUBLIC_BASE_URL=https://mayaran-mdk2.hf.space`.
+
+### Проверка
+- Локально прогнаны smoke-сценарии через Flask test client:
+  - `AUTH_MODE=hybrid`;
+  - `AUTH_MODE=session`;
+  - обратная совместимость `AUTH_MODE=token`.
+- Отдельно проверены:
+  - login / register;
+  - восстановление `/api/index-summary` только по `auth_session` cookie;
+  - бронирование;
+  - обычная оплата;
+  - доставка;
+  - отключение legacy token sync в `AUTH_MODE=session`.
+
+### Документация
+- `README.md` обновлён под новую cookie-first архитектуру и больше не описывает токен как единственный основной механизм.
+- В документации зафиксированы:
+  - режимы `AUTH_MODE=token|hybrid|session`;
+  - новый `AUTH_SESSION_COOKIE_NAME`;
+  - `AUTH_SESSION_COOKIE_MAX_AGE_SECONDS`;
+  - рекомендованный rollout: `hybrid` -> наблюдение -> `session`.
+
+### Меню: автоисправление `id` в item.txt
+- Runtime-fallback для невалидных и дублирующихся `id` в `backend/static/menu_items/*/item.txt` переведён в реальное автоисправление файлов.
+- Если у блюда `id` пустой, строковый, неположительный или уже занят другим блюдом:
+  - backend назначает следующий свободный числовой `id`;
+  - затем атомарно перезаписывает `item.txt` в UTF-8 с новым `id`.
+- После первого исправляющего прохода повторные загрузки меню больше не должны шуметь одними и теми же предупреждениями по тем же блюдам.
