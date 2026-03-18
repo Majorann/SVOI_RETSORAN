@@ -21,9 +21,6 @@ def login_route(
     hash_password,
     debug_login_failure=None,
     log_session_debug=None,
-    issue_auth_token=None,
-    auth_storage_key="auth_token",
-    auth_query_param="auth_token",
 ):
     initial_error = request.args.get("error")
     if request.method == "POST":
@@ -47,22 +44,17 @@ def login_route(
         session["user_id"] = user.get("id")
         session["user_name"] = user.get("name")
         session.permanent = True
-        auth_token = issue_auth_token(user.get("id")) if issue_auth_token is not None else ""
         if log_session_debug is not None:
             log_session_debug(
                 "login_success",
                 extra={
                     "login_phone": phone,
                     "redirect_to": url_for("index"),
-                    "auth_token_issued": bool(auth_token),
                 },
             )
         return render_template(
             "login-success.html",
             redirect_url=url_for("index"),
-            auth_token=auth_token,
-            auth_storage_key=auth_storage_key,
-            auth_query_param=auth_query_param,
             title_text="Вход выполнен",
         )
     return render_template("login.html", error=initial_error, form_phone="")
@@ -75,9 +67,6 @@ def register_route(
     hash_password,
     json_file_lock,
     users_path,
-    issue_auth_token=None,
-    auth_storage_key="auth_token",
-    auth_query_param="auth_token",
 ):
     if request.method == "POST":
         name = (request.form.get("name") or "").strip()
@@ -118,22 +107,14 @@ def register_route(
         session["user_id"] = new_user["id"]
         session["user_name"] = new_user["name"]
         session.permanent = True
-        auth_token = issue_auth_token(new_user["id"]) if issue_auth_token is not None else ""
         return render_template(
             "login-success.html",
             redirect_url=url_for("index"),
-            auth_token=auth_token,
-            auth_storage_key=auth_storage_key,
-            auth_query_param=auth_query_param,
             title_text="Регистрация завершена",
         )
     return render_template("register.html", error=None, form_name="", form_phone="")
 
 
-def logout_route(auth_storage_key="auth_token"):
+def logout_route():
     session.clear()
-    return render_template(
-        "logout.html",
-        redirect_url=url_for("login"),
-        auth_storage_key=auth_storage_key,
-    )
+    return render_template("logout.html", redirect_url=url_for("login"))
