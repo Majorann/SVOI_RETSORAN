@@ -26,10 +26,10 @@
   </a>
 </section>
 
-{% if order_statuses %}
-<section class="section order-status-section">
+<section class="section order-status-section" id="orderStatusSection" {% if not order_statuses %}hidden{% endif %}>
   <article
     class="order-status-bar"
+    {% if not order_statuses %}hidden{% endif %}
     id="orderStatusBar"
     data-orders="{{ order_statuses|tojson|forceescape }}"
     role="button"
@@ -77,7 +77,6 @@
     </div>
   </article>
 </section>
-{% endif %}
 
 <section class="section">
   <div class="secondary-actions">

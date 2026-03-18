@@ -1,4 +1,4 @@
-from flask import redirect, render_template, session, url_for
+from flask import g, redirect, render_template, session, url_for
 import secrets
 
 
@@ -70,7 +70,9 @@ def index_route(
         preparing_orders = get_user_preparing_orders(user_id)
         order_statuses = list_active_order_statuses(user_id)
         order_status = order_statuses[0] if order_statuses else None
-        user = next((u for u in load_users() if u.get("id") == user_id), None)
+        user = getattr(g, "current_user", None)
+        if not user or user.get("id") != user_id:
+            user = next((u for u in load_users() if u.get("id") == user_id), None)
         points_balance = int((user or {}).get("balance", 0) or 0)
     else:
         bookings = []

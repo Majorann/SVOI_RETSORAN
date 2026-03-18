@@ -1,6 +1,12 @@
 from datetime import datetime, timedelta
 
-from flask import jsonify, redirect, render_template, request, session, url_for
+from flask import g, jsonify, redirect, render_template, request, session, url_for
+
+
+def _payment_error_response(message: str, redirect_endpoint: str = "checkout", status_code: int = 400):
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return jsonify({"ok": False, "error": message}), status_code
+    return redirect(url_for(redirect_endpoint, error=message))
 
 
 def orders_route(load_orders):
@@ -40,8 +46,10 @@ def checkout_route(
         booking_dt = parse_datetime(booking.get("date"), booking.get("time"))
         if booking_dt:
             custom_time_max = (booking_dt + timedelta(minutes=booking_duration_minutes - 1)).strftime("%H:%M")
-    users = load_users()
-    user = next((u for u in users if u.get("id") == user_id), None)
+    user = getattr(g, "current_user", None)
+    if not user or user.get("id") != user_id:
+        users = load_users()
+        user = next((u for u in users if u.get("id") == user_id), None)
     cards = list((user or {}).get("cards", []))
     active_card = next((card for card in cards if card.get("active")), None)
     checkout_error = request.args.get("error")
@@ -66,14 +74,21 @@ def checkout_route(
         menu_catalog=menu_catalog,
     )
 
-
-def payment_route(load_users, latest_user_booking_status, resolve_order_items, parse_serving_option):
+def payment_route(
+    load_users,
+    latest_user_booking_status,
+    resolve_order_items,
+    parse_serving_option,
+    issue_checkout_preview_token,
+):
     user_id = session.get("user_id")
     if not user_id:
         return redirect(url_for("login", error="Войдите, чтобы продолжить оплату."))
 
-    users = load_users()
-    user = next((u for u in users if u.get("id") == user_id), None)
+    user = getattr(g, "current_user", None)
+    if not user or user.get("id") != user_id:
+        users = load_users()
+        user = next((u for u in users if u.get("id") == user_id), None)
     cards = list((user or {}).get("cards", []))
     active_card = next((card for card in cards if card.get("active")), None)
     user_balance = int((user or {}).get("balance", 0) or 0)
@@ -131,10 +146,12 @@ def payment_route(load_users, latest_user_booking_status, resolve_order_items, p
             "expiry": (active_card or {}).get("expiry"),
         },
     }
+    preview_token = issue_checkout_preview_token(preview) if can_pay else ""
     session["checkout_preview"] = preview if can_pay else None
     return render_template(
         "payment.html",
         preview=preview,
+        preview_token=preview_token,
         can_pay=can_pay,
         payment_error_code=payment_error_code,
         payment_error_text=payment_error_text,
@@ -151,31 +168,41 @@ def payment_confirm_route(
     save_orders,
     users_path,
     save_users,
+    verify_checkout_preview_token,
 ):
     user_id = session.get("user_id")
     if not user_id:
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"ok": False, "error": "Log in to complete payment."}), 401
         return redirect(url_for("login", error="Log in to complete payment."))
 
     preview = session.get("checkout_preview")
     if not preview:
-        return redirect(url_for("checkout", error="Payment session expired. Repeat checkout."))
+        preview_token = (request.form.get("preview_token") or "").strip()
+        preview = verify_checkout_preview_token(preview_token)
+        if preview is None:
+            return _payment_error_response("Payment session expired. Repeat checkout.", status_code=409)
 
     booking_status = latest_user_booking_status(user_id)
     booking = booking_status.get("booking")
     if booking_status.get("state") != "active":
         session.pop("checkout_preview", None)
-        return redirect(url_for("checkout", error="Booking is no longer active."))
+        return _payment_error_response("Booking is no longer active.", status_code=409)
 
-    users = load_users()
-    user = next((u for u in users if u.get("id") == user_id), None)
+    user = getattr(g, "current_user", None)
+    if not user or user.get("id") != user_id:
+        users = load_users()
+        user = next((u for u in users if u.get("id") == user_id), None)
     if user is None:
         session.clear()
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"ok": False, "error": "User not found. Please log in again."}), 401
         return redirect(url_for("login", error="User not found. Please log in again."))
 
     active_card = next((card for card in user.get("cards", []) if card.get("active")), None)
     if active_card is None:
         session.pop("checkout_preview", None)
-        return redirect(url_for("checkout", error="No active payment card."))
+        return _payment_error_response("No active payment card.", status_code=409)
 
     preview_items = preview.get("items")
     if not isinstance(preview_items, list):
@@ -206,7 +233,7 @@ def payment_confirm_route(
 
     if not items:
         session.pop("checkout_preview", None)
-        return redirect(url_for("checkout", error="Cart is empty."))
+        return _payment_error_response("Cart is empty.", status_code=409)
 
     items_total = sum(item["price"] * item["qty"] for item in items)
     current_balance = int(user.get("balance", 0) or 0)
@@ -252,6 +279,9 @@ def payment_confirm_route(
             current_balance = int(user.get("balance", 0) or 0)
             user["balance"] = max(0, current_balance - points_applied) + bonus_earned
             save_users(users)
+            g.current_user = user
+            g.current_user_id = user_id
+            g.current_user_loaded = True
 
     session.pop("checkout_preview", None)
     order_url = url_for("order_detail", order_id=order_id, paid="1")

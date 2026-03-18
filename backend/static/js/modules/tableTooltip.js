@@ -1,5 +1,7 @@
 ﻿import { getCsrfToken } from "./core.js";
 
+import { navigateWithAuth } from "./authToken.js";
+
 const setupTableTooltip = () => {
   const tooltip = document.getElementById("tableTooltip");
   if (!tooltip) return;
@@ -492,7 +494,7 @@ const setupTableTooltip = () => {
     const result = await response.json().catch(() => ({}));
     if (response.status === 401) {
       bookingInfo.textContent = "Войдите в аккаунт, чтобы забронировать.";
-      window.location.href = "/login";
+      navigateWithAuth("/login");
       return;
     }
     if (!response.ok) {
@@ -506,7 +508,7 @@ const setupTableTooltip = () => {
       table.classList.add("table--reserved");
     }
     bookingInfo.textContent = "Бронь подтверждена.";
-    window.location.href = "/";
+    navigateWithAuth("/");
   });
 
   [bookingDate, bookingTime, bookingName].forEach((field) => {
@@ -646,4 +648,3 @@ const setupTableTooltip = () => {
   updateDateValidation();
 };
 export { setupTableTooltip };
-

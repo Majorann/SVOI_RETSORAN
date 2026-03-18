@@ -196,8 +196,10 @@ const pickRandomPhrase = (stageKey, previousPhrase) => {
 };
 
 const setupOrderStatusBar = () => {
+  const section = document.getElementById("orderStatusSection");
   const bar = document.getElementById("orderStatusBar");
-  if (!bar) return;
+  if (!section || !bar) return;
+  if (bar.dataset.initialized === "true") return;
 
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const reducedMotionForStatusText = false;
@@ -221,7 +223,14 @@ const setupOrderStatusBar = () => {
   } catch {
     initialOrders = [];
   }
-  if (!Array.isArray(initialOrders) || !initialOrders.length) return;
+  if (!Array.isArray(initialOrders) || !initialOrders.length) {
+    section.hidden = true;
+    bar.hidden = true;
+    return;
+  }
+  bar.dataset.initialized = "true";
+  section.hidden = false;
+  bar.hidden = false;
 
   const phraseState = {
     stageKey: "",
@@ -480,9 +489,9 @@ const setupOrderStatusBar = () => {
     }
     clearStatusTypingTimeout();
     bar.classList.add("is-exiting");
-    const container = bar.closest(".order-status-section");
     window.setTimeout(() => {
-      if (container) container.remove();
+      section.hidden = true;
+      bar.hidden = true;
     }, 260);
   };
 

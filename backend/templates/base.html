@@ -4,14 +4,45 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content="{{ csrf_token }}" />
+    <meta name="referrer" content="origin" />
     <title>{{ title or "Свои — ресторан" }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+    <style>
+      body.auth-sync-pending .page {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
   </head>
   <body class="{% block body_class %}{% endblock %}">
     <div class="page">
       {% block content %}{% endblock %}
     </div>
+    <script>
+      window.__AUTH_STORAGE_KEY = {{ auth_storage_key|tojson }};
+      window.__AUTH_QUERY_PARAM = {{ auth_query_param|tojson }};
+      window.__SESSION_USER_ID = {{ current_user_id|tojson }};
+    </script>
+    <script>
+      (function () {
+        if (window.__SESSION_USER_ID) return;
+        try {
+          var storageKey = window.__AUTH_STORAGE_KEY || "auth_token";
+          var queryParam = window.__AUTH_QUERY_PARAM || "auth_token";
+          var token = window.localStorage.getItem(storageKey) || "";
+          if (!token) return;
+
+          var current = new URL(window.location.href);
+          if (current.searchParams.get(queryParam)) return;
+
+          current.searchParams.set(queryParam, token);
+          document.body.classList.add("auth-sync-pending");
+          window.location.replace(current.pathname + current.search + current.hash);
+        } catch (_error) {
+          // Ignore storage / URL errors and let the regular app bootstrap continue.
+        }
+      })();
+    </script>
     <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
   </body>
 </html>
-
