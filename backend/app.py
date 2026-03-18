@@ -17,6 +17,7 @@ import threading
 import time
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import check_password_hash, generate_password_hash
 from routes.auth_routes import login_route, register_route, logout_route
 from routes.booking_routes import (
     availability_route,
@@ -245,6 +246,7 @@ AUTH_SESSION_COOKIE_MAX_AGE_SECONDS = max(
     300,
     env_int("AUTH_SESSION_COOKIE_MAX_AGE_SECONDS", 30 * 24 * 60 * 60),
 )
+PASSWORD_HASH_METHOD = env_str("PASSWORD_HASH_METHOD", "pbkdf2:sha256:600000")
 _AUTH_SESSION_SERIALIZER = URLSafeTimedSerializer(app.secret_key, salt="auth-session-v1")
 CHECKOUT_PREVIEW_MAX_AGE_SECONDS = max(300, env_int("CHECKOUT_PREVIEW_MAX_AGE_SECONDS", 30 * 60))
 _CHECKOUT_PREVIEW_SERIALIZER = URLSafeTimedSerializer(app.secret_key, salt="checkout-preview-v1")
@@ -1086,7 +1088,10 @@ def notifications():
 def login():
     return login_route(
         load_users,
-        hash_password,
+        save_users,
+        verify_and_upgrade_password,
+        storage_write_lock,
+        USERS_PATH,
         debug_login_failure,
         log_session_debug,
     )
@@ -1529,8 +1534,39 @@ def next_order_id(orders):
 
 
 def hash_password(password):
-    # Простой хеш для демо (без соли)
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    return generate_password_hash(password, method=PASSWORD_HASH_METHOD)
+
+
+def hash_password_legacy(password):
+    return hashlib.sha256((password or "").encode("utf-8")).hexdigest()
+
+
+def is_legacy_password_hash(password_hash):
+    return bool(re.fullmatch(r"[0-9a-f]{64}", str(password_hash or "")))
+
+
+def verify_password(password, password_hash):
+    stored_hash = str(password_hash or "")
+    if not stored_hash:
+        return False, False
+    if is_legacy_password_hash(stored_hash):
+        return secrets.compare_digest(stored_hash, hash_password_legacy(password)), True
+    try:
+        return check_password_hash(stored_hash, password), False
+    except (TypeError, ValueError):
+        return False, False
+
+
+def verify_and_upgrade_password(user, password):
+    if not isinstance(user, dict):
+        return False, False
+    matches, needs_upgrade = verify_password(password, user.get("password_hash"))
+    if not matches:
+        return False, False
+    if needs_upgrade:
+        user["password_hash"] = hash_password(password)
+        return True, True
+    return True, False
 
 
 def parse_datetime(date_str, time_str):
