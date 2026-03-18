@@ -1,7 +1,7 @@
 from datetime import datetime
 import re
 
-from flask import redirect, render_template, request, session, url_for
+from flask import g, redirect, render_template, request, session, url_for
 
 TRANSLIT_MAP = {
     "А": "A", "Б": "B", "В": "V", "Г": "G", "Д": "D",
@@ -60,7 +60,9 @@ def profile_route(load_users, load_bookings):
 
     user_name = session.get("user_name")
     error = request.args.get("error")
-    user_record = next((u for u in load_users() if u.get("id") == user_id), None)
+    user_record = getattr(g, "current_user", None)
+    if not user_record or user_record.get("id") != user_id:
+        user_record = next((u for u in load_users() if u.get("id") == user_id), None)
     if not user_record:
         # Avoid hard logout on a transient storage miss (e.g. temporary DB hiccup).
         if not user_name:
@@ -141,6 +143,9 @@ def add_card_route(load_users, save_users, json_file_lock, users_path):
         )
         user_record["cards"] = cards
         save_users(users)
+        g.current_user = user_record
+        g.current_user_id = user_id
+        g.current_user_loaded = True
     return redirect(url_for("profile"))
 
 
@@ -182,4 +187,7 @@ def delete_card_route(load_users, save_users, json_file_lock, users_path):
 
         user_record["cards"] = cards
         save_users(users)
+        g.current_user = user_record
+        g.current_user_id = user_id
+        g.current_user_loaded = True
     return redirect(url_for("profile"))

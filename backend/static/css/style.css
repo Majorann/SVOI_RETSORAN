@@ -1958,6 +1958,7 @@ body.page-index .secondary-card--delivery:hover .delivery-scene .w3 {
   background-position: center;
   background-repeat: no-repeat;
   min-height: 110px;
+  overflow: hidden;
 }
 
 .menu-card__media--smoke {
@@ -2008,6 +2009,7 @@ body.page-index .secondary-card--delivery:hover .delivery-scene .w3 {
   color: #fff;
   text-align: left;
 }
+
 
 .menu-card__content p {
   font-size: 12px;
@@ -5435,6 +5437,13 @@ body.mood-night { --mood-tint: rgba(70, 56, 46, 0.24); }
 
 .payment-head--show {
   animation: checkoutHeadIn 220ms ease forwards;
+}
+
+.page-payment-center .payment-head {
+  text-align: center;
+  align-items: center;
+  justify-items: center;
+  margin-inline: auto;
 }
 
 .payment-card-main {

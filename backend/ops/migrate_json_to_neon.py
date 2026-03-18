@@ -1,5 +1,5 @@
-"""
-One-time migration: backend/*.json -> Neon app_state.
+r"""
+One-time migration: backend/*.json -> Neon relational tables.
 
 Usage (PowerShell):
   $env:DATABASE_URL="postgresql://..."; .\.venv\Scripts\python.exe ops\migrate_json_to_neon.py
@@ -7,15 +7,19 @@ Usage (PowerShell):
 
 import json
 import os
+import sys
 from pathlib import Path
-
-import psycopg
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 USERS_PATH = BASE_DIR / "users.json"
 BOOKINGS_PATH = BASE_DIR / "bookings.json"
 ORDERS_PATH = BASE_DIR / "orders.json"
+
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+from storage import pg_store  # noqa: E402
 
 
 def read_list(path: Path):
@@ -37,35 +41,10 @@ def main():
     bookings = read_list(BOOKINGS_PATH)
     orders = read_list(ORDERS_PATH)
 
-    with psycopg.connect(database_url) as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS app_state (
-                state_key TEXT PRIMARY KEY,
-                state_value JSONB NOT NULL DEFAULT '[]'::jsonb,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-            """
-        )
-        cur.execute(
-            """
-            INSERT INTO app_state(state_key, state_value)
-            VALUES
-                ('users', %s::jsonb),
-                ('bookings', %s::jsonb),
-                ('orders', %s::jsonb)
-            ON CONFLICT (state_key)
-            DO UPDATE SET state_value = EXCLUDED.state_value, updated_at = NOW();
-            """,
-            (
-                psycopg.types.json.Jsonb(users),
-                psycopg.types.json.Jsonb(bookings),
-                psycopg.types.json.Jsonb(orders),
-            ),
-        )
+    pg_store.replace_all_state(users, bookings, orders)
 
     print(
-        "Migrated: users={0}, bookings={1}, orders={2}".format(
+        "Migrated to relational Neon tables: users={0}, bookings={1}, orders={2}".format(
             len(users),
             len(bookings),
             len(orders),

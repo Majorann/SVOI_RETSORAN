@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="section auth">
+  <div class="auth__card">
+    <h1 class="brand__name">Выход выполнен</h1>
+    <p class="auth__hint">Очищаем авторизацию и возвращаем на страницу входа...</p>
+    <p class="auth__hint">
+      Если переход не сработал автоматически, <a class="link" href="{{ redirect_url }}">нажмите сюда</a>.
+    </p>
+  </div>
+</section>
+<script>
+  try {
+    window.localStorage.removeItem({{ auth_storage_key|tojson }});
+  } catch (error) {
+    console.warn("Failed to clear auth token", error);
+  }
+  window.setTimeout(function () {
+    window.location.replace({{ redirect_url|tojson }});
+  }, 100);
+</script>
+{% endblock %}

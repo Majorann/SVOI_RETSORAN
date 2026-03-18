@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="section auth">
+  <div class="auth__card">
+    <h1 class="brand__name">{{ title_text or "Вход выполнен" }}</h1>
+    <p class="auth__hint">Переходим на главную страницу...</p>
+    <p class="auth__hint">
+      Если переход не сработал автоматически, <a class="link" href="{{ redirect_url }}">нажмите сюда</a>.
+    </p>
+  </div>
+</section>
+<script>
+  try {
+    if ({{ auth_token|tojson }}) {
+      window.localStorage.setItem({{ auth_storage_key|tojson }}, {{ auth_token|tojson }});
+    }
+  } catch (error) {
+    console.warn("Failed to store auth token", error);
+  }
+  const nextUrl = new URL({{ redirect_url|tojson }}, window.location.origin);
+  if ({{ auth_token|tojson }}) {
+    nextUrl.searchParams.set({{ auth_query_param|tojson }}, {{ auth_token|tojson }});
+  }
+  window.setTimeout(function () {
+    window.location.replace(nextUrl.toString());
+  }, 150);
+</script>
+{% endblock %}

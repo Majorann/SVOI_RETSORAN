@@ -49,6 +49,7 @@
     <section class="payment-block payment-block--actions">
       <form method="post" action="{{ url_for('delivery_confirm') }}" id="paymentConfirmForm">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="preview_token" value="{{ preview_token or '' }}" />
         <button class="primary-action" id="payNowButton" type="submit">
           <span class="pay-btn__spinner" aria-hidden="true"></span>
           <span class="pay-btn__label">Оплатить</span>

@@ -7,10 +7,11 @@
 - Главная страница с новостями, промо-блоками и подборкой популярных блюд
 - Схема зала с интерактивными столами и бронированием по дате и времени
 - Меню с фильтрацией, сортировкой, корзиной и адаптивными карточками блюд
-- Checkout и экран оплаты
+- Checkout, экран оплаты и оплата доставки
 - Уведомления о бронированиях и активных заказах
 - Профиль пользователя с привязкой и удалением карт
 - Авторизация и регистрация
+- Долгоживущий подписанный токен авторизации для клиентов, где cookie-сессия нестабильна
 - Работа через JSON-хранилища или Neon Postgres
 - Опциональный Redis-кэш для меню
 
@@ -34,7 +35,7 @@
 - `backend/models/` - dataclass-модели
 - `backend/templates/` - HTML-шаблоны страниц
 - `backend/static/css/style.css` - стили интерфейса
-- `backend/static/js/app.js` - фронтенд-инициализация
+- `backend/static/js/app.js` - лёгкая фронтенд-инициализация и подключение модулей страниц
 - `backend/static/js/modules/` - JS-модули интерфейса
 - `backend/static/menu_items/` - карточки блюд (`item.txt` + изображение)
 - `backend/static/promo_items/` - промо и акции (`item.txt` + изображение)
@@ -58,7 +59,7 @@ python app.py
 Запуск через Gunicorn:
 
 ```powershell
-cd "C:\Users\almaz\OneDrive\Рабочий стол\main\SVOI_RETSORAN-main\backend"
+cd "C:\*****\main\SVOI_RETSORAN-main\backend"
 gunicorn app:app --bind 0.0.0.0:7860
 ```
 
@@ -77,6 +78,8 @@ gunicorn app:app --bind 0.0.0.0:7860
 - `/menu` - меню
 - `/checkout` - оформление заказа
 - `/payment` - предпросмотр оплаты
+- `/delivery` - меню доставки
+- `/delivery/checkout` - оформление доставки
 - `/notifications` - уведомления
 - `/orders` - история заказов
 - `/orders/<id>` - детали заказа
@@ -171,6 +174,7 @@ python backend/ops/migrate_json_to_neon.py
 - `SESSION_COOKIE_SAMESITE`
 - `SESSION_COOKIE_SECURE`
 - `SESSION_COOKIE_PARTITIONED`
+- `PUBLIC_BASE_URL` - публичный URL сайта; если начинается с `https://`, secure-cookie включается по умолчанию
 - `TRUST_PROXY_HEADERS`
 - `APP_TIMEZONE`
 - `DB_KEEPALIVE_ENABLED`
@@ -184,6 +188,20 @@ python backend/ops/migrate_json_to_neon.py
 - `DB_OPERATION_RETRIES`
 - `DB_RETRY_DELAY_SECONDS`
 - `DEBUG_STORAGE_ENABLED`
+- `LOGIN_DEBUG_ENABLED` - включает логирование неудачных входов в файл JSONL
+- `LOGIN_DEBUG_LOG_PATH` - путь к файлу лога неудачных входов; по умолчанию `backend/login_failed_attempts.jsonl` или файл в `APP_DATA_DIR`
+- `SESSION_DEBUG_ENABLED` - включает диагностику сессии и эндпоинт `/debug/session`
+- `SESSION_DEBUG_LOG_PATH` - путь к файлу session-debug лога; по умолчанию `backend/session_debug.jsonl` или файл в `APP_DATA_DIR`
+- `AUTH_TOKEN_STORAGE_KEY` - имя ключа в `localStorage` для токена авторизации
+- `AUTH_TOKEN_QUERY_PARAM` - имя query/form-параметра для передачи токена между страницами
+- `AUTH_TOKEN_MAX_AGE_SECONDS` - срок жизни подписанного токена авторизации
+- `CHECKOUT_PREVIEW_MAX_AGE_SECONDS` - срок жизни подписанного preview-токена для подтверждения оплаты
+
+### Подсказка по логину и cookie
+
+- Если сайт открыт по `http://` в локальной сети, secure-cookie нужно отключить: `SESSION_COOKIE_SECURE=false`
+- Если сайт открыт по `https://`, лучше использовать `PUBLIC_BASE_URL=https://...` или явно задать `SESSION_COOKIE_SECURE=true`
+- Если сайт встроен в iframe или открывается в кросс-доменном контексте, обычно нужны `SESSION_COOKIE_SAMESITE=None` и `SESSION_COOKIE_SECURE=true`
 
 ## Диагностика
 
@@ -192,6 +210,93 @@ python backend/ops/migrate_json_to_neon.py
 - `GET /debug/storage`
 
 Показывает активный backend, пути хранилищ и количество записей. По текущей логике доступен только при включении `DEBUG_STORAGE_ENABLED=true`.
+
+Если включить `LOGIN_DEBUG_ENABLED=true`, backend будет записывать все неудачные входы в UTF-8 JSONL-файл.
+В запись попадают причина отказа, телефон в введённом виде, нормализованный телефон, IP и `User-Agent`.
+Пароли в debug-лог не записываются.
+
+Если включить `SESSION_DEBUG_ENABLED=true`, станет доступен `GET /debug/session`, а backend начнёт писать ключевые события сессии в UTF-8 JSONL-файл.
+Это полезно, когда логин формально успешен, но последующие запросы теряют `session`.
+
+### Режим токен-авторизации
+
+Для клиентов, которые плохо работают с cookie-сессией, frontend может переносить подписанный токен между страницами и запросами.
+Токен хранится в `localStorage`, добавляется в `Authorization` для `fetch` и временно передаётся между страницами через query/form-параметр.
+
+Что важно в текущей реализации:
+
+- основная авторизация пользователя держится на долгоживущем подписанном токене;
+- сервер при каждом запросе умеет восстановить `session["user_id"]` из токена;
+- внутренние ссылки, формы и серверные redirect-ответы автоматически сохраняют `auth_token`;
+- если токен уже лежит в `localStorage`, а серверная сессия ещё не поднята, frontend на первой загрузке тихо синхронизирует сессию через `POST /api/auth/session`.
+- для главной страницы есть дополнительная одноразовая догрузка `/api/index-summary`, которая подтягивает баллы и активные статусы заказов, даже если первый HTML-рендер пришёл без полной пользовательской сессии.
+
+### Оплата и подтверждение заказа
+
+Для обычной оплаты и оплаты доставки используется не только server-side session preview, но и подписанный preview-токен.
+Это нужно для случаев, когда между шагом предпросмотра и шагом подтверждения часть сессии теряется.
+
+Сейчас flow такой:
+
+- `/payment` и `/delivery/payment` формируют preview заказа;
+- в форму подтверждения вкладывается подписанный `preview_token`;
+- `/payment/confirm` и `/delivery/confirm` умеют восстановить preview либо из session, либо из signed token;
+- это снижает риск ошибок вида `Оплата не прошла` из-за пропавшего preview между шагами.
+
+## Frontend-модули
+
+Тяжёлая клиентская логика разнесена по page-specific модулям, чтобы не грузить весь код на каждой странице.
+
+Ключевые модули:
+
+- `backend/static/js/modules/menuCatalog.js` - фильтрация, сортировка и анимации каталога меню
+- `backend/static/js/modules/cartDrawer.js` - корзина, mobile drawer и синхронизация кнопок `В корзину`
+- `backend/static/js/modules/checkoutPaymentFlow.js` - checkout и экран оплаты
+- `backend/static/js/modules/formEnhancements.js` - маски и валидация карты, срока действия, держателя и телефона
+- `backend/static/js/modules/authToken.js` - токен-авторизация и перенос токена между переходами
+
+`backend/static/js/app.js` теперь выполняет только безопасную инициализацию страницы и подключает нужные блоки через lazy import.
+
+## Что оптимизировано
+
+- На backend добавлен request-scoped cache для текущего пользователя и уведомлений, чтобы не читать одни и те же данные несколько раз в рамках одного запроса.
+- `backend/static/js/app.js` разрезан на page-specific модули:
+  - `menuCatalog.js`
+  - `cartDrawer.js`
+  - `checkoutPaymentFlow.js`
+  - `formEnhancements.js`
+  - `indexSummaryHydration.js`
+- Главная страница не полагается только на первый server-render для баллов и status bar:
+  - `/api/index-summary` вызывается один раз после загрузки;
+  - постоянный polling `/api/order-statuses` работает только когда реально есть активный заказ.
+
+## План перехода обратно на cookie
+
+Ниже зафиксирован безопасный план перехода с текущего долгоживущего токена обратно на cookie-session без риска сломать прод.
+
+1. Оставить текущий токеновый режим рабочим fallback-механизмом.
+2. Ввести режимы авторизации через переменную окружения:
+   - `AUTH_MODE=token`
+   - `AUTH_MODE=hybrid`
+   - `AUTH_MODE=session`
+3. Использовать только один боевой домен: `https://mayaran-mdk2.hf.space`.
+4. Перевести первую загрузку профильных данных, баллов и статусов на API-догрузку, а не только на первый HTML-рендер.
+5. В режиме `hybrid` оставить cookie основным способом входа, а токен использовать только как восстановление, если серверная сессия не поднялась.
+6. Отключить перенос `auth_token` в ссылки и формы в режиме `session`, но сохранить его как fallback в `hybrid`.
+7. Прогнать полный тестовый сценарий на ПК и мобильных браузерах:
+   - вход;
+   - перезагрузка первой страницы;
+   - профиль;
+   - бронирование;
+   - оплата;
+   - доставка;
+   - logout/login.
+8. Только после стабильной проверки перевести production из `hybrid` в `session`.
+9. После периода наблюдения убрать токен из URL и затем полностью удалить token fallback.
+
+- На backend текущий пользователь и данные уведомлений кэшируются в рамках одного запроса, чтобы не читать одни и те же данные несколько раз.
+- На frontend основной `app.js` уменьшен и превращён в orchestration-layer вместо монолитного файла.
+- Каталог меню, корзина, checkout и form-enhancements вынесены в отдельные модули без смены пользовательского поведения.
 
 ## Примечания
 

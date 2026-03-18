@@ -4,10 +4,11 @@ Restaurant demo app (Flask).
 - Bookings/users stored in JSON files
 """
 
-from flask import Flask, render_template, url_for, request, jsonify, session, redirect
+from flask import Flask, render_template, url_for, request, jsonify, session, redirect, g
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from contextlib import contextmanager
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import json
 import hashlib
 import os
@@ -15,6 +16,7 @@ import re
 import secrets
 import threading
 import time
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from werkzeug.middleware.proxy_fix import ProxyFix
 from routes.auth_routes import login_route, register_route, logout_route
 from routes.booking_routes import (
@@ -91,6 +93,7 @@ from services.business_logic import (
 from config import (
     BOOKINGS_PATH,
     BOOKING_DURATION_MINUTES,
+    DATA_DIR,
     MENU_ITEMS_PATH,
     MENU_META_NAME,
     MENU_PHOTO_NAMES,
@@ -225,20 +228,41 @@ app.secret_key = os.getenv(
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 # На hosted-платформах (в т.ч. HF Spaces в iframe) Lax может блокировать сессию.
 is_hf_space = bool(os.getenv("SPACE_ID") or os.getenv("HF_SPACE_ID"))
+public_base_url = env_str("PUBLIC_BASE_URL", "")
 default_samesite = "None" if is_hf_space else "Lax"
 session_samesite = env_str("SESSION_COOKIE_SAMESITE", default_samesite)
+default_secure_cookie = is_hf_space or public_base_url.lower().startswith("https://")
+if session_samesite.strip().lower() == "none":
+    # Browsers require SameSite=None cookies to be marked Secure.
+    default_secure_cookie = True
 app.config["SESSION_COOKIE_SAMESITE"] = session_samesite
-app.config["SESSION_COOKIE_SECURE"] = env_bool("SESSION_COOKIE_SECURE", True)
+app.config["SESSION_COOKIE_SECURE"] = env_bool("SESSION_COOKIE_SECURE", default_secure_cookie)
 app.config["SESSION_COOKIE_PARTITIONED"] = env_bool("SESSION_COOKIE_PARTITIONED", is_hf_space)
-app.config["PREFERRED_URL_SCHEME"] = "https"
+app.config["PREFERRED_URL_SCHEME"] = "https" if app.config["SESSION_COOKIE_SECURE"] else "http"
 if env_bool("TRUST_PROXY_HEADERS", True):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+AUTH_TOKEN_STORAGE_KEY = env_str("AUTH_TOKEN_STORAGE_KEY", "auth_token")
+AUTH_TOKEN_QUERY_PARAM = env_str("AUTH_TOKEN_QUERY_PARAM", "auth_token")
+AUTH_TOKEN_MAX_AGE_SECONDS = max(300, env_int("AUTH_TOKEN_MAX_AGE_SECONDS", 30 * 24 * 60 * 60))
+_AUTH_TOKEN_SERIALIZER = URLSafeTimedSerializer(app.secret_key, salt="auth-token-v1")
+CHECKOUT_PREVIEW_MAX_AGE_SECONDS = max(300, env_int("CHECKOUT_PREVIEW_MAX_AGE_SECONDS", 30 * 60))
+_CHECKOUT_PREVIEW_SERIALIZER = URLSafeTimedSerializer(app.secret_key, salt="checkout-preview-v1")
 _PROCESS_LOCKS = {}
 _PROCESS_LOCKS_GUARD = threading.RLock()
 _ORDER_PRUNE_LOCK = threading.RLock()
 _LAST_ORDER_PRUNE_AT = 0.0
 ORDER_RETENTION_DAYS = max(0, env_int("ORDER_RETENTION_DAYS", 7))
 ORDER_PRUNE_INTERVAL_SECONDS = max(15, env_int("ORDER_PRUNE_INTERVAL_SECONDS", 60))
+LOGIN_DEBUG_ENABLED = env_bool("LOGIN_DEBUG_ENABLED", False)
+LOGIN_DEBUG_LOG_PATH = Path(
+    env_str("LOGIN_DEBUG_LOG_PATH", str(DATA_DIR / "login_failed_attempts.jsonl"))
+)
+_LOGIN_DEBUG_LOCK = threading.RLock()
+SESSION_DEBUG_ENABLED = env_bool("SESSION_DEBUG_ENABLED", False)
+SESSION_DEBUG_LOG_PATH = Path(
+    env_str("SESSION_DEBUG_LOG_PATH", str(DATA_DIR / "session_debug.jsonl"))
+)
+_SESSION_DEBUG_LOCK = threading.RLock()
 DB_KEEPALIVE_ENABLED = env_bool("DB_KEEPALIVE_ENABLED", True)
 DB_KEEPALIVE_INTERVAL_SECONDS = max(60, env_int("DB_KEEPALIVE_INTERVAL_SECONDS", 600))
 _DB_KEEPALIVE_STARTED = False
@@ -251,13 +275,291 @@ _REDIS_CLIENT = None
 _REDIS_CLIENT_LOCK = threading.Lock()
 
 print(
-    "[storage] backend={0} users={1} bookings={2} orders={3}".format(
+    "[storage] backend={0} users={1} bookings={2} orders={3} cookie_secure={4} cookie_samesite={5} cookie_partitioned={6} login_debug={7} session_debug={8} auth_token_key={9}".format(
         ACTIVE_STORAGE,
         USERS_PATH,
         BOOKINGS_PATH,
         ORDERS_PATH,
+        app.config["SESSION_COOKIE_SECURE"],
+        app.config["SESSION_COOKIE_SAMESITE"],
+        app.config["SESSION_COOKIE_PARTITIONED"],
+        LOGIN_DEBUG_ENABLED,
+        SESSION_DEBUG_ENABLED,
+        AUTH_TOKEN_QUERY_PARAM,
     )
 )
+if LOGIN_DEBUG_ENABLED:
+    print(f"[auth-debug] failed login log path={LOGIN_DEBUG_LOG_PATH}")
+if SESSION_DEBUG_ENABLED:
+    print(f"[session-debug] session log path={SESSION_DEBUG_LOG_PATH}")
+
+
+def debug_login_failure(reason: str, phone_raw: str = "", normalized_phone: str | None = None):
+    if not LOGIN_DEBUG_ENABLED:
+        return
+
+    log_entry = {
+        "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "reason": reason,
+        "phone_raw": phone_raw,
+        "normalized_phone": normalized_phone,
+        "request": {
+            "method": request.method,
+            "path": request.path,
+            "scheme": request.scheme,
+            "host": request.host,
+            "remote_addr": request.remote_addr,
+            "forwarded_for": request.headers.get("X-Forwarded-For"),
+            "real_ip": request.headers.get("X-Real-Ip"),
+            "cf_connecting_ip": request.headers.get("CF-Connecting-IP"),
+            "user_agent": request.headers.get("User-Agent"),
+            "referer": request.headers.get("Referer"),
+            "origin": request.headers.get("Origin"),
+        },
+    }
+
+    try:
+        LOGIN_DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(log_entry, ensure_ascii=False)
+        with _LOGIN_DEBUG_LOCK:
+            with LOGIN_DEBUG_LOG_PATH.open("a", encoding="utf-8") as fh:
+                fh.write(payload + "\n")
+    except OSError as exc:
+        print(f"[auth-debug] failed to write login debug log ({exc})")
+
+
+def log_session_debug(event: str, extra: dict | None = None):
+    if not SESSION_DEBUG_ENABLED:
+        return
+
+    session_keys = sorted(session.keys())
+    log_entry = {
+        "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "event": event,
+        "request": {
+            "method": request.method,
+            "path": request.path,
+            "query_string": request.query_string.decode("utf-8", errors="ignore"),
+            "scheme": request.scheme,
+            "host": request.host,
+            "remote_addr": request.remote_addr,
+            "forwarded_for": request.headers.get("X-Forwarded-For"),
+            "real_ip": request.headers.get("X-Real-Ip"),
+            "cf_connecting_ip": request.headers.get("CF-Connecting-IP"),
+            "forwarded_proto": request.headers.get("X-Forwarded-Proto"),
+            "user_agent": request.headers.get("User-Agent"),
+            "referer": request.headers.get("Referer"),
+            "origin": request.headers.get("Origin"),
+        },
+        "session": {
+            "has_user_id": "user_id" in session,
+            "user_id": session.get("user_id"),
+            "user_name": session.get("user_name"),
+            "has_csrf_token": "csrf_token" in session,
+            "session_keys": session_keys,
+            "permanent": session.permanent,
+            "cookie_secure": app.config["SESSION_COOKIE_SECURE"],
+            "cookie_samesite": app.config["SESSION_COOKIE_SAMESITE"],
+            "cookie_partitioned": app.config["SESSION_COOKIE_PARTITIONED"],
+        },
+    }
+    if extra:
+        log_entry["extra"] = extra
+
+    try:
+        SESSION_DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(log_entry, ensure_ascii=False)
+        with _SESSION_DEBUG_LOCK:
+            with SESSION_DEBUG_LOG_PATH.open("a", encoding="utf-8") as fh:
+                fh.write(payload + "\n")
+    except OSError as exc:
+        print(f"[session-debug] failed to write session debug log ({exc})")
+
+
+def issue_auth_token(user_id: int) -> str:
+    return _AUTH_TOKEN_SERIALIZER.dumps({"user_id": int(user_id), "v": 1})
+
+
+def verify_auth_token(token: str | None):
+    if not token:
+        return None
+    try:
+        payload = _AUTH_TOKEN_SERIALIZER.loads(token, max_age=AUTH_TOKEN_MAX_AGE_SECONDS)
+    except (BadSignature, SignatureExpired):
+        return None
+    try:
+        user_id = int(payload.get("user_id"))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if user_id <= 0:
+        return None
+    return {"user_id": user_id}
+
+
+def issue_checkout_preview_token(preview: dict) -> str:
+    return _CHECKOUT_PREVIEW_SERIALIZER.dumps({"preview": preview, "v": 1})
+
+
+def verify_checkout_preview_token(token: str | None):
+    if not token:
+        return None
+    try:
+        payload = _CHECKOUT_PREVIEW_SERIALIZER.loads(
+            token,
+            max_age=CHECKOUT_PREVIEW_MAX_AGE_SECONDS,
+        )
+    except (BadSignature, SignatureExpired):
+        return None
+    preview = payload.get("preview")
+    return preview if isinstance(preview, dict) else None
+
+
+def extract_request_auth_token():
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header[7:].strip()
+        if token:
+            return token, "authorization"
+
+    query_token = (request.args.get(AUTH_TOKEN_QUERY_PARAM) or "").strip()
+    if query_token:
+        return query_token, "query"
+
+    form_token = (request.form.get(AUTH_TOKEN_QUERY_PARAM) or "").strip()
+    if form_token:
+        return form_token, "form"
+
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        json_token = str(payload.get("token") or "").strip()
+        if json_token:
+            return json_token, "json"
+
+    return None, None
+
+
+def normalize_next_url(raw_url: str | None):
+    fallback = url_for("index")
+    if not raw_url:
+        return fallback
+
+    candidate = str(raw_url).strip()
+    if not candidate:
+        return fallback
+
+    parts = urlsplit(candidate)
+    if parts.scheme or parts.netloc:
+        return fallback
+
+    path = parts.path or "/"
+    if not path.startswith("/"):
+        return fallback
+
+    filtered_query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key != AUTH_TOKEN_QUERY_PARAM
+    ]
+    query = urlencode(filtered_query, doseq=True)
+    return urlunsplit(("", "", path, query, parts.fragment))
+
+
+def append_auth_token_to_url(raw_url: str | None, token: str | None):
+    if not raw_url or not token:
+        return raw_url
+
+    parts = urlsplit(str(raw_url))
+    if parts.scheme or parts.netloc:
+        request_origin = f"{request.scheme}://{request.host}"
+        target_origin = f"{parts.scheme}://{parts.netloc}"
+        if target_origin != request_origin:
+            return raw_url
+
+    path = parts.path or "/"
+    if path.startswith("/static/"):
+        return raw_url
+
+    filtered_query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key != AUTH_TOKEN_QUERY_PARAM
+    ]
+    filtered_query.append((AUTH_TOKEN_QUERY_PARAM, token))
+    next_query = urlencode(filtered_query, doseq=True)
+    return urlunsplit((parts.scheme, parts.netloc, path, next_query, parts.fragment))
+
+
+def get_navigation_auth_token():
+    token, _source = extract_request_auth_token()
+    payload = verify_auth_token(token)
+    if payload is not None:
+        return token
+
+    user_id = session.get("user_id")
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    if user_id <= 0:
+        return None
+    return issue_auth_token(user_id)
+
+
+def apply_session_user(user: dict):
+    preserved_csrf = session.get("csrf_token")
+    session.clear()
+    if preserved_csrf:
+        session["csrf_token"] = preserved_csrf
+    session["user_id"] = user.get("id")
+    session["user_name"] = user.get("name")
+    session.permanent = True
+
+
+def _set_request_user(user: dict | None):
+    g.current_user_loaded = True
+    g.current_user = user
+    try:
+        g.current_user_id = int(user.get("id")) if user else None
+    except (TypeError, ValueError, AttributeError):
+        g.current_user_id = None
+
+
+def get_request_user(user_id=None):
+    try:
+        normalized_user_id = int(user_id if user_id is not None else session.get("user_id"))
+    except (TypeError, ValueError):
+        _set_request_user(None)
+        return None
+
+    if normalized_user_id <= 0:
+        _set_request_user(None)
+        return None
+
+    if getattr(g, "current_user_loaded", False) and getattr(g, "current_user_id", None) == normalized_user_id:
+        return getattr(g, "current_user", None)
+
+    user = next((u for u in load_users() if u.get("id") == normalized_user_id), None)
+    _set_request_user(user)
+    return user
+
+
+def get_request_notification_data():
+    if getattr(g, "notifications_loaded", False):
+        return getattr(g, "notification_bookings", []), getattr(g, "notification_preparing_orders", [])
+
+    user_id = session.get("user_id")
+    if not user_id:
+        g.notifications_loaded = True
+        g.notification_bookings = []
+        g.notification_preparing_orders = []
+        return g.notification_bookings, g.notification_preparing_orders
+
+    bookings = [b for b in load_bookings() if b.get("user_id") == user_id]
+    preparing_orders = get_user_preparing_orders(user_id)
+    g.notifications_loaded = True
+    g.notification_bookings = bookings
+    g.notification_preparing_orders = preparing_orders
+    return bookings, preparing_orders
 
 
 def _db_keepalive_loop():
@@ -455,10 +757,73 @@ def storage_write_lock(path: Path, timeout_seconds: float = 5.0, poll_interval: 
         return
     yield
 
+
+@app.before_request
+def restore_auth_from_token():
+    if request.endpoint == "static":
+        return
+
+    token, source = extract_request_auth_token()
+    current_user_id = session.get("user_id")
+
+    if not token:
+        return
+
+    payload = verify_auth_token(token)
+    if payload is None:
+        if SESSION_DEBUG_ENABLED:
+            log_session_debug("auth_token_invalid", extra={"source": source})
+        return
+
+    user_id = payload["user_id"]
+    if current_user_id == user_id and session.get("user_name"):
+        session.permanent = True
+        if SESSION_DEBUG_ENABLED:
+            log_session_debug(
+                "auth_token_confirmed_session",
+                extra={"source": source, "user_id": user_id},
+            )
+        return
+
+    user = get_request_user(user_id)
+    if not user:
+        if SESSION_DEBUG_ENABLED:
+            log_session_debug("auth_token_user_missing", extra={"source": source, "user_id": user_id})
+        return
+
+    apply_session_user(user)
+    _set_request_user(user)
+    if SESSION_DEBUG_ENABLED:
+        log_session_debug(
+            "auth_token_restored",
+            extra={
+                "source": source,
+                "user_id": user_id,
+                "previous_user_id": current_user_id,
+            },
+        )
+
+
+@app.before_request
+def hydrate_current_user():
+    if request.endpoint == "static":
+        return
+
+    user_id = session.get("user_id")
+    if not user_id:
+        _set_request_user(None)
+        return
+
+    get_request_user(user_id)
+
+
 @app.before_request
 def keep_user_session():
     if request.endpoint == "static":
         return
+
+    if SESSION_DEBUG_ENABLED and request.endpoint in {"login", "profile", "index"}:
+        log_session_debug("before_request")
 
     user_id = session.get("user_id")
     if not user_id:
@@ -468,13 +833,15 @@ def keep_user_session():
     if session.get("user_name"):
         return
 
-    user = next((u for u in load_users() if u.get("id") == user_id), None)
+    user = get_request_user(user_id)
     if not user:
         # Do not hard-drop session on a single miss.
         # A concurrent JSON write may produce a transient empty read.
         return
     if not session.get("user_name"):
         session["user_name"] = user.get("name")
+        if SESSION_DEBUG_ENABLED and request.endpoint in {"login", "profile", "index"}:
+            log_session_debug("user_name_restored")
 
 
 @app.before_request
@@ -497,6 +864,25 @@ def validate_csrf_token():
     if request.is_json:
         return jsonify({"ok": False, "error": "CSRF token is missing or invalid."}), 400
     return redirect(url_for("index"))
+
+
+@app.after_request
+def preserve_auth_token_on_redirects(response):
+    if not (300 <= response.status_code < 400):
+        return response
+
+    location = response.headers.get("Location")
+    if not location:
+        return response
+
+    token = get_navigation_auth_token()
+    if not token:
+        return response
+
+    next_location = append_auth_token_to_url(location, token)
+    if next_location and next_location != location:
+        response.headers["Location"] = next_location
+    return response
 
 @app.route("/")
 def index():
@@ -527,6 +913,35 @@ def api_order_statuses():
     )
 
 
+@app.get("/api/index-summary")
+def api_index_summary():
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify(
+            {
+                "ok": True,
+                "authenticated": False,
+                "points_balance": 0,
+                "points_balance_formatted": "0",
+                "order_statuses": [],
+                "server_time": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+
+    user = get_request_user(user_id)
+    points_balance = int((user or {}).get("balance", 0) or 0)
+    return jsonify(
+        {
+            "ok": True,
+            "authenticated": True,
+            "points_balance": points_balance,
+            "points_balance_formatted": f"{points_balance:,}".replace(",", " "),
+            "order_statuses": list_active_order_statuses(user_id),
+            "server_time": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+
+
 @app.get("/debug/storage")
 def debug_storage():
     if not DEBUG_STORAGE_ENABLED:
@@ -548,6 +963,86 @@ def debug_storage():
             "server_time": datetime.now().isoformat(timespec="seconds"),
         }
     )
+
+
+@app.get("/debug/session")
+def debug_session():
+    if not SESSION_DEBUG_ENABLED:
+        return render_template("placeholder.html", title="Страница не найдена"), 404
+    return jsonify(
+        {
+            "ok": True,
+            "request": {
+                "method": request.method,
+                "path": request.path,
+                "scheme": request.scheme,
+                "host": request.host,
+                "remote_addr": request.remote_addr,
+                "forwarded_for": request.headers.get("X-Forwarded-For"),
+                "real_ip": request.headers.get("X-Real-Ip"),
+                "cf_connecting_ip": request.headers.get("CF-Connecting-IP"),
+                "forwarded_proto": request.headers.get("X-Forwarded-Proto"),
+                "user_agent": request.headers.get("User-Agent"),
+                "referer": request.headers.get("Referer"),
+                "origin": request.headers.get("Origin"),
+            },
+            "session": {
+                "has_user_id": "user_id" in session,
+                "user_id": session.get("user_id"),
+                "user_name": session.get("user_name"),
+                "has_csrf_token": "csrf_token" in session,
+                "session_keys": sorted(session.keys()),
+                "permanent": session.permanent,
+            },
+            "cookies": {
+                "session_cookie_present": bool(request.cookies.get(app.config.get("SESSION_COOKIE_NAME", "session"))),
+                "cookie_name": app.config.get("SESSION_COOKIE_NAME", "session"),
+                "secure": app.config["SESSION_COOKIE_SECURE"],
+                "samesite": app.config["SESSION_COOKIE_SAMESITE"],
+                "partitioned": app.config["SESSION_COOKIE_PARTITIONED"],
+            },
+            "server_time": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+
+
+@app.get("/auth-bridge")
+def auth_bridge():
+    next_url = normalize_next_url(request.args.get("next"))
+    return render_template("auth-bridge.html", next_url=next_url)
+
+
+@app.post("/api/auth/session")
+def api_auth_session():
+    token, source = extract_request_auth_token()
+    payload = verify_auth_token(token)
+    if payload is None:
+        if SESSION_DEBUG_ENABLED and token:
+            log_session_debug(
+                "auth_token_invalid",
+                extra={"source": source, "endpoint": "api_auth_session"},
+            )
+        return jsonify({"ok": False, "error": "Authorization token is missing or invalid."}), 401
+
+    user_id = payload["user_id"]
+    user = get_request_user(user_id)
+    if not user:
+        if SESSION_DEBUG_ENABLED:
+            log_session_debug(
+                "auth_token_user_missing",
+                extra={"source": source, "user_id": user_id, "endpoint": "api_auth_session"},
+            )
+        return jsonify({"ok": False, "error": "User not found."}), 401
+
+    previous_user_id = session.get("user_id")
+    apply_session_user(user)
+    _set_request_user(user)
+    if SESSION_DEBUG_ENABLED:
+        log_session_debug(
+            "auth_token_session_synced",
+            extra={"source": source, "user_id": user_id, "previous_user_id": previous_user_id},
+        )
+    return jsonify({"ok": True, "user_id": user_id, "user_name": user.get("name")})
 
 
 @app.route("/reserve")
@@ -588,17 +1083,18 @@ def delivery_confirm():
         load_orders,
         next_order_id,
         save_orders,
+        verify_checkout_preview_token,
     )
 
 
 @app.post("/delivery/payment")
 def delivery_payment():
-    return delivery_payment_route(resolve_order_items)
+    return delivery_payment_route(resolve_order_items, issue_checkout_preview_token)
 
 
 @app.get("/delivery/payment")
 def delivery_payment_page():
-    return delivery_payment_page_route()
+    return delivery_payment_page_route(verify_checkout_preview_token)
 
 
 @app.route("/notifications")
@@ -608,7 +1104,15 @@ def notifications():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    return login_route(load_users, hash_password)
+    return login_route(
+        load_users,
+        hash_password,
+        debug_login_failure,
+        log_session_debug,
+        issue_auth_token,
+        AUTH_TOKEN_STORAGE_KEY,
+        AUTH_TOKEN_QUERY_PARAM,
+    )
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -620,28 +1124,34 @@ def register():
         hash_password,
         storage_write_lock,
         USERS_PATH,
+        issue_auth_token,
+        AUTH_TOKEN_STORAGE_KEY,
+        AUTH_TOKEN_QUERY_PARAM,
     )
 
 @app.route("/logout")
 def logout():
-    return logout_route()
+    return logout_route(AUTH_TOKEN_STORAGE_KEY)
+
+
+@app.get("/post-login")
+def post_login():
+    if SESSION_DEBUG_ENABLED:
+        log_session_debug("post_login_landing")
+    return redirect(url_for("index"))
 
 
 @app.context_processor
 def inject_notifications_count():
     # Бейдж уведомлений в нижнем меню
-    user_id = session.get("user_id")
-    bookings = load_bookings()
-    preparing_orders = []
-    if user_id:
-        bookings = [b for b in bookings if b.get("user_id") == user_id]
-        preparing_orders = get_user_preparing_orders(user_id)
-    else:
-        bookings = []
+    bookings, preparing_orders = get_request_notification_data()
     return {
         "notifications_count": len(bookings) + len(preparing_orders),
         "current_user_name": session.get("user_name"),
+        "current_user_id": session.get("user_id"),
         "csrf_token": session.get("csrf_token", ""),
+        "auth_storage_key": AUTH_TOKEN_STORAGE_KEY,
+        "auth_query_param": AUTH_TOKEN_QUERY_PARAM,
     }
 
 
@@ -683,7 +1193,13 @@ def checkout():
 
 @app.post("/payment")
 def payment():
-    return payment_route(load_users, latest_user_booking_status, resolve_order_items, parse_serving_option)
+    return payment_route(
+        load_users,
+        latest_user_booking_status,
+        resolve_order_items,
+        parse_serving_option,
+        issue_checkout_preview_token,
+    )
 
 
 @app.post("/payment/confirm")
@@ -698,6 +1214,7 @@ def payment_confirm():
         save_orders,
         USERS_PATH,
         save_users,
+        verify_checkout_preview_token,
     )
 
 

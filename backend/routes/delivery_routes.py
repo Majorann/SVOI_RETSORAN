@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from flask import jsonify, redirect, render_template, request, session, url_for
+from flask import g, jsonify, redirect, render_template, request, session, url_for
 
 
 def _collect_delivery_form(form):
@@ -42,7 +42,10 @@ def delivery_checkout_route(load_users):
     if not user_id:
         return redirect(url_for("login", error="Войдите, чтобы оформить доставку."))
 
-    user = next((u for u in load_users() if u.get("id") == user_id), None) or {}
+    user = getattr(g, "current_user", None)
+    if not user or user.get("id") != user_id:
+        user = next((u for u in load_users() if u.get("id") == user_id), None)
+    user = user or {}
     error = request.args.get("error", "")
     return render_template(
         "delivery_checkout.html",
@@ -51,8 +54,7 @@ def delivery_checkout_route(load_users):
         prefill_phone=user.get("phone", ""),
     )
 
-
-def delivery_payment_route(resolve_order_items):
+def delivery_payment_route(resolve_order_items, issue_checkout_preview_token):
     user_id = session.get("user_id")
     if not user_id:
         return render_template(
@@ -115,11 +117,12 @@ def delivery_payment_route(resolve_order_items):
         "delivery_address": _build_delivery_address(data),
         "delivery_eta_minutes": 20,
     }
+    preview_token = issue_checkout_preview_token(preview)
     session["delivery_checkout_preview"] = preview
-    return redirect(url_for("delivery_payment_page"))
+    return redirect(url_for("delivery_payment_page", preview_token=preview_token))
 
 
-def delivery_payment_page_route():
+def delivery_payment_page_route(verify_checkout_preview_token):
     user_id = session.get("user_id")
     if not user_id:
         return render_template(
@@ -132,6 +135,9 @@ def delivery_payment_page_route():
 
     preview = session.get("delivery_checkout_preview")
     if not isinstance(preview, dict):
+        preview_token = (request.args.get("preview_token") or "").strip()
+        preview = verify_checkout_preview_token(preview_token)
+    if not isinstance(preview, dict):
         return render_template(
             "delivery_payment.html",
             preview={},
@@ -142,6 +148,7 @@ def delivery_payment_page_route():
     return render_template(
         "delivery_payment.html",
         preview=preview,
+        preview_token=(request.args.get("preview_token") or "").strip(),
         payment_error="",
         payment_action_url=url_for("delivery_checkout"),
         payment_action_label="Вернуться к форме доставки",
@@ -154,6 +161,7 @@ def delivery_confirm_route(
     load_orders,
     next_order_id,
     save_orders,
+    verify_checkout_preview_token,
 ):
     user_id = session.get("user_id")
     if not user_id:
@@ -161,11 +169,18 @@ def delivery_confirm_route(
 
     preview = session.get("delivery_checkout_preview")
     if not isinstance(preview, dict):
+        preview_token = (request.form.get("preview_token") or "").strip()
+        preview = verify_checkout_preview_token(preview_token)
+    if not isinstance(preview, dict):
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"ok": False, "error": "Сессия оформления истекла. Повторите заказ."}), 409
         return redirect(url_for("delivery_checkout", error="Сессия оформления истекла. Повторите заказ."))
 
     items = preview.get("items")
     if not isinstance(items, list) or not items:
         session.pop("delivery_checkout_preview", None)
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"ok": False, "error": "Корзина доставки пуста."}), 409
         return redirect(url_for("delivery_checkout", error="Корзина доставки пуста."))
 
     items_total = int(preview.get("items_total", 0) or 0)
