@@ -11,7 +11,9 @@
 - Уведомления о бронированиях и активных заказах
 - Профиль пользователя с привязкой и удалением карт
 - Авторизация и регистрация
-- Долгоживущий подписанный токен авторизации для клиентов, где cookie-сессия нестабильна
+- Cookie-first авторизация с режимами `AUTH_MODE=token|hybrid|session`
+- Signed `auth_session` cookie для восстановления server-side session на первом запросе
+- Legacy `auth_token` fallback для безопасной миграции в `AUTH_MODE=hybrid`
 - Работа через JSON-хранилища или Neon Postgres
 - Опциональный Redis-кэш для меню
 
@@ -116,7 +118,7 @@ featured=true
 - `featured` - попадание в блок популярных блюд
 - `weight`, `portion`, `grams`, `volume`, `serving`, `yield` - источник бейджа порции на карточке
 
-Если `id` некорректный или конфликтует с другим блюдом, backend автоматически назначает следующий свободный числовой ID.
+Если `id` некорректный или конфликтует с другим блюдом, backend автоматически назначает следующий свободный числовой ID и сохраняет исправление обратно в `item.txt` в UTF-8.
 
 ## Формат промо-блоков
 
@@ -195,6 +197,9 @@ python backend/ops/migrate_json_to_neon.py
 - `AUTH_TOKEN_STORAGE_KEY` - имя ключа в `localStorage` для токена авторизации
 - `AUTH_TOKEN_QUERY_PARAM` - имя query/form-параметра для передачи токена между страницами
 - `AUTH_TOKEN_MAX_AGE_SECONDS` - срок жизни подписанного токена авторизации
+- `AUTH_MODE` - режим авторизации: `token`, `hybrid` или `session`
+- `AUTH_SESSION_COOKIE_NAME` - имя дополнительного signed cookie для восстановления server-side session
+- `AUTH_SESSION_COOKIE_MAX_AGE_SECONDS` - срок жизни signed `auth_session` cookie
 - `CHECKOUT_PREVIEW_MAX_AGE_SECONDS` - срок жизни подписанного preview-токена для подтверждения оплаты
 
 ### Подсказка по логину и cookie
@@ -218,18 +223,59 @@ python backend/ops/migrate_json_to_neon.py
 Если включить `SESSION_DEBUG_ENABLED=true`, станет доступен `GET /debug/session`, а backend начнёт писать ключевые события сессии в UTF-8 JSONL-файл.
 Это полезно, когда логин формально успешен, но последующие запросы теряют `session`.
 
-### Режим токен-авторизации
+### Режимы авторизации
 
-Для клиентов, которые плохо работают с cookie-сессией, frontend может переносить подписанный токен между страницами и запросами.
-Токен хранится в `localStorage`, добавляется в `Authorization` для `fetch` и временно передаётся между страницами через query/form-параметр.
+Проект поддерживает три режима через `AUTH_MODE`.
 
-Что важно в текущей реализации:
+`AUTH_MODE=token`
 
-- основная авторизация пользователя держится на долгоживущем подписанном токене;
-- сервер при каждом запросе умеет восстановить `session["user_id"]` из токена;
-- внутренние ссылки, формы и серверные redirect-ответы автоматически сохраняют `auth_token`;
-- если токен уже лежит в `localStorage`, а серверная сессия ещё не поднята, frontend на первой загрузке тихо синхронизирует сессию через `POST /api/auth/session`.
-- для главной страницы есть дополнительная одноразовая догрузка `/api/index-summary`, которая подтягивает баллы и активные статусы заказов, даже если первый HTML-рендер пришёл без полной пользовательской сессии.
+- Полностью legacy-режим.
+- Авторизация держится на долгоживущем signed `auth_token`.
+- Токен хранится в `localStorage`, передаётся через query/form и подставляется в `Authorization` для same-origin `fetch`.
+- Используется только как режим отката или для контролируемой обратной совместимости.
+
+`AUTH_MODE=hybrid`
+
+- Рекомендуемый продовый режим миграции.
+- Основной путь: обычная Flask session + signed `auth_session` cookie.
+- Backend сначала пытается восстановить пользователя из `auth_session` cookie и только потом использует legacy `auth_token`, если он есть.
+- Frontend больше не разносит токен по ссылкам и формам как основной механизм.
+- Если у старого клиента в `localStorage` уже лежит токен, frontend может один раз тихо поднять session через `POST /api/auth/session`.
+
+`AUTH_MODE=session`
+
+- Целевой чистый режим.
+- Работают только Flask session и signed `auth_session` cookie.
+- Legacy token sync отключён.
+- `POST /api/auth/session` больше не участвует в авторизации.
+
+### Cookie-first авторизация и first-load
+
+Текущая схема спроектирована так, чтобы первый заход не зависел только от query/form токена и не ломался на hosted-окружениях вроде Hugging Face Spaces.
+
+Что делает backend:
+
+- после входа или регистрации поднимает обычную Flask session;
+- дополнительно выставляет signed `auth_session` cookie;
+- на следующем запросе может восстановить `session["user_id"]` из `auth_session`, даже если Flask session по какой-то причине не доехала стабильно;
+- очищает `auth_session` cookie, если она стала невалидной.
+
+Что делает frontend:
+
+- в `hybrid` и `session` не считает токен основной навигационной схемой;
+- для главной страницы один раз вызывает `/api/index-summary`, чтобы баллы и status bar не зависели только от первого HTML-рендера;
+- использует polling `/api/order-statuses` только когда действительно есть активный заказ.
+
+### Рекомендованные настройки для Hugging Face Spaces
+
+Для рабочего домена `https://mayaran-mdk2.hf.space` рекомендуется:
+
+- `AUTH_MODE=hybrid`
+- `PUBLIC_BASE_URL=https://mayaran-mdk2.hf.space`
+- `SESSION_COOKIE_SECURE=true`
+- `SESSION_COOKIE_SAMESITE=None`
+- `SESSION_COOKIE_PARTITIONED=true`
+- `TRUST_PROXY_HEADERS=true`
 
 ### Оплата и подтверждение заказа
 
@@ -253,7 +299,7 @@ python backend/ops/migrate_json_to_neon.py
 - `backend/static/js/modules/cartDrawer.js` - корзина, mobile drawer и синхронизация кнопок `В корзину`
 - `backend/static/js/modules/checkoutPaymentFlow.js` - checkout и экран оплаты
 - `backend/static/js/modules/formEnhancements.js` - маски и валидация карты, срока действия, держателя и телефона
-- `backend/static/js/modules/authToken.js` - токен-авторизация и перенос токена между переходами
+- `backend/static/js/modules/authToken.js` - режимная auth-логика для `token|hybrid|session`
 
 `backend/static/js/app.js` теперь выполняет только безопасную инициализацию страницы и подключает нужные блоки через lazy import.
 
@@ -270,29 +316,25 @@ python backend/ops/migrate_json_to_neon.py
   - `/api/index-summary` вызывается один раз после загрузки;
   - постоянный polling `/api/order-statuses` работает только когда реально есть активный заказ.
 
-## План перехода обратно на cookie
+## План миграции auth
 
-Ниже зафиксирован безопасный план перехода с текущего долгоживущего токена обратно на cookie-session без риска сломать прод.
+Текущий безопасный путь для production:
 
-1. Оставить текущий токеновый режим рабочим fallback-механизмом.
-2. Ввести режимы авторизации через переменную окружения:
-   - `AUTH_MODE=token`
-   - `AUTH_MODE=hybrid`
-   - `AUTH_MODE=session`
-3. Использовать только один боевой домен: `https://mayaran-mdk2.hf.space`.
-4. Перевести первую загрузку профильных данных, баллов и статусов на API-догрузку, а не только на первый HTML-рендер.
-5. В режиме `hybrid` оставить cookie основным способом входа, а токен использовать только как восстановление, если серверная сессия не поднялась.
-6. Отключить перенос `auth_token` в ссылки и формы в режиме `session`, но сохранить его как fallback в `hybrid`.
-7. Прогнать полный тестовый сценарий на ПК и мобильных браузерах:
-   - вход;
-   - перезагрузка первой страницы;
-   - профиль;
+1. Держать прод на `AUTH_MODE=hybrid`.
+2. Проверять сценарии на рабочем домене `https://mayaran-mdk2.hf.space`:
+   - login;
+   - первый заход на `/`;
+   - профиль и баллы;
    - бронирование;
-   - оплата;
+   - checkout и оплата;
    - доставка;
-   - logout/login.
-8. Только после стабильной проверки перевести production из `hybrid` в `session`.
-9. После периода наблюдения убрать токен из URL и затем полностью удалить token fallback.
+   - logout/login;
+   - мобильные браузеры.
+3. На период наблюдения при необходимости включать:
+   - `SESSION_DEBUG_ENABLED=true`
+   - `GET /debug/session`
+4. После стабилизации first-load и cookie-поведения переключать прод на `AUTH_MODE=session`.
+5. `AUTH_MODE=token` оставлять только как аварийный откат, а не как основной рабочий режим.
 
 - На backend текущий пользователь и данные уведомлений кэшируются в рамках одного запроса, чтобы не читать одни и те же данные несколько раз.
 - На frontend основной `app.js` уменьшен и превращён в orchestration-layer вместо монолитного файла.

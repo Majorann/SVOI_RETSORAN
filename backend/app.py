@@ -241,10 +241,21 @@ app.config["SESSION_COOKIE_PARTITIONED"] = env_bool("SESSION_COOKIE_PARTITIONED"
 app.config["PREFERRED_URL_SCHEME"] = "https" if app.config["SESSION_COOKIE_SECURE"] else "http"
 if env_bool("TRUST_PROXY_HEADERS", True):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+AUTH_MODE = env_str("AUTH_MODE", "hybrid").lower()
+if AUTH_MODE not in {"token", "hybrid", "session"}:
+    AUTH_MODE = "hybrid"
+TOKEN_AUTH_ENABLED = AUTH_MODE in {"token", "hybrid"}
+COOKIE_AUTH_ENABLED = AUTH_MODE in {"hybrid", "session"}
 AUTH_TOKEN_STORAGE_KEY = env_str("AUTH_TOKEN_STORAGE_KEY", "auth_token")
 AUTH_TOKEN_QUERY_PARAM = env_str("AUTH_TOKEN_QUERY_PARAM", "auth_token")
 AUTH_TOKEN_MAX_AGE_SECONDS = max(300, env_int("AUTH_TOKEN_MAX_AGE_SECONDS", 30 * 24 * 60 * 60))
 _AUTH_TOKEN_SERIALIZER = URLSafeTimedSerializer(app.secret_key, salt="auth-token-v1")
+AUTH_SESSION_COOKIE_NAME = env_str("AUTH_SESSION_COOKIE_NAME", "auth_session")
+AUTH_SESSION_COOKIE_MAX_AGE_SECONDS = max(
+    300,
+    env_int("AUTH_SESSION_COOKIE_MAX_AGE_SECONDS", 30 * 24 * 60 * 60),
+)
+_AUTH_SESSION_SERIALIZER = URLSafeTimedSerializer(app.secret_key, salt="auth-session-v1")
 CHECKOUT_PREVIEW_MAX_AGE_SECONDS = max(300, env_int("CHECKOUT_PREVIEW_MAX_AGE_SECONDS", 30 * 60))
 _CHECKOUT_PREVIEW_SERIALIZER = URLSafeTimedSerializer(app.secret_key, salt="checkout-preview-v1")
 _PROCESS_LOCKS = {}
@@ -275,7 +286,7 @@ _REDIS_CLIENT = None
 _REDIS_CLIENT_LOCK = threading.Lock()
 
 print(
-    "[storage] backend={0} users={1} bookings={2} orders={3} cookie_secure={4} cookie_samesite={5} cookie_partitioned={6} login_debug={7} session_debug={8} auth_token_key={9}".format(
+    "[storage] backend={0} users={1} bookings={2} orders={3} cookie_secure={4} cookie_samesite={5} cookie_partitioned={6} login_debug={7} session_debug={8} auth_mode={9} auth_token_key={10} auth_session_cookie={11}".format(
         ACTIVE_STORAGE,
         USERS_PATH,
         BOOKINGS_PATH,
@@ -285,7 +296,9 @@ print(
         app.config["SESSION_COOKIE_PARTITIONED"],
         LOGIN_DEBUG_ENABLED,
         SESSION_DEBUG_ENABLED,
+        AUTH_MODE,
         AUTH_TOKEN_QUERY_PARAM,
+        AUTH_SESSION_COOKIE_NAME,
     )
 )
 if LOGIN_DEBUG_ENABLED:
@@ -396,6 +409,29 @@ def verify_auth_token(token: str | None):
     return {"user_id": user_id}
 
 
+def issue_auth_session_cookie(user_id: int) -> str:
+    return _AUTH_SESSION_SERIALIZER.dumps({"user_id": int(user_id), "v": 1})
+
+
+def verify_auth_session_cookie(cookie_value: str | None):
+    if not cookie_value:
+        return None
+    try:
+        payload = _AUTH_SESSION_SERIALIZER.loads(
+            cookie_value,
+            max_age=AUTH_SESSION_COOKIE_MAX_AGE_SECONDS,
+        )
+    except (BadSignature, SignatureExpired):
+        return None
+    try:
+        user_id = int(payload.get("user_id"))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if user_id <= 0:
+        return None
+    return {"user_id": user_id}
+
+
 def issue_checkout_preview_token(preview: dict) -> str:
     return _CHECKOUT_PREVIEW_SERIALIZER.dumps({"preview": preview, "v": 1})
 
@@ -490,6 +526,8 @@ def append_auth_token_to_url(raw_url: str | None, token: str | None):
 
 
 def get_navigation_auth_token():
+    if not TOKEN_AUTH_ENABLED:
+        return None
     token, _source = extract_request_auth_token()
     payload = verify_auth_token(token)
     if payload is not None:
@@ -513,6 +551,61 @@ def apply_session_user(user: dict):
     session["user_id"] = user.get("id")
     session["user_name"] = user.get("name")
     session.permanent = True
+
+
+def build_auth_session_cookie_kwargs(max_age=None):
+    cookie_kwargs = {
+        "httponly": True,
+        "path": "/",
+        "secure": app.config["SESSION_COOKIE_SECURE"],
+        "samesite": app.config["SESSION_COOKIE_SAMESITE"],
+    }
+    if max_age is not None:
+        cookie_kwargs["max_age"] = max_age
+    if app.config["SESSION_COOKIE_PARTITIONED"]:
+        cookie_kwargs["partitioned"] = True
+    return cookie_kwargs
+
+
+def set_auth_session_cookie(response, user_id: int):
+    cookie_kwargs = build_auth_session_cookie_kwargs(
+        max_age=AUTH_SESSION_COOKIE_MAX_AGE_SECONDS
+    )
+    cookie_value = issue_auth_session_cookie(user_id)
+    try:
+        response.set_cookie(
+            AUTH_SESSION_COOKIE_NAME,
+            cookie_value,
+            **cookie_kwargs,
+        )
+    except TypeError:
+        cookie_kwargs.pop("partitioned", None)
+        response.set_cookie(
+            AUTH_SESSION_COOKIE_NAME,
+            cookie_value,
+            **cookie_kwargs,
+        )
+
+
+def clear_auth_session_cookie(response):
+    cookie_kwargs = build_auth_session_cookie_kwargs()
+    try:
+        response.set_cookie(
+            AUTH_SESSION_COOKIE_NAME,
+            "",
+            expires=0,
+            max_age=0,
+            **cookie_kwargs,
+        )
+    except TypeError:
+        cookie_kwargs.pop("partitioned", None)
+        response.set_cookie(
+            AUTH_SESSION_COOKIE_NAME,
+            "",
+            expires=0,
+            max_age=0,
+            **cookie_kwargs,
+        )
 
 
 def _set_request_user(user: dict | None):
@@ -626,9 +719,9 @@ def get_redis_client():
 
 
 def load_menu_items_from_disk():
-    items = []
+    items_with_meta = []
     if not MENU_ITEMS_PATH.exists():
-        return items
+        return []
 
     for item_dir in sorted(MENU_ITEMS_PATH.iterdir()):
         if not item_dir.is_dir():
@@ -642,26 +735,58 @@ def load_menu_items_from_disk():
         menu_item = parse_menu_item(meta, item_dir.name, photo_name)
         if menu_item is None:
             continue
-        items.append(menu_item)
+        items_with_meta.append((menu_item, meta_path))
 
-    items = ensure_unique_menu_item_ids(items)
+    items = ensure_unique_menu_item_ids(items_with_meta)
     items.sort(key=lambda item: item["id"])
     return items
 
 
-def ensure_unique_menu_item_ids(items):
+def update_menu_meta_id(meta_path: Path, new_id: int):
+    raw_text = read_text_with_fallback(meta_path, ("utf-8", "utf-8-sig", "cp1251"))
+    lines = raw_text.splitlines(keepends=True)
+    updated = False
+
+    for index, raw_line in enumerate(lines):
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in raw_line:
+            continue
+        key, _value = raw_line.split("=", 1)
+        normalized_key = key.strip().lower().lstrip("\ufeff")
+        if normalized_key != "id":
+            continue
+        line_ending = "\n" if raw_line.endswith("\n") else ""
+        lines[index] = f"id={int(new_id)}{line_ending}"
+        updated = True
+        break
+
+    if not updated:
+        prefix = f"id={int(new_id)}\n"
+        lines.insert(0, prefix)
+
+    payload = "".join(lines)
+    if payload == raw_text:
+        return
+
+    tmp_path = meta_path.with_suffix(meta_path.suffix + ".tmp")
+    tmp_path.write_text(payload, encoding="utf-8")
+    os.replace(tmp_path, meta_path)
+
+
+def ensure_unique_menu_item_ids(items_with_meta):
+    items = [item for item, _meta_path in items_with_meta]
     used_ids = set()
     max_id = max(
         (
             item_id
-            for item in items
+            for item, _meta_path in items_with_meta
             for item_id in [item.get("id")]
             if isinstance(item_id, int) and item_id > 0
         ),
         default=0,
     )
 
-    for item in items:
+    for item, meta_path in items_with_meta:
         item_id = item.get("id")
         if isinstance(item_id, int) and item_id > 0 and item_id not in used_ids:
             used_ids.add(item_id)
@@ -684,6 +809,16 @@ def ensure_unique_menu_item_ids(items):
             )
         )
         item["id"] = new_id
+        try:
+            update_menu_meta_id(meta_path, new_id)
+        except OSError as exc:
+            print(
+                "[menu] failed to persist item id for '{0}' in {1} ({2})".format(
+                    item.get("name", "unknown"),
+                    meta_path,
+                    exc,
+                )
+            )
         used_ids.add(new_id)
         max_id = new_id
 
@@ -759,43 +894,70 @@ def storage_write_lock(path: Path, timeout_seconds: float = 5.0, poll_interval: 
 
 
 @app.before_request
-def restore_auth_from_token():
+def restore_auth_from_cookies_or_token():
     if request.endpoint == "static":
         return
 
-    token, source = extract_request_auth_token()
     current_user_id = session.get("user_id")
+    auth_candidate = None
 
-    if not token:
+    if COOKIE_AUTH_ENABLED:
+        cookie_value = request.cookies.get(AUTH_SESSION_COOKIE_NAME)
+        if cookie_value:
+            payload = verify_auth_session_cookie(cookie_value)
+            if payload is None:
+                g.clear_auth_session_cookie = True
+                if SESSION_DEBUG_ENABLED:
+                    log_session_debug(
+                        "auth_session_cookie_invalid",
+                        extra={"cookie_name": AUTH_SESSION_COOKIE_NAME},
+                    )
+            else:
+                auth_candidate = {
+                    "user_id": payload["user_id"],
+                    "source": "auth_session_cookie",
+                }
+
+    if auth_candidate is None and TOKEN_AUTH_ENABLED:
+        token, token_source = extract_request_auth_token()
+        if token:
+            payload = verify_auth_token(token)
+            if payload is None:
+                if SESSION_DEBUG_ENABLED:
+                    log_session_debug("auth_token_invalid", extra={"source": token_source})
+            else:
+                auth_candidate = {
+                    "user_id": payload["user_id"],
+                    "source": f"auth_token:{token_source}",
+                }
+
+    if auth_candidate is None:
         return
 
-    payload = verify_auth_token(token)
-    if payload is None:
-        if SESSION_DEBUG_ENABLED:
-            log_session_debug("auth_token_invalid", extra={"source": source})
-        return
-
-    user_id = payload["user_id"]
+    user_id = auth_candidate["user_id"]
+    source = auth_candidate["source"]
     if current_user_id == user_id and session.get("user_name"):
         session.permanent = True
         if SESSION_DEBUG_ENABLED:
             log_session_debug(
-                "auth_token_confirmed_session",
+                "auth_session_confirmed",
                 extra={"source": source, "user_id": user_id},
             )
         return
 
     user = get_request_user(user_id)
     if not user:
+        if source == "auth_session_cookie":
+            g.clear_auth_session_cookie = True
         if SESSION_DEBUG_ENABLED:
-            log_session_debug("auth_token_user_missing", extra={"source": source, "user_id": user_id})
+            log_session_debug("auth_user_missing", extra={"source": source, "user_id": user_id})
         return
 
     apply_session_user(user)
     _set_request_user(user)
     if SESSION_DEBUG_ENABLED:
         log_session_debug(
-            "auth_token_restored",
+            "auth_session_restored",
             extra={
                 "source": source,
                 "user_id": user_id,
@@ -868,6 +1030,8 @@ def validate_csrf_token():
 
 @app.after_request
 def preserve_auth_token_on_redirects(response):
+    if AUTH_MODE != "token":
+        return response
     if not (300 <= response.status_code < 400):
         return response
 
@@ -882,6 +1046,27 @@ def preserve_auth_token_on_redirects(response):
     next_location = append_auth_token_to_url(location, token)
     if next_location and next_location != location:
         response.headers["Location"] = next_location
+    return response
+
+
+@app.after_request
+def sync_auth_session_cookie_response(response):
+    if request.endpoint == "static":
+        return response
+
+    session_user_id = session.get("user_id")
+    try:
+        normalized_user_id = int(session_user_id)
+    except (TypeError, ValueError):
+        normalized_user_id = None
+
+    if COOKIE_AUTH_ENABLED and normalized_user_id and normalized_user_id > 0:
+        set_auth_session_cookie(response, normalized_user_id)
+        return response
+
+    has_auth_cookie = bool(request.cookies.get(AUTH_SESSION_COOKIE_NAME))
+    if has_auth_cookie or getattr(g, "clear_auth_session_cookie", False):
+        clear_auth_session_cookie(response)
     return response
 
 @app.route("/")
@@ -1000,6 +1185,13 @@ def debug_session():
                 "secure": app.config["SESSION_COOKIE_SECURE"],
                 "samesite": app.config["SESSION_COOKIE_SAMESITE"],
                 "partitioned": app.config["SESSION_COOKIE_PARTITIONED"],
+                "auth_session_cookie_present": bool(request.cookies.get(AUTH_SESSION_COOKIE_NAME)),
+                "auth_session_cookie_name": AUTH_SESSION_COOKIE_NAME,
+            },
+            "auth": {
+                "mode": AUTH_MODE,
+                "token_enabled": TOKEN_AUTH_ENABLED,
+                "cookie_enabled": COOKIE_AUTH_ENABLED,
             },
             "server_time": datetime.now().isoformat(timespec="seconds"),
         }
@@ -1014,6 +1206,9 @@ def auth_bridge():
 
 @app.post("/api/auth/session")
 def api_auth_session():
+    if not TOKEN_AUTH_ENABLED:
+        return jsonify({"ok": False, "error": "Legacy token sync is disabled."}), 404
+
     token, source = extract_request_auth_token()
     payload = verify_auth_token(token)
     if payload is None:
@@ -1109,7 +1304,7 @@ def login():
         hash_password,
         debug_login_failure,
         log_session_debug,
-        issue_auth_token,
+        issue_auth_token if TOKEN_AUTH_ENABLED else None,
         AUTH_TOKEN_STORAGE_KEY,
         AUTH_TOKEN_QUERY_PARAM,
     )
@@ -1124,7 +1319,7 @@ def register():
         hash_password,
         storage_write_lock,
         USERS_PATH,
-        issue_auth_token,
+        issue_auth_token if TOKEN_AUTH_ENABLED else None,
         AUTH_TOKEN_STORAGE_KEY,
         AUTH_TOKEN_QUERY_PARAM,
     )
@@ -1150,6 +1345,8 @@ def inject_notifications_count():
         "current_user_name": session.get("user_name"),
         "current_user_id": session.get("user_id"),
         "csrf_token": session.get("csrf_token", ""),
+        "auth_mode": AUTH_MODE,
+        "auth_token_enabled": TOKEN_AUTH_ENABLED,
         "auth_storage_key": AUTH_TOKEN_STORAGE_KEY,
         "auth_query_param": AUTH_TOKEN_QUERY_PARAM,
     }

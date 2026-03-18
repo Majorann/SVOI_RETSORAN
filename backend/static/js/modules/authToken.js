@@ -1,7 +1,12 @@
+const getAuthMode = () => window.__AUTH_MODE || "hybrid";
+const isTokenAuthEnabled = () => Boolean(window.__AUTH_TOKEN_ENABLED);
+const isTokenNavigationMode = () => getAuthMode() === "token";
+const isHybridAuthMode = () => getAuthMode() === "hybrid";
 const getAuthStorageKey = () => window.__AUTH_STORAGE_KEY || "auth_token";
 const getAuthQueryParam = () => window.__AUTH_QUERY_PARAM || "auth_token";
 
 const getAuthToken = () => {
+  if (!isTokenAuthEnabled()) return "";
   try {
     return window.localStorage.getItem(getAuthStorageKey()) || "";
   } catch {
@@ -15,6 +20,7 @@ const setAuthToken = (token) => {
       window.localStorage.removeItem(getAuthStorageKey());
       return;
     }
+    if (!isTokenAuthEnabled()) return;
     window.localStorage.setItem(getAuthStorageKey(), token);
   } catch {
     // Ignore storage errors in private / restricted modes.
@@ -22,14 +28,18 @@ const setAuthToken = (token) => {
 };
 
 const clearAuthToken = () => {
-  setAuthToken("");
+  try {
+    window.localStorage.removeItem(getAuthStorageKey());
+  } catch {
+    // Ignore storage errors in private / restricted modes.
+  }
 };
 
 const getCsrfToken = () =>
   document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
 
 const ensureFormTokenField = (form, token = getAuthToken()) => {
-  if (!form) return;
+  if (!isTokenNavigationMode() || !form) return;
   let field = form.querySelector(`input[name="${getAuthQueryParam()}"]`);
   if (!token) {
     field?.remove();
@@ -45,27 +55,8 @@ const ensureFormTokenField = (form, token = getAuthToken()) => {
   field.value = token;
 };
 
-const decorateInternalLinks = () => {
-  const token = getAuthToken();
-  if (!token) return;
-
-  document.querySelectorAll("a[href]").forEach((link) => {
-    const href = link.getAttribute("href");
-    if (!href) return;
-    const nextHref = buildUrlWithToken(href, token);
-    if (nextHref && nextHref !== href) {
-      link.setAttribute("href", nextHref);
-    }
-  });
-};
-
-const decorateForms = () => {
-  document.querySelectorAll("form").forEach((form) => {
-    ensureFormTokenField(form);
-  });
-};
-
 const buildUrlWithToken = (rawUrl, token = getAuthToken()) => {
+  if (!isTokenNavigationMode()) return rawUrl;
   if (!rawUrl || !token) return rawUrl;
   if (rawUrl.startsWith("#") || rawUrl.startsWith("mailto:") || rawUrl.startsWith("tel:")) {
     return rawUrl;
@@ -83,8 +74,30 @@ const buildUrlWithToken = (rawUrl, token = getAuthToken()) => {
   return `${url.pathname}${url.search}${url.hash}`;
 };
 
+const decorateInternalLinks = () => {
+  if (!isTokenNavigationMode()) return;
+  const token = getAuthToken();
+  if (!token) return;
+
+  document.querySelectorAll("a[href]").forEach((link) => {
+    const href = link.getAttribute("href");
+    if (!href) return;
+    const nextHref = buildUrlWithToken(href, token);
+    if (nextHref && nextHref !== href) {
+      link.setAttribute("href", nextHref);
+    }
+  });
+};
+
+const decorateForms = () => {
+  if (!isTokenNavigationMode()) return;
+  document.querySelectorAll("form").forEach((form) => {
+    ensureFormTokenField(form);
+  });
+};
+
 const patchFetch = () => {
-  if (window.__AUTH_FETCH_PATCHED) return;
+  if (!isTokenAuthEnabled() || window.__AUTH_FETCH_PATCHED) return;
   window.__AUTH_FETCH_PATCHED = true;
 
   const originalFetch = window.fetch.bind(window);
@@ -99,19 +112,19 @@ const patchFetch = () => {
       const initHeaders = new Headers(init.headers || {});
       initHeaders.forEach((value, key) => headers.set(key, value));
       headers.set("Authorization", `Bearer ${token}`);
-      return originalFetch(new Request(input, { ...init, headers }));
+      return originalFetch(new Request(input, { ...init, credentials: "same-origin", headers }));
     }
 
     const url = new URL(String(input), window.location.origin);
     if (url.origin !== window.location.origin) return originalFetch(input, init);
     const headers = new Headers(init.headers || {});
     headers.set("Authorization", `Bearer ${token}`);
-    return originalFetch(input, { ...init, headers });
+    return originalFetch(input, { ...init, credentials: "same-origin", headers });
   };
 };
 
 const bootstrapPageAuthFromToken = () => {
-  if (window.__SESSION_USER_ID) return false;
+  if (!isTokenNavigationMode() || window.__SESSION_USER_ID) return false;
 
   const token = getAuthToken();
   if (!token) return false;
@@ -133,13 +146,15 @@ const stripAuthTokenFromAddressBar = () => {
   const queryParam = getAuthQueryParam();
   const tokenFromUrl = current.searchParams.get(queryParam);
   if (!tokenFromUrl) return;
-  setAuthToken(tokenFromUrl);
+  if (isTokenAuthEnabled()) {
+    setAuthToken(tokenFromUrl);
+  }
   current.searchParams.delete(queryParam);
   window.history.replaceState({}, document.title, `${current.pathname}${current.search}${current.hash}`);
 };
 
 const patchDocumentNavigation = () => {
-  if (window.__AUTH_NAV_PATCHED) return;
+  if (!isTokenNavigationMode() || window.__AUTH_NAV_PATCHED) return;
   window.__AUTH_NAV_PATCHED = true;
 
   document.addEventListener(
@@ -174,7 +189,7 @@ const patchDocumentNavigation = () => {
 };
 
 const observeAuthTargets = () => {
-  if (window.__AUTH_TARGET_OBSERVER) return;
+  if (!isTokenNavigationMode() || window.__AUTH_TARGET_OBSERVER) return;
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) {
@@ -207,13 +222,10 @@ const observeAuthTargets = () => {
 };
 
 const syncSessionFromStoredToken = async () => {
-  if (window.__SESSION_USER_ID) return false;
+  if (!isHybridAuthMode() || window.__SESSION_USER_ID) return false;
 
   const token = getAuthToken();
   if (!token) return false;
-
-  const currentUrl = new URL(window.location.href);
-  if (currentUrl.searchParams.get(getAuthQueryParam())) return false;
 
   if (window.__AUTH_SESSION_SYNC_STARTED) {
     return true;
@@ -240,6 +252,9 @@ const syncSessionFromStoredToken = async () => {
       body: JSON.stringify({ token }),
     });
     if (!response.ok) {
+      if (response.status === 401 || response.status === 404) {
+        clearAuthToken();
+      }
       throw new Error(`sync_failed_${response.status}`);
     }
     const payload = await response.json().catch(() => ({}));
@@ -261,12 +276,18 @@ const setupAuthTokenBridge = async () => {
   if (bootstrapPageAuthFromToken()) {
     return true;
   }
+
   stripAuthTokenFromAddressBar();
   patchFetch();
-  decorateForms();
-  decorateInternalLinks();
-  patchDocumentNavigation();
-  observeAuthTargets();
+
+  if (isTokenNavigationMode()) {
+    decorateForms();
+    decorateInternalLinks();
+    patchDocumentNavigation();
+    observeAuthTargets();
+    return false;
+  }
+
   return syncSessionFromStoredToken();
 };
 
@@ -284,6 +305,7 @@ export {
   clearAuthToken,
   decorateForms,
   decorateInternalLinks,
+  getAuthMode,
   getAuthQueryParam,
   getAuthStorageKey,
   getAuthToken,
