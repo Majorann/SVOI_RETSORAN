@@ -920,3 +920,23 @@
   - backend назначает следующий свободный числовой `id`;
   - затем атомарно перезаписывает `item.txt` в UTF-8 с новым `id`.
 - После первого исправляющего прохода повторные загрузки меню больше не должны шуметь одними и теми же предупреждениями по тем же блюдам.
+
+## 18.03.2026 (3)
+
+### Авторизация: окончательный отказ от token
+- Из backend удалён legacy token auth-flow:
+  - убраны `AUTH_MODE`, `AUTH_TOKEN_*`, signed `auth_token` и связанная проверка на `before_request`;
+  - удалён endpoint `POST /api/auth/session`;
+  - удалён server-side redirect propagation через `auth_token`.
+- Авторизация теперь полностью cookie-only:
+  - основой остаётся Flask session;
+  - signed `auth_session` cookie используется только для восстановления server-side session на первом запросе.
+
+### Frontend: удаление token bridge
+- `backend/static/js/modules/authToken.js` упрощён до обычной навигационной обёртки без `localStorage`, Bearer headers и query/form токенов.
+- Из `backend/templates/base.html`, `login-success.html` и `logout.html` удалены mode-aware флаги, `auth_token`-логика и очистка токена в браузере.
+- Удалён неиспользуемый шаблон `backend/templates/auth-bridge.html`.
+
+### Документация
+- `README.md` обновлён под итоговую cookie-only архитектуру.
+- Из документации убраны рекомендации по `AUTH_MODE` и token fallback.

@@ -10,11 +10,6 @@
   </div>
 </section>
 <script>
-  try {
-    window.localStorage.removeItem({{ auth_storage_key|tojson }});
-  } catch (error) {
-    console.warn("Failed to clear auth token", error);
-  }
   window.setTimeout(function () {
     window.location.replace({{ redirect_url|tojson }});
   }, 100);

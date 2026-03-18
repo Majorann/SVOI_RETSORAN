@@ -8,7 +8,6 @@ from flask import Flask, render_template, url_for, request, jsonify, session, re
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from contextlib import contextmanager
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import json
 import hashlib
 import os
@@ -241,15 +240,6 @@ app.config["SESSION_COOKIE_PARTITIONED"] = env_bool("SESSION_COOKIE_PARTITIONED"
 app.config["PREFERRED_URL_SCHEME"] = "https" if app.config["SESSION_COOKIE_SECURE"] else "http"
 if env_bool("TRUST_PROXY_HEADERS", True):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
-AUTH_MODE = env_str("AUTH_MODE", "hybrid").lower()
-if AUTH_MODE not in {"token", "hybrid", "session"}:
-    AUTH_MODE = "hybrid"
-TOKEN_AUTH_ENABLED = AUTH_MODE in {"token", "hybrid"}
-COOKIE_AUTH_ENABLED = AUTH_MODE in {"hybrid", "session"}
-AUTH_TOKEN_STORAGE_KEY = env_str("AUTH_TOKEN_STORAGE_KEY", "auth_token")
-AUTH_TOKEN_QUERY_PARAM = env_str("AUTH_TOKEN_QUERY_PARAM", "auth_token")
-AUTH_TOKEN_MAX_AGE_SECONDS = max(300, env_int("AUTH_TOKEN_MAX_AGE_SECONDS", 30 * 24 * 60 * 60))
-_AUTH_TOKEN_SERIALIZER = URLSafeTimedSerializer(app.secret_key, salt="auth-token-v1")
 AUTH_SESSION_COOKIE_NAME = env_str("AUTH_SESSION_COOKIE_NAME", "auth_session")
 AUTH_SESSION_COOKIE_MAX_AGE_SECONDS = max(
     300,
@@ -286,7 +276,7 @@ _REDIS_CLIENT = None
 _REDIS_CLIENT_LOCK = threading.Lock()
 
 print(
-    "[storage] backend={0} users={1} bookings={2} orders={3} cookie_secure={4} cookie_samesite={5} cookie_partitioned={6} login_debug={7} session_debug={8} auth_mode={9} auth_token_key={10} auth_session_cookie={11}".format(
+    "[storage] backend={0} users={1} bookings={2} orders={3} cookie_secure={4} cookie_samesite={5} cookie_partitioned={6} login_debug={7} session_debug={8} auth_session_cookie={9}".format(
         ACTIVE_STORAGE,
         USERS_PATH,
         BOOKINGS_PATH,
@@ -296,8 +286,6 @@ print(
         app.config["SESSION_COOKIE_PARTITIONED"],
         LOGIN_DEBUG_ENABLED,
         SESSION_DEBUG_ENABLED,
-        AUTH_MODE,
-        AUTH_TOKEN_QUERY_PARAM,
         AUTH_SESSION_COOKIE_NAME,
     )
 )
@@ -389,26 +377,6 @@ def log_session_debug(event: str, extra: dict | None = None):
         print(f"[session-debug] failed to write session debug log ({exc})")
 
 
-def issue_auth_token(user_id: int) -> str:
-    return _AUTH_TOKEN_SERIALIZER.dumps({"user_id": int(user_id), "v": 1})
-
-
-def verify_auth_token(token: str | None):
-    if not token:
-        return None
-    try:
-        payload = _AUTH_TOKEN_SERIALIZER.loads(token, max_age=AUTH_TOKEN_MAX_AGE_SECONDS)
-    except (BadSignature, SignatureExpired):
-        return None
-    try:
-        user_id = int(payload.get("user_id"))
-    except (TypeError, ValueError, AttributeError):
-        return None
-    if user_id <= 0:
-        return None
-    return {"user_id": user_id}
-
-
 def issue_auth_session_cookie(user_id: int) -> str:
     return _AUTH_SESSION_SERIALIZER.dumps({"user_id": int(user_id), "v": 1})
 
@@ -448,99 +416,6 @@ def verify_checkout_preview_token(token: str | None):
         return None
     preview = payload.get("preview")
     return preview if isinstance(preview, dict) else None
-
-
-def extract_request_auth_token():
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.lower().startswith("bearer "):
-        token = auth_header[7:].strip()
-        if token:
-            return token, "authorization"
-
-    query_token = (request.args.get(AUTH_TOKEN_QUERY_PARAM) or "").strip()
-    if query_token:
-        return query_token, "query"
-
-    form_token = (request.form.get(AUTH_TOKEN_QUERY_PARAM) or "").strip()
-    if form_token:
-        return form_token, "form"
-
-    if request.is_json:
-        payload = request.get_json(silent=True) or {}
-        json_token = str(payload.get("token") or "").strip()
-        if json_token:
-            return json_token, "json"
-
-    return None, None
-
-
-def normalize_next_url(raw_url: str | None):
-    fallback = url_for("index")
-    if not raw_url:
-        return fallback
-
-    candidate = str(raw_url).strip()
-    if not candidate:
-        return fallback
-
-    parts = urlsplit(candidate)
-    if parts.scheme or parts.netloc:
-        return fallback
-
-    path = parts.path or "/"
-    if not path.startswith("/"):
-        return fallback
-
-    filtered_query = [
-        (key, value)
-        for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if key != AUTH_TOKEN_QUERY_PARAM
-    ]
-    query = urlencode(filtered_query, doseq=True)
-    return urlunsplit(("", "", path, query, parts.fragment))
-
-
-def append_auth_token_to_url(raw_url: str | None, token: str | None):
-    if not raw_url or not token:
-        return raw_url
-
-    parts = urlsplit(str(raw_url))
-    if parts.scheme or parts.netloc:
-        request_origin = f"{request.scheme}://{request.host}"
-        target_origin = f"{parts.scheme}://{parts.netloc}"
-        if target_origin != request_origin:
-            return raw_url
-
-    path = parts.path or "/"
-    if path.startswith("/static/"):
-        return raw_url
-
-    filtered_query = [
-        (key, value)
-        for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if key != AUTH_TOKEN_QUERY_PARAM
-    ]
-    filtered_query.append((AUTH_TOKEN_QUERY_PARAM, token))
-    next_query = urlencode(filtered_query, doseq=True)
-    return urlunsplit((parts.scheme, parts.netloc, path, next_query, parts.fragment))
-
-
-def get_navigation_auth_token():
-    if not TOKEN_AUTH_ENABLED:
-        return None
-    token, _source = extract_request_auth_token()
-    payload = verify_auth_token(token)
-    if payload is not None:
-        return token
-
-    user_id = session.get("user_id")
-    try:
-        user_id = int(user_id)
-    except (TypeError, ValueError):
-        return None
-    if user_id <= 0:
-        return None
-    return issue_auth_token(user_id)
 
 
 def apply_session_user(user: dict):
@@ -894,48 +769,27 @@ def storage_write_lock(path: Path, timeout_seconds: float = 5.0, poll_interval: 
 
 
 @app.before_request
-def restore_auth_from_cookies_or_token():
+def restore_auth_from_cookie():
     if request.endpoint == "static":
         return
 
     current_user_id = session.get("user_id")
-    auth_candidate = None
-
-    if COOKIE_AUTH_ENABLED:
-        cookie_value = request.cookies.get(AUTH_SESSION_COOKIE_NAME)
-        if cookie_value:
-            payload = verify_auth_session_cookie(cookie_value)
-            if payload is None:
-                g.clear_auth_session_cookie = True
-                if SESSION_DEBUG_ENABLED:
-                    log_session_debug(
-                        "auth_session_cookie_invalid",
-                        extra={"cookie_name": AUTH_SESSION_COOKIE_NAME},
-                    )
-            else:
-                auth_candidate = {
-                    "user_id": payload["user_id"],
-                    "source": "auth_session_cookie",
-                }
-
-    if auth_candidate is None and TOKEN_AUTH_ENABLED:
-        token, token_source = extract_request_auth_token()
-        if token:
-            payload = verify_auth_token(token)
-            if payload is None:
-                if SESSION_DEBUG_ENABLED:
-                    log_session_debug("auth_token_invalid", extra={"source": token_source})
-            else:
-                auth_candidate = {
-                    "user_id": payload["user_id"],
-                    "source": f"auth_token:{token_source}",
-                }
-
-    if auth_candidate is None:
+    cookie_value = request.cookies.get(AUTH_SESSION_COOKIE_NAME)
+    if not cookie_value:
         return
 
-    user_id = auth_candidate["user_id"]
-    source = auth_candidate["source"]
+    payload = verify_auth_session_cookie(cookie_value)
+    if payload is None:
+        g.clear_auth_session_cookie = True
+        if SESSION_DEBUG_ENABLED:
+            log_session_debug(
+                "auth_session_cookie_invalid",
+                extra={"cookie_name": AUTH_SESSION_COOKIE_NAME},
+            )
+        return
+
+    user_id = payload["user_id"]
+    source = "auth_session_cookie"
     if current_user_id == user_id and session.get("user_name"):
         session.permanent = True
         if SESSION_DEBUG_ENABLED:
@@ -1029,27 +883,6 @@ def validate_csrf_token():
 
 
 @app.after_request
-def preserve_auth_token_on_redirects(response):
-    if AUTH_MODE != "token":
-        return response
-    if not (300 <= response.status_code < 400):
-        return response
-
-    location = response.headers.get("Location")
-    if not location:
-        return response
-
-    token = get_navigation_auth_token()
-    if not token:
-        return response
-
-    next_location = append_auth_token_to_url(location, token)
-    if next_location and next_location != location:
-        response.headers["Location"] = next_location
-    return response
-
-
-@app.after_request
 def sync_auth_session_cookie_response(response):
     if request.endpoint == "static":
         return response
@@ -1060,7 +893,7 @@ def sync_auth_session_cookie_response(response):
     except (TypeError, ValueError):
         normalized_user_id = None
 
-    if COOKIE_AUTH_ENABLED and normalized_user_id and normalized_user_id > 0:
+    if normalized_user_id and normalized_user_id > 0:
         set_auth_session_cookie(response, normalized_user_id)
         return response
 
@@ -1188,57 +1021,9 @@ def debug_session():
                 "auth_session_cookie_present": bool(request.cookies.get(AUTH_SESSION_COOKIE_NAME)),
                 "auth_session_cookie_name": AUTH_SESSION_COOKIE_NAME,
             },
-            "auth": {
-                "mode": AUTH_MODE,
-                "token_enabled": TOKEN_AUTH_ENABLED,
-                "cookie_enabled": COOKIE_AUTH_ENABLED,
-            },
             "server_time": datetime.now().isoformat(timespec="seconds"),
         }
     )
-
-
-@app.get("/auth-bridge")
-def auth_bridge():
-    next_url = normalize_next_url(request.args.get("next"))
-    return render_template("auth-bridge.html", next_url=next_url)
-
-
-@app.post("/api/auth/session")
-def api_auth_session():
-    if not TOKEN_AUTH_ENABLED:
-        return jsonify({"ok": False, "error": "Legacy token sync is disabled."}), 404
-
-    token, source = extract_request_auth_token()
-    payload = verify_auth_token(token)
-    if payload is None:
-        if SESSION_DEBUG_ENABLED and token:
-            log_session_debug(
-                "auth_token_invalid",
-                extra={"source": source, "endpoint": "api_auth_session"},
-            )
-        return jsonify({"ok": False, "error": "Authorization token is missing or invalid."}), 401
-
-    user_id = payload["user_id"]
-    user = get_request_user(user_id)
-    if not user:
-        if SESSION_DEBUG_ENABLED:
-            log_session_debug(
-                "auth_token_user_missing",
-                extra={"source": source, "user_id": user_id, "endpoint": "api_auth_session"},
-            )
-        return jsonify({"ok": False, "error": "User not found."}), 401
-
-    previous_user_id = session.get("user_id")
-    apply_session_user(user)
-    _set_request_user(user)
-    if SESSION_DEBUG_ENABLED:
-        log_session_debug(
-            "auth_token_session_synced",
-            extra={"source": source, "user_id": user_id, "previous_user_id": previous_user_id},
-        )
-    return jsonify({"ok": True, "user_id": user_id, "user_name": user.get("name")})
-
 
 @app.route("/reserve")
 def reserve():
@@ -1304,9 +1089,6 @@ def login():
         hash_password,
         debug_login_failure,
         log_session_debug,
-        issue_auth_token if TOKEN_AUTH_ENABLED else None,
-        AUTH_TOKEN_STORAGE_KEY,
-        AUTH_TOKEN_QUERY_PARAM,
     )
 
 
@@ -1319,14 +1101,11 @@ def register():
         hash_password,
         storage_write_lock,
         USERS_PATH,
-        issue_auth_token if TOKEN_AUTH_ENABLED else None,
-        AUTH_TOKEN_STORAGE_KEY,
-        AUTH_TOKEN_QUERY_PARAM,
     )
 
 @app.route("/logout")
 def logout():
-    return logout_route(AUTH_TOKEN_STORAGE_KEY)
+    return logout_route()
 
 
 @app.get("/post-login")
@@ -1345,10 +1124,6 @@ def inject_notifications_count():
         "current_user_name": session.get("user_name"),
         "current_user_id": session.get("user_id"),
         "csrf_token": session.get("csrf_token", ""),
-        "auth_mode": AUTH_MODE,
-        "auth_token_enabled": TOKEN_AUTH_ENABLED,
-        "auth_storage_key": AUTH_TOKEN_STORAGE_KEY,
-        "auth_query_param": AUTH_TOKEN_QUERY_PARAM,
     }
 
 

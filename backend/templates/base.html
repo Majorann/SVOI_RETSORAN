@@ -19,32 +19,7 @@
       {% block content %}{% endblock %}
     </div>
     <script>
-      window.__AUTH_MODE = {{ auth_mode|tojson }};
-      window.__AUTH_TOKEN_ENABLED = {{ auth_token_enabled|tojson }};
-      window.__AUTH_STORAGE_KEY = {{ auth_storage_key|tojson }};
-      window.__AUTH_QUERY_PARAM = {{ auth_query_param|tojson }};
       window.__SESSION_USER_ID = {{ current_user_id|tojson }};
-    </script>
-    <script>
-      (function () {
-        if (window.__AUTH_MODE !== "token") return;
-        if (window.__SESSION_USER_ID) return;
-        try {
-          var storageKey = window.__AUTH_STORAGE_KEY || "auth_token";
-          var queryParam = window.__AUTH_QUERY_PARAM || "auth_token";
-          var token = window.localStorage.getItem(storageKey) || "";
-          if (!token) return;
-
-          var current = new URL(window.location.href);
-          if (current.searchParams.get(queryParam)) return;
-
-          current.searchParams.set(queryParam, token);
-          document.body.classList.add("auth-sync-pending");
-          window.location.replace(current.pathname + current.search + current.hash);
-        } catch (_error) {
-          // Ignore storage / URL errors and let the regular app bootstrap continue.
-        }
-      })();
     </script>
     <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
   </body>

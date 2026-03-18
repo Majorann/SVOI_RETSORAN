@@ -1,4 +1,4 @@
-id=Burmaldatik
+id=305
 name=Бурмалдатик
 type=Салаты
 price=350
