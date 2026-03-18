@@ -18,7 +18,10 @@ def normalize_phone(phone_raw):
 
 def login_route(
     load_users,
-    hash_password,
+    save_users,
+    verify_and_upgrade_password,
+    json_file_lock,
+    users_path,
     debug_login_failure=None,
     log_session_debug=None,
 ):
@@ -33,10 +36,18 @@ def login_route(
             return render_template("login.html", error="Введите корректный номер телефона.", form_phone=phone_raw)
         users = load_users()
         user = next((u for u in users if normalize_phone(u.get("phone")) == phone), None)
-        if not user or user.get("password_hash") != hash_password(password):
+        password_ok, password_upgraded = verify_and_upgrade_password(user, password) if user else (False, False)
+        if not password_ok:
             if debug_login_failure is not None:
                 debug_login_failure("invalid_credentials", phone_raw=phone_raw, normalized_phone=phone)
             return render_template("login.html", error="Неверный телефон или пароль.", form_phone=phone_raw)
+        if password_upgraded:
+            with json_file_lock(users_path):
+                persisted_users = load_users()
+                persisted_user = next((u for u in persisted_users if u.get("id") == user.get("id")), None)
+                if persisted_user is not None:
+                    persisted_user["password_hash"] = user.get("password_hash")
+                    save_users(persisted_users)
         preserved_csrf = session.get("csrf_token")
         session.clear()
         if preserved_csrf:

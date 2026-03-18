@@ -2,12 +2,11 @@
 setlocal
 
 set "SCRIPT_DIR=%~dp0"
-for %%I in ("%SCRIPT_DIR%..\..") do set "BACKEND_DIR=%%~fI"
-set "VENV_PY=%BACKEND_DIR%\.venv\Scripts\python.exe"
+for %%I in ("%SCRIPT_DIR%..\..\..") do set "REPO_ROOT=%%~fI"
 set "PY_CMD="
 
-if not exist "%BACKEND_DIR%\app.py" (
-  echo [ERROR] app.py not found in "%BACKEND_DIR%"
+if not exist "%REPO_ROOT%\run_local.py" (
+  echo [ERROR] run_local.py not found in "%REPO_ROOT%"
   pause
   exit /b 1
 )
@@ -33,28 +32,9 @@ if not defined PY_CMD (
   exit /b 1
 )
 
-if not exist "%VENV_PY%" (
-  echo [INFO] Creating virtual environment...
-  %PY_CMD% -m venv "%BACKEND_DIR%\.venv"
-  if errorlevel 1 (
-    echo [ERROR] Failed to create virtual environment.
-    echo [HINT] Selected launcher: %PY_CMD%
-    pause
-    exit /b 1
-  )
-)
-
-echo [INFO] Installing dependencies...
-"%VENV_PY%" -m pip install -r "%BACKEND_DIR%\requirements.txt"
-if errorlevel 1 (
-  echo [ERROR] Failed to install dependencies.
-  pause
-  exit /b 1
-)
-
-cd /d "%BACKEND_DIR%"
+cd /d "%REPO_ROOT%"
 start "" cmd /c "timeout /t 2 >nul && start http://127.0.0.1:5000/"
 echo [INFO] Starting local development server: http://127.0.0.1:5000/
-"%VENV_PY%" app.py
+%PY_CMD% run_local.py --host 127.0.0.1 --port 5000
 
 endlocal

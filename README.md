@@ -47,22 +47,109 @@
 
 ## Локальный запуск
 
+Универсальный способ запуска из корня репозитория:
+
 ```powershell
-cd "C:\Users\almaz\OneDrive\Рабочий стол\main\SVOI_RETSORAN-main\backend"
+python run_local.py
+```
+
+На macOS/Linux:
+
+```bash
+python3 run_local.py
+```
+
+Что делает `run_local.py`:
+
+- сам находит корень проекта и `backend/`;
+- создаёт `backend/.venv`, если его ещё нет;
+- устанавливает зависимости из `backend/requirements.txt`;
+- подхватывает переменные из `backend/.env.local`, если файл существует;
+- при отсутствии `FLASK_SECRET_KEY` генерирует его и сохраняет в `backend/.env.local`;
+- для локального `http://127.0.0.1` выставляет безопасные dev-defaults:
+  - `SESSION_COOKIE_SECURE=0`
+  - `SESSION_COOKIE_SAMESITE=Lax`
+  - `SESSION_COOKIE_PARTITIONED=0`
+  - `TRUST_PROXY_HEADERS=0`
+- запускает backend через `waitress` на `http://127.0.0.1:5000`.
+
+Для локальной настройки можно взять шаблон:
+
+```powershell
+copy backend\.env.example backend\.env.local
+```
+
+Примеры:
+
+```powershell
+python run_local.py --host 0.0.0.0 --port 8000
+python run_local.py --install-deps
+python run_local.py --install-only
+```
+
+Windows PowerShell-обёртка:
+
+```powershell
+.\backend\ops\start_app.ps1
+```
+
+Windows `.bat`-обёртка:
+
+```bat
+backend\start_up\local\start_site.bat
+```
+
+Если нужен полностью ручной запуск из любого каталога:
+
+```powershell
+cd backend
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
-python app.py
+python -m waitress --host 127.0.0.1 --port 5000 app:app
 ```
 
-Приложение откроется на `http://127.0.0.1:5000`.
+На macOS/Linux вручную:
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m waitress --host 127.0.0.1 --port 5000 app:app
+```
 
 Запуск через Gunicorn:
 
 ```powershell
-cd "C:\*****\main\SVOI_RETSORAN-main\backend"
+cd backend
 gunicorn app:app --bind 0.0.0.0:7860
 ```
+
+## Автотесты
+
+Для тестов добавлен отдельный dev-набор зависимостей, чтобы не тащить `pytest` в продовый `requirements.txt`.
+
+Установка:
+
+```powershell
+cd backend
+.\.venv\Scripts\python -m pip install -r requirements-dev.txt
+```
+
+Запуск:
+
+```powershell
+cd ..
+backend\.venv\Scripts\python -m pytest backend\tests -q
+```
+
+Что покрыто сейчас:
+
+- регистрация с сохранением современного password hash;
+- вход со старым SHA-256 hash и его автоматический апгрейд;
+- восстановление авторизации только по `auth_session` cookie;
+- бронирование, обычная оплата и доставка через реальные HTTP-сценарии Flask `test_client`.
 
 ## Docker
 
@@ -161,6 +248,9 @@ python backend/ops/migrate_json_to_neon.py
 
 ## Переменные окружения
 
+Шаблон переменных лежит в `backend/.env.example`.
+Для локального запуска основной рабочий файл: `backend/.env.local`.
+
 Минимально:
 
 - `FLASK_SECRET_KEY` - секрет Flask-сессий
@@ -195,6 +285,7 @@ python backend/ops/migrate_json_to_neon.py
 - `SESSION_DEBUG_LOG_PATH` - путь к файлу session-debug лога; по умолчанию `backend/session_debug.jsonl` или файл в `APP_DATA_DIR`
 - `AUTH_SESSION_COOKIE_NAME` - имя дополнительного signed cookie для восстановления server-side session
 - `AUTH_SESSION_COOKIE_MAX_AGE_SECONDS` - срок жизни signed `auth_session` cookie
+- `PASSWORD_HASH_METHOD` - алгоритм хранения новых паролей; по умолчанию `pbkdf2:sha256:600000`
 - `CHECKOUT_PREVIEW_MAX_AGE_SECONDS` - срок жизни подписанного preview-токена для подтверждения оплаты
 
 ### Подсказка по логину и cookie
@@ -303,6 +394,6 @@ python backend/ops/migrate_json_to_neon.py
 ## Примечания
 
 - Корзина хранится в `localStorage` браузера.
-- Пароли в учебной версии хранятся как SHA-256 без соли.
-- Для production нужен более сильный механизм хеширования.
+- Новые пароли сохраняются через `werkzeug.security.generate_password_hash`.
+- Старые SHA-256 хеши поддерживаются только для мягкой миграции и автоматически обновляются после успешного логина.
 - История изменений ведётся в `backend/CHANGELOG.md`.
