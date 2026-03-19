@@ -82,6 +82,20 @@
       <div class="checkout-counter"><span id="deliveryCommentCount">0</span> / 300</div>
     </div>
     <p class="delivery-eta">Ориентировочное время доставки: <strong>20 минут</strong></p>
+    <div class="delivery-charge-card">
+      <div class="delivery-charge-card__row">
+        <span>Сумма заказа</span>
+        <strong id="deliveryCheckoutItemsTotal">0 ₽</strong>
+      </div>
+      <div class="delivery-charge-card__row">
+        <span>Сервисный сбор</span>
+        <strong id="deliveryCheckoutServiceFee">{{ delivery_service_fee }} ₽</strong>
+      </div>
+      <div class="delivery-charge-card__row delivery-charge-card__row--total">
+        <span>К оплате</span>
+        <strong id="deliveryCheckoutPayable">{{ delivery_service_fee }} ₽</strong>
+      </div>
+    </div>
     <button class="primary-action" type="submit" id="deliverySubmit">Перейти к оплате</button>
   </section>
 </form>

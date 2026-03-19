@@ -171,12 +171,12 @@ const formatLongTimer = (seconds) => {
   return `${hh}:${mm}:${ss}`;
 };
 
-const parseIsoToMs = (value) => {
+const parseIsoToMs = (value, assumeUtc = false) => {
   if (!value) return null;
   const raw = String(value).trim();
   if (!raw) return null;
-  const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
-  const normalized = hasTimezone ? raw : `${raw}Z`;
+  const hasExplicitTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
+  const normalized = assumeUtc && !hasExplicitTimezone ? `${raw}Z` : raw;
   const ts = Date.parse(normalized);
   return Number.isFinite(ts) ? ts : null;
 };
@@ -251,6 +251,7 @@ const setupOrderStatusBar = () => {
   let titleAnimationToken = 0;
   let stageTitleCurrent = titleNode?.textContent?.trim() || "";
   let stageTitleTarget = stageTitleCurrent;
+  let expandedTransitionCleanup = null;
 
   const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -395,11 +396,11 @@ const setupOrderStatusBar = () => {
     const rawEtaRemainingSeconds = Math.max(0, Number(order?.eta_remaining_seconds) || 0);
     const remainingFromSnapshot = Math.max(0, rawRemainingSeconds - elapsedFromSnapshot);
     const etaFromSnapshot = Math.max(0, rawEtaRemainingSeconds - elapsedFromSnapshot);
-    const phaseEndMs = parseIsoToMs(order?.phase_ends_at);
+    const phaseEndMs = parseIsoToMs(order?.phase_ends_at, true);
     const phaseRemainingByDeadline = phaseEndMs === null
       ? null
       : Math.max(0, Math.ceil((phaseEndMs - Date.now()) / 1000));
-    const cycleStartMs = parseIsoToMs(order?.cycle_started_at);
+    const cycleStartMs = parseIsoToMs(order?.cycle_started_at, true);
     const etaTotalSeconds = Number(order?.eta_total_seconds);
     const etaEndMs = (cycleStartMs !== null && Number.isFinite(etaTotalSeconds))
       ? cycleStartMs + (etaTotalSeconds * 1000)
@@ -470,7 +471,56 @@ const setupOrderStatusBar = () => {
     isExpanded = Boolean(nextExpanded);
     bar.classList.toggle("is-expanded", isExpanded);
     bar.setAttribute("aria-expanded", isExpanded ? "true" : "false");
-    if (expandedNode) expandedNode.hidden = !isExpanded;
+    if (!expandedNode) return;
+
+    if (expandedTransitionCleanup) {
+      expandedTransitionCleanup();
+      expandedTransitionCleanup = null;
+    }
+
+    if (isExpanded) {
+      expandedNode.hidden = false;
+      expandedNode.style.maxHeight = "0px";
+      expandedNode.style.opacity = "0";
+      expandedNode.style.transform = "translateY(-6px)";
+      void expandedNode.offsetHeight;
+      expandedNode.style.maxHeight = `${expandedNode.scrollHeight}px`;
+      expandedNode.style.opacity = "1";
+      expandedNode.style.transform = "translateY(0)";
+
+      const handleExpandEnd = (event) => {
+        if (event.target !== expandedNode || event.propertyName !== "max-height") return;
+        expandedNode.removeEventListener("transitionend", handleExpandEnd);
+        expandedNode.style.maxHeight = "none";
+        expandedTransitionCleanup = null;
+      };
+
+      expandedNode.addEventListener("transitionend", handleExpandEnd);
+      expandedTransitionCleanup = () => {
+        expandedNode.removeEventListener("transitionend", handleExpandEnd);
+      };
+      return;
+    }
+
+    expandedNode.style.maxHeight = `${expandedNode.scrollHeight}px`;
+    expandedNode.style.opacity = "1";
+    expandedNode.style.transform = "translateY(0)";
+    void expandedNode.offsetHeight;
+    expandedNode.style.maxHeight = "0px";
+    expandedNode.style.opacity = "0";
+    expandedNode.style.transform = "translateY(-6px)";
+
+    const handleCollapseEnd = (event) => {
+      if (event.target !== expandedNode || event.propertyName !== "max-height") return;
+      expandedNode.removeEventListener("transitionend", handleCollapseEnd);
+      expandedNode.hidden = true;
+      expandedTransitionCleanup = null;
+    };
+
+    expandedNode.addEventListener("transitionend", handleCollapseEnd);
+    expandedTransitionCleanup = () => {
+      expandedNode.removeEventListener("transitionend", handleCollapseEnd);
+    };
   };
 
   const toggleExpanded = () => {

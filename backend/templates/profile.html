@@ -13,14 +13,11 @@
 
 <section class="section">
   <div class="profile-card">
-    <div class="profile-avatar">{{ user.name[:1] }}</div>
-    <div>
+    <div class="profile-avatar">
+      <img class="profile-avatar__img" src="{{ url_for('static', filename='img/orelll.svg') }}" alt="" aria-hidden="true" />
+    </div>
+    <div class="profile-card__content">
       <p class="profile-name">{{ user.name }}</p>
-      {% if is_authenticated %}
-        <p class="profile-sub">Баланс: {{ user.balance }} баллов</p>
-      {% else %}
-        <p class="profile-sub">Войдите, чтобы увидеть брони</p>
-      {% endif %}
     </div>
   </div>
 </section>
@@ -33,6 +30,9 @@
   </div>
   <div class="payments">
     {% if is_authenticated %}
+      {% if payment_success %}
+        <div class="notice notice--success">{{ payment_success }}</div>
+      {% endif %}
       {% if payment_error %}
         <div class="notice notice--error">{{ payment_error }}</div>
       {% endif %}
@@ -54,25 +54,32 @@
         </div>
       {% endfor %}
       <details class="payment-add">
-        <summary class="payment-card payment-card--add">+ Привязать новую карту</summary>
-        <form class="payment-form" method="post" action="{{ url_for('add_card') }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <label class="payment-form__field">
-            <span>Номер карты</span>
-            <input type="text" name="card_number" placeholder="0000 0000 0000 0000" inputmode="numeric" autocomplete="cc-number" required />
-          </label>
-          <div class="payment-form__row">
+        <summary class="payment-card payment-card--add" aria-expanded="false">
+          <span class="payment-add__label-wrap" aria-hidden="true">
+            <span class="payment-add__label payment-add__label--default">+ Привязать новую карту</span>
+            <span class="payment-add__label payment-add__label--cancel">Отмена</span>
+          </span>
+        </summary>
+        <div class="payment-add__content">
+          <form class="payment-form" method="post" action="{{ url_for('add_card') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <label class="payment-form__field">
-              <span>Срок</span>
-              <input type="text" name="expiry" placeholder="MM/YY" inputmode="numeric" autocomplete="cc-exp" />
+              <span>Номер карты</span>
+              <input type="text" name="card_number" placeholder="0000 0000 0000 0000" inputmode="numeric" autocomplete="cc-number" required />
             </label>
-            <label class="payment-form__field">
-              <span>Имя</span>
-              <input type="text" name="holder" placeholder="NAME SURNAME" autocomplete="cc-name" maxlength="26" />
-            </label>
-          </div>
-          <button class="primary-action" type="submit">Сохранить</button>
-        </form>
+            <div class="payment-form__row">
+              <label class="payment-form__field">
+                <span>Срок</span>
+                <input type="text" name="expiry" placeholder="MM/YY" inputmode="numeric" autocomplete="cc-exp" />
+              </label>
+              <label class="payment-form__field">
+                <span>Имя</span>
+                <input type="text" name="holder" placeholder="NAME SURNAME" autocomplete="cc-name" maxlength="26" />
+              </label>
+            </div>
+            <button class="primary-action hero__cta payment-form__submit" type="submit">Сохранить</button>
+          </form>
+        </div>
       </details>
     {% else %}
       <div class="notice notice--empty">Войдите, чтобы управлять картами.</div>
@@ -91,13 +98,17 @@
           <div>
             <p class="booking-card__title">Стол №{{ booking.table_id }}</p>
             <p class="booking-card__meta">{{ booking.date }} · {{ booking.time }}</p>
+            <p class="booking-card__meta">Бронь на {{ booking_duration_minutes // 60 }} часа</p>
           </div>
           <span class="booking-card__action">Ждём вас!</span>
         </div>
       {% endfor %}
     </div>
   {% elif is_authenticated %}
-    <div class="notice notice--empty">Пока нет активных броней.</div>
+    <div class="notice notice--empty">
+      Пока нет активных броней
+      <a class="primary-action hero__cta notice__cta" href="{{ url_for('reserve') }}">Забронировать столик</a>
+    </div>
   {% else %}
     <div class="notice notice--empty">Войдите, чтобы увидеть свои брони.</div>
   {% endif %}

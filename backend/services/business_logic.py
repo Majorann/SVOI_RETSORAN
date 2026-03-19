@@ -1,4 +1,5 @@
 import os
+import math
 from datetime import datetime, timedelta, timezone
 import json
 from zoneinfo import ZoneInfo
@@ -14,6 +15,23 @@ def _resolve_app_timezone():
 
 APP_TIMEZONE = _resolve_app_timezone()
 UTC = timezone.utc
+
+
+def current_local_datetime_value():
+    return datetime.now(APP_TIMEZONE).replace(tzinfo=None)
+
+
+def current_time_value():
+    return datetime.now(APP_TIMEZONE).astimezone(UTC).replace(tzinfo=None)
+
+
+def current_timestamp_value():
+    return current_time_value().isoformat(timespec="seconds")
+
+
+def current_local_date_time_strings_value():
+    local_now = current_local_datetime_value()
+    return local_now.date().isoformat(), local_now.strftime("%H:%M")
 
 
 def parse_datetime_value(date_str, time_str):
@@ -152,7 +170,7 @@ def build_order_status_timeline_value(order, now, order_status_steps, parse_iso_
         phase_end = phase_start + timedelta(seconds=phase_duration)
         cycle_end = created_at + timedelta(seconds=total_duration)
         eta_end = created_at + timedelta(seconds=eta_total_seconds)
-        eta_remaining = max(0, int((eta_end - now).total_seconds()))
+        eta_remaining = max(0, math.ceil((eta_end - now).total_seconds()))
 
         return {
             "order_id": order.get("id"),
@@ -191,12 +209,12 @@ def build_order_status_timeline_value(order, now, order_status_steps, parse_iso_
         delivering_start = cook_start + timedelta(seconds=cooking_seconds)
         delivered_start = delivering_start + timedelta(seconds=delivering_seconds)
         cycle_end = delivered_start + timedelta(seconds=delivered_seconds)
-        target_remaining_seconds = max(0, int((delivered_start - now).total_seconds()))
+        target_remaining_seconds = max(0, math.ceil((delivered_start - now).total_seconds()))
 
         if now < cook_start:
-            waiting_duration = max(1, int((cook_start - created_at).total_seconds()))
-            waiting_elapsed = min(waiting_duration, max(0, int((now - created_at).total_seconds())))
-            waiting_remaining = max(0, int((cook_start - now).total_seconds()))
+            waiting_duration = max(1, math.ceil((cook_start - created_at).total_seconds()))
+            waiting_elapsed = min(waiting_duration, max(0, math.floor((now - created_at).total_seconds())))
+            waiting_remaining = max(0, math.ceil((cook_start - now).total_seconds()))
             return {
                 "order_id": order.get("id"),
                 "order_type": "dine_in",
@@ -227,9 +245,9 @@ def build_order_status_timeline_value(order, now, order_status_steps, parse_iso_
         else:
             return None
 
-        phase_duration = max(1, int((phase_end - phase_start).total_seconds()))
-        phase_elapsed = min(phase_duration, max(0, int((now - phase_start).total_seconds())))
-        phase_remaining = max(0, int((phase_end - now).total_seconds()))
+        phase_duration = max(1, math.ceil((phase_end - phase_start).total_seconds()))
+        phase_elapsed = min(phase_duration, max(0, math.floor((now - phase_start).total_seconds())))
+        phase_remaining = max(0, math.ceil((phase_end - now).total_seconds()))
         return {
             "order_id": order.get("id"),
             "order_type": "dine_in",
@@ -299,7 +317,7 @@ def get_user_preparing_orders_value(user_id, load_orders_fn, build_timeline_fn):
         o for o in load_orders_fn()
         if o.get("user_id") == user_id and not is_cancelled_order(o)
     ]
-    now = datetime.now()
+    now = current_time_value()
     active_orders = []
     for order in orders:
         timeline = build_timeline_fn(order, now)
@@ -360,7 +378,7 @@ def get_user_preparing_orders_value(user_id, load_orders_fn, build_timeline_fn):
 
 
 def list_active_order_statuses_value(user_id, load_orders_fn, build_timeline_fn):
-    now = datetime.now()
+    now = current_time_value()
     orders = [
         o for o in load_orders_fn()
         if o.get("user_id") == user_id and not is_cancelled_order(o)
@@ -414,7 +432,8 @@ def latest_user_booking_status_value(user_id, load_bookings_raw_fn, parse_dateti
     booking_dt = parse_datetime_fn(booking.get("date"), booking.get("time"))
     if booking_dt is None:
         return {"state": "no_booking", "booking": None}
-    if booking_dt + timedelta(minutes=booking_duration_minutes) <= datetime.now():
+    current_dt = current_time_value()
+    if current_dt is not None and booking_dt + timedelta(minutes=booking_duration_minutes) <= current_dt:
         return {"state": "expired_booking", "booking": booking}
     return {"state": "active", "booking": booking}
 

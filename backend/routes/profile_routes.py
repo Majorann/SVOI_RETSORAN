@@ -1,7 +1,7 @@
-from datetime import datetime
 import re
 
 from flask import g, redirect, render_template, request, session, url_for
+from services.business_logic import current_local_datetime_value, current_timestamp_value
 
 TRANSLIT_MAP = {
     "А": "A", "Б": "B", "В": "V", "Г": "G", "Д": "D",
@@ -37,29 +37,30 @@ def normalize_and_validate_expiry(value: str):
 
     match = re.fullmatch(r"(\d{2})/(\d{2})", raw)
     if not match:
-        return None, "Enter expiry in MM/YY format."
+        return None, "Введите срок действия в формате ММ/ГГ."
 
     month = int(match.group(1))
     year = int(match.group(2))
     if month < 1 or month > 12:
-        return None, "Month must be between 01 and 12."
+        return None, "Месяц должен быть в диапазоне от 01 до 12."
 
-    now = datetime.now()
+    now = current_local_datetime_value()
     current_year = now.year % 100
     current_month = now.month
     if year < current_year or (year == current_year and month < current_month):
-        return None, "Card expiry date is in the past."
+        return None, "Срок действия карты уже истёк."
 
     return f"{month:02d}/{year:02d}", None
 
 
-def profile_route(load_users, load_bookings):
+def profile_route(load_users, load_bookings, booking_duration_minutes):
     user_id = session.get("user_id")
     if not user_id:
         return redirect(url_for("login", error="Войдите в аккаунт, чтобы открыть профиль."))
 
     user_name = session.get("user_name")
     error = request.args.get("error")
+    card_added = (request.args.get("card_added") or "") == "1"
     user_record = getattr(g, "current_user", None)
     if not user_record or user_record.get("id") != user_id:
         user_record = next((u for u in load_users() if u.get("id") == user_id), None)
@@ -96,6 +97,8 @@ def profile_route(load_users, load_bookings):
         bookings=bookings,
         is_authenticated=bool(user_id),
         payment_error=error,
+        payment_success="Карта успешно добавлена" if card_added else "",
+        booking_duration_minutes=booking_duration_minutes,
     )
 
 
@@ -111,13 +114,13 @@ def add_card_route(load_users, save_users, json_file_lock, users_path):
 
     digits = "".join(ch for ch in number if ch.isdigit())
     if len(digits) < 12:
-        return redirect(url_for("profile", error="Enter a valid card number."))
+        return redirect(url_for("profile", error="Введите корректный номер карты."))
 
     expiry, expiry_error = normalize_and_validate_expiry(expiry_input)
     if expiry_error:
         return redirect(url_for("profile", error=expiry_error))
     if holder_raw and not holder:
-        return redirect(url_for("profile", error="Use only English letters for card holder name."))
+        return redirect(url_for("profile", error="Используйте только английские буквы в имени держателя карты."))
 
     brand = "MIR"
 
@@ -138,7 +141,7 @@ def add_card_route(load_users, save_users, json_file_lock, users_path):
                 "active": True,
                 "holder": holder,
                 "expiry": expiry or None,
-                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "created_at": current_timestamp_value(),
             }
         )
         user_record["cards"] = cards
@@ -146,7 +149,7 @@ def add_card_route(load_users, save_users, json_file_lock, users_path):
         g.current_user = user_record
         g.current_user_id = user_id
         g.current_user_loaded = True
-    return redirect(url_for("profile"))
+    return redirect(url_for("profile", card_added="1"))
 
 
 def delete_card_route(load_users, save_users, json_file_lock, users_path):
@@ -179,7 +182,7 @@ def delete_card_route(load_users, save_users, json_file_lock, users_path):
                     break
 
         if removed_index is None:
-            return redirect(url_for("profile", error="Card not found."))
+            return redirect(url_for("profile", error="Карта не найдена."))
 
         removed_card = cards.pop(removed_index)
         if removed_card.get("active") and cards and not any(card.get("active") for card in cards):

@@ -1,6 +1,7 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 import json
 import os
+from services.business_logic import current_time_value
 
 
 def _read_json_list(path):
@@ -32,7 +33,7 @@ def save_bookings(bookings_path, bookings):
 
 def load_bookings(bookings_path, parse_datetime_fn, booking_duration_minutes):
     bookings = _read_json_list(bookings_path)
-    now = datetime.now()
+    now = current_time_value()
     active = []
     for booking in bookings:
         booking_dt = parse_datetime_fn(booking.get("date"), booking.get("time"))

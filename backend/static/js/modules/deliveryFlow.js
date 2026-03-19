@@ -1,4 +1,5 @@
 const DELIVERY_CART_KEY = "delivery_cart";
+const DELIVERY_SERVICE_FEE = 42;
 
 const loadDeliveryCart = () => {
   try {
@@ -144,6 +145,9 @@ const setupDeliveryCheckout = () => {
   const form = document.getElementById("deliveryCheckoutForm");
   const itemsJson = document.getElementById("deliveryItemsJson");
   const submitButton = document.getElementById("deliverySubmit");
+  const itemsTotalNode = document.getElementById("deliveryCheckoutItemsTotal");
+  const serviceFeeNode = document.getElementById("deliveryCheckoutServiceFee");
+  const payableNode = document.getElementById("deliveryCheckoutPayable");
   const commentNode = document.getElementById("deliveryComment");
   const commentCountNode = document.getElementById("deliveryCommentCount");
   if (!form || !itemsJson || !submitButton) {
@@ -157,8 +161,13 @@ const setupDeliveryCheckout = () => {
 
   const syncCartPayload = () => {
     const cart = normalizeCart(loadDeliveryCart());
+    const itemsTotal = cart.reduce((sum, item) => sum + (Number(item.qty) * Number(item.price)), 0);
+    const payableTotal = itemsTotal + DELIVERY_SERVICE_FEE;
     submitButton.disabled = cart.length === 0;
     itemsJson.value = JSON.stringify(cart.map((item) => ({ id: item.id, qty: item.qty })));
+    if (itemsTotalNode) itemsTotalNode.textContent = `${itemsTotal} ₽`;
+    if (serviceFeeNode) serviceFeeNode.textContent = `${DELIVERY_SERVICE_FEE} ₽`;
+    if (payableNode) payableNode.textContent = `${payableTotal} ₽`;
     return cart;
   };
 

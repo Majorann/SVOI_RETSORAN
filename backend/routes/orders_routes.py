@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 
 from flask import g, jsonify, redirect, render_template, request, session, url_for
+from services.business_logic import current_timestamp_value
+from services.order_totals import calculate_order_totals
 
 
 def _payment_error_response(message: str, redirect_endpoint: str = "checkout", status_code: int = 400):
@@ -43,9 +45,12 @@ def checkout_route(
     checkout_state = booking_state.get("state", "no_booking")
     custom_time_max = None
     if booking and checkout_state == "active":
-        booking_dt = parse_datetime(booking.get("date"), booking.get("time"))
-        if booking_dt:
-            custom_time_max = (booking_dt + timedelta(minutes=booking_duration_minutes - 1)).strftime("%H:%M")
+        try:
+            booking_local_dt = datetime.fromisoformat(f"{booking.get('date')}T{booking.get('time')}")
+        except (TypeError, ValueError):
+            booking_local_dt = None
+        if booking_local_dt:
+            custom_time_max = (booking_local_dt + timedelta(minutes=booking_duration_minutes - 1)).strftime("%H:%M")
     user = getattr(g, "current_user", None)
     if not user or user.get("id") != user_id:
         users = load_users()
@@ -66,6 +71,7 @@ def checkout_route(
     return render_template(
         "checkout.html",
         booking=booking,
+        booking_duration_minutes=booking_duration_minutes,
         checkout_state=checkout_state,
         custom_time_max=custom_time_max,
         active_card=active_card,
@@ -106,10 +112,12 @@ def payment_route(
     if serving is None:
         serving = {"mode": "booking_start", "label": "К началу брони"}
 
-    items_total = sum(item["price"] * item["qty"] for item in items)
     use_points = (request.form.get("use_points") or "") == "1"
-    points_applied = min(user_balance, items_total) if use_points else 0
-    payable_total = items_total - points_applied
+    totals = calculate_order_totals(
+        items,
+        points_balance=user_balance,
+        use_points=use_points,
+    )
     payment_error_code = None
     payment_error_text = None
     if booking_state == "no_booking":
@@ -128,10 +136,11 @@ def payment_route(
     can_pay = payment_error_code is None
     preview = {
         "items": items,
-        "items_total": items_total,
+        "items_total": totals["items_total"],
         "items_count": sum(item["qty"] for item in items),
-        "points_applied": points_applied,
-        "payable_total": payable_total,
+        "points_applied": totals["points_applied"],
+        "payable_total": totals["payable_total"],
+        "bonus_earned": totals["bonus_earned"],
         "comment": comment,
         "serving": serving,
         "booking": {
@@ -173,21 +182,21 @@ def payment_confirm_route(
     user_id = session.get("user_id")
     if not user_id:
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-            return jsonify({"ok": False, "error": "Log in to complete payment."}), 401
-        return redirect(url_for("login", error="Log in to complete payment."))
+            return jsonify({"ok": False, "error": "Войдите, чтобы завершить оплату."}), 401
+        return redirect(url_for("login", error="Войдите, чтобы завершить оплату."))
 
     preview = session.get("checkout_preview")
     if not preview:
         preview_token = (request.form.get("preview_token") or "").strip()
         preview = verify_checkout_preview_token(preview_token)
         if preview is None:
-            return _payment_error_response("Payment session expired. Repeat checkout.", status_code=409)
+            return _payment_error_response("Сессия оплаты истекла. Повторите оформление.", status_code=409)
 
     booking_status = latest_user_booking_status(user_id)
     booking = booking_status.get("booking")
     if booking_status.get("state") != "active":
         session.pop("checkout_preview", None)
-        return _payment_error_response("Booking is no longer active.", status_code=409)
+        return _payment_error_response("Ваша бронь больше не активна.", status_code=409)
 
     user = getattr(g, "current_user", None)
     if not user or user.get("id") != user_id:
@@ -196,18 +205,18 @@ def payment_confirm_route(
     if user is None:
         session.clear()
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-            return jsonify({"ok": False, "error": "User not found. Please log in again."}), 401
-        return redirect(url_for("login", error="User not found. Please log in again."))
+            return jsonify({"ok": False, "error": "Пользователь не найден. Войдите снова."}), 401
+        return redirect(url_for("login", error="Пользователь не найден. Войдите снова."))
 
     active_card = next((card for card in user.get("cards", []) if card.get("active")), None)
     if active_card is None:
         session.pop("checkout_preview", None)
-        return _payment_error_response("No active payment card.", status_code=409)
+        return _payment_error_response("Нет активной карты для оплаты.", status_code=409)
 
     preview_items = preview.get("items")
     if not isinstance(preview_items, list):
         session.pop("checkout_preview", None)
-        return redirect(url_for("checkout", error="Invalid order data."))
+        return redirect(url_for("checkout", error="Некорректные данные заказа."))
 
     items = []
     for item in preview_items:
@@ -233,14 +242,15 @@ def payment_confirm_route(
 
     if not items:
         session.pop("checkout_preview", None)
-        return _payment_error_response("Cart is empty.", status_code=409)
+        return _payment_error_response("Корзина пуста.", status_code=409)
 
-    items_total = sum(item["price"] * item["qty"] for item in items)
     current_balance = int(user.get("balance", 0) or 0)
     requested_points = int(preview.get("points_applied", 0) or 0)
-    points_applied = max(0, min(requested_points, current_balance, items_total))
-    payable_total = items_total - points_applied
-    bonus_earned = int(payable_total * 0.05)
+    totals = calculate_order_totals(
+        items,
+        points_balance=current_balance,
+        requested_points=requested_points,
+    )
 
     with json_file_lock(orders_path):
         orders = load_orders()
@@ -249,12 +259,12 @@ def payment_confirm_route(
             "id": order_id,
             "user_id": user_id,
             "status": "preparing",
-            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "created_at": current_timestamp_value(),
             "items": items,
-            "items_total": items_total,
-            "points_applied": points_applied,
-            "payable_total": payable_total,
-            "bonus_earned": bonus_earned,
+            "items_total": totals["items_total"],
+            "points_applied": totals["points_applied"],
+            "payable_total": totals["payable_total"],
+            "bonus_earned": totals["bonus_earned"],
             "comment": preview.get("comment", ""),
             "serving": preview.get("serving", {}),
             "booking": {
@@ -277,7 +287,7 @@ def payment_confirm_route(
         user = next((u for u in users if u.get("id") == user_id), None)
         if user is not None:
             current_balance = int(user.get("balance", 0) or 0)
-            user["balance"] = max(0, current_balance - points_applied) + bonus_earned
+            user["balance"] = max(0, current_balance - totals["points_applied"]) + totals["bonus_earned"]
             save_users(users)
             g.current_user = user
             g.current_user_id = user_id

@@ -78,6 +78,7 @@ if _REDIS_URL:
 from services.business_logic import (
     build_order_status_timeline_value,
     compute_serve_datetime_value,
+    current_time_value,
     get_user_preparing_orders_value,
     latest_active_order_status_value,
     latest_user_booking_entry,
@@ -1044,7 +1045,7 @@ def points():
 
 @app.route("/profile")
 def profile():
-    return profile_route(load_users, load_bookings)
+    return profile_route(load_users, load_bookings, BOOKING_DURATION_MINUTES)
 
 
 @app.route("/delivery")
@@ -1081,7 +1082,7 @@ def delivery_payment_page():
 
 @app.route("/notifications")
 def notifications():
-    return notifications_route(load_bookings, get_user_preparing_orders)
+    return notifications_route(load_bookings, get_user_preparing_orders, load_promo_items, BOOKING_DURATION_MINUTES)
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -1202,6 +1203,7 @@ def book_table():
         load_bookings,
         save_bookings,
         overlaps_booking,
+        parse_datetime,
         storage_write_lock,
         BOOKINGS_PATH,
     )
@@ -1484,7 +1486,7 @@ def prune_orders(orders):
             return orders
         _LAST_ORDER_PRUNE_AT = now_monotonic
 
-    now_dt = datetime.now()
+    now_dt = current_time_value()
     retention_delta = timedelta(days=ORDER_RETENTION_DAYS)
     cleaned = []
     changed = False

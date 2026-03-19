@@ -1,5 +1,6 @@
 from flask import g, redirect, render_template, session, url_for
 import secrets
+from services.order_totals import summarize_saved_order_totals
 
 
 def _format_date_ddmmyy(value):
@@ -35,6 +36,16 @@ def _pick_popular_items(items, limit):
     if len(pool) <= safe_limit:
         return pool[:safe_limit]
     if len(pool) <= 10:
+        return pool[:safe_limit]
+    return _POPULAR_ROTATOR.sample(pool, safe_limit)
+
+
+def _pick_random_items(items, limit):
+    pool = list(items or [])
+    if not pool:
+        return []
+    safe_limit = max(1, int(limit or 1))
+    if len(pool) <= safe_limit:
         return pool[:safe_limit]
     return _POPULAR_ROTATOR.sample(pool, safe_limit)
 
@@ -103,7 +114,7 @@ def delivery_route():
     return render_template("placeholder.html", title="Доставка")
 
 
-def notifications_route(load_bookings, get_user_preparing_orders):
+def notifications_route(load_bookings, get_user_preparing_orders, load_promo_items, booking_duration_minutes):
     user_id = session.get("user_id")
     bookings = load_bookings()
     preparing_orders = []
@@ -144,13 +155,34 @@ def notifications_route(load_bookings, get_user_preparing_orders):
             item["notice_date_display"] = booking.get("date_display") or created_date_display
             item["notice_time_display"] = booking.get("time") or created_time_display
 
+        totals = summarize_saved_order_totals(item, recompute_zero_bonus=True)
+        item["display_total"] = totals["payable_total"]
+        item["bonus_earned"] = totals["bonus_earned"]
         item["created_at_display"] = created_date_display
         preparing_orders_view.append(item)
+
+    promo_notifications = []
+    for promo in load_promo_items() or []:
+        promo_item = dict(promo)
+        promo_class = str(promo_item.get("class") or "").strip().lower()
+        if promo_class == "reklama":
+            promo_item["badge"] = "Реклама"
+            promo_item["title"] = "Реклама"
+            promo_item["text"] = promo_item.get("text") or "Актуальное предложение."
+        elif promo_class == "akciya":
+            promo_item["badge"] = "Акция"
+            promo_item["title"] = promo_item.get("name") or "Акция"
+            promo_item["text"] = promo_item.get("lore") or ""
+        else:
+            continue
+        promo_notifications.append(promo_item)
 
     return render_template(
         "notifications.html",
         bookings=bookings_view,
         preparing_orders=preparing_orders_view,
+        promo_notifications=_pick_random_items(promo_notifications, 1),
+        booking_duration_minutes=booking_duration_minutes,
     )
 
 

@@ -1,6 +1,9 @@
-from datetime import datetime
-
 from flask import g, jsonify, redirect, render_template, request, session, url_for
+from services.business_logic import current_timestamp_value
+from services.order_totals import calculate_order_totals
+
+
+DELIVERY_SERVICE_FEE = 42
 
 
 def _collect_delivery_form(form):
@@ -52,6 +55,7 @@ def delivery_checkout_route(load_users):
         delivery_error=error,
         prefill_name=user.get("name", ""),
         prefill_phone=user.get("phone", ""),
+        delivery_service_fee=DELIVERY_SERVICE_FEE,
     )
 
 def delivery_payment_route(resolve_order_items, issue_checkout_preview_token):
@@ -101,10 +105,13 @@ def delivery_payment_route(resolve_order_items, issue_checkout_preview_token):
             payment_action_label="Вернуться к форме доставки",
         )
 
-    items_total = sum(int(item.get("price", 0)) * int(item.get("qty", 0)) for item in items)
+    totals = calculate_order_totals(items, service_fee=DELIVERY_SERVICE_FEE)
     preview = {
         "items": items,
-        "items_total": items_total,
+        "items_total": totals["items_total"],
+        "service_fee": totals["service_fee"],
+        "payable_total": totals["payable_total"],
+        "bonus_earned": totals["bonus_earned"],
         "delivery_name": data["delivery_name"],
         "delivery_phone": data["delivery_phone"],
         "delivery_street": data["delivery_street"],
@@ -183,7 +190,10 @@ def delivery_confirm_route(
             return jsonify({"ok": False, "error": "Корзина доставки пуста."}), 409
         return redirect(url_for("delivery_checkout", error="Корзина доставки пуста."))
 
-    items_total = int(preview.get("items_total", 0) or 0)
+    totals = calculate_order_totals(
+        items,
+        service_fee=int(preview.get("service_fee", DELIVERY_SERVICE_FEE) or DELIVERY_SERVICE_FEE),
+    )
     eta_minutes = int(preview.get("delivery_eta_minutes", 20) or 20)
 
     with json_file_lock(orders_path):
@@ -194,12 +204,13 @@ def delivery_confirm_route(
             "user_id": user_id,
             "order_type": "delivery",
             "status": "cooking",
-            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "created_at": current_timestamp_value(),
             "items": items,
-            "items_total": items_total,
+            "items_total": totals["items_total"],
+            "service_fee": totals["service_fee"],
             "points_applied": 0,
-            "payable_total": items_total,
-            "bonus_earned": 0,
+            "payable_total": totals["payable_total"],
+            "bonus_earned": totals["bonus_earned"],
             "comment": "",
             "serving": {},
             "booking": {},

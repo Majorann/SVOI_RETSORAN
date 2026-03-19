@@ -2,6 +2,17 @@
 {% block body_class %}page-checkout page-checkout-payment{% endblock %}
 {% block content %}
 <header class="top checkout-head" id="checkoutHead">
+  <a class="icon-button menu-top__back" href="{{ url_for('menu') }}" aria-label="Назад в меню">
+    <svg class="menu-top__back-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 16" width="24" height="24" shape-rendering="crispEdges" aria-hidden="true" focusable="false">
+      <g fill="#F2F6FF">
+        <rect x="5" y="0" width="2" height="8"></rect>
+        <rect x="2" y="8" width="8" height="1"></rect>
+        <rect x="3" y="9" width="6" height="1"></rect>
+        <rect x="4" y="10" width="4" height="1"></rect>
+        <rect x="5" y="11" width="2" height="1"></rect>
+      </g>
+    </svg>
+  </a>
   <div class="brand">
     <div class="brand__mark"><img class="brand__mark-img" src="{{ url_for('static', filename='img/orelll.svg') }}" alt="" aria-hidden="true" /></div>
     <div>
@@ -9,7 +20,6 @@
       <p class="brand__tag">Проверьте детали заказа перед оплатой</p>
     </div>
   </div>
-  <a class="icon-button" href="{{ url_for('menu') }}" aria-label="Назад в меню">←</a>
 </header>
 
 {% if checkout_error %}
@@ -47,6 +57,7 @@
           <div>
             <p class="checkout-booking__title">Столик №{{ booking.table_id }}</p>
             <p class="checkout-booking__meta">{{ booking.date }} · {{ booking.time }}</p>
+            <p class="checkout-booking__meta">Бронь на {{ booking_duration_minutes // 60 }} часа</p>
           </div>
           <span class="pill">Активна</span>
         </div>
@@ -125,6 +136,7 @@
         </label>
         <p class="checkout-total__hint">Доступно баллов: <span id="availablePoints">{{ user_balance }}</span></p>
         <p class="checkout-total__hint">Списать баллов: <span id="checkoutPointsApplied">0</span> ₽</p>
+        <p class="checkout-total__hint">Начислится бонусов: <span id="checkoutBonusEarned">0</span> ₽</p>
         <p class="checkout-total__value">
           <span class="checkout-total__label">К оплате:</span>
           <span class="checkout-total__amount"><span id="checkoutPayable">0</span> <span class="checkout-total__currency">₽</span></span>

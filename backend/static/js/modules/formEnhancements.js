@@ -56,12 +56,27 @@ const setupFormEnhancements = ({
   holderInput,
   phoneInputs = [],
 }) => {
+  const syncCardVisualState = (input, isValid, hasValue) => {
+    if (!input) return;
+    input.classList.toggle("is-card-valid", Boolean(hasValue && isValid));
+    input.classList.toggle("is-card-invalid", Boolean(hasValue && !isValid));
+  };
+
   if (cardNumberInput) {
+    const validateCardNumber = () => {
+      const digits = cardNumberInput.value.replace(/\D/g, "");
+      const isValid = digits.length === 16;
+      syncCardVisualState(cardNumberInput, isValid, digits.length > 0);
+      return isValid;
+    };
+
     cardNumberInput.addEventListener("input", () => {
       const digits = cardNumberInput.value.replace(/\D/g, "").slice(0, 16);
       const groups = digits.match(/.{1,4}/g) || [];
       cardNumberInput.value = groups.join(" ");
+      validateCardNumber();
     });
+    cardNumberInput.addEventListener("blur", validateCardNumber);
   }
 
   if (expiryInput) {
@@ -69,17 +84,20 @@ const setupFormEnhancements = ({
       const raw = (expiryInput.value || "").trim();
       if (!raw) {
         expiryInput.setCustomValidity("");
+        syncCardVisualState(expiryInput, false, false);
         return;
       }
       const match = raw.match(/^(\d{2})\/(\d{2})$/);
       if (!match) {
         expiryInput.setCustomValidity("Введите срок в формате MM/YY");
+        syncCardVisualState(expiryInput, false, true);
         return;
       }
       const month = Number(match[1]);
       const year = Number(match[2]);
       if (month < 1 || month > 12) {
         expiryInput.setCustomValidity("Месяц должен быть от 01 до 12");
+        syncCardVisualState(expiryInput, false, true);
         return;
       }
       const now = new Date();
@@ -87,9 +105,11 @@ const setupFormEnhancements = ({
       const currentYear = now.getFullYear() % 100;
       if (year < currentYear || (year === currentYear && month < currentMonth)) {
         expiryInput.setCustomValidity("Срок карты в прошлом");
+        syncCardVisualState(expiryInput, false, true);
         return;
       }
       expiryInput.setCustomValidity("");
+      syncCardVisualState(expiryInput, true, true);
     };
 
     expiryInput.addEventListener("input", () => {
@@ -114,11 +134,20 @@ const setupFormEnhancements = ({
   }
 
   if (holderInput) {
+    const validateHolderInput = () => {
+      const value = holderInput.value.trim();
+      const isValid = value.length >= 2;
+      syncCardVisualState(holderInput, isValid, value.length > 0);
+      return isValid;
+    };
+
     holderInput.addEventListener("input", () => {
       holderInput.value = normalizeHolder(holderInput.value, false);
+      validateHolderInput();
     });
     holderInput.addEventListener("blur", () => {
       holderInput.value = normalizeHolder(holderInput.value, true);
+      validateHolderInput();
     });
   }
 

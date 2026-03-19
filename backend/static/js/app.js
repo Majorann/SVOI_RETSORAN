@@ -6,6 +6,8 @@ import { setupTableTooltip } from "./modules/tableTooltip.js";
 import { setupOrderStatusBar } from "./modules/orderStatusBar.js";
 import { setupPointsBalanceCard } from "./modules/pointsBalanceCard.js";
 import { setupDeliveryFlow } from "./modules/deliveryFlow.js";
+import { setupPaymentAddAccordion } from "./modules/paymentAddAccordion.js";
+import { setupProfileNameFit } from "./modules/profileNameFit.js";
 window.addEventListener("DOMContentLoaded", async () => {
   const authSessionSyncPending = await setupAuthTokenBridge();
   if (authSessionSyncPending) return;
@@ -16,6 +18,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupTableTooltip();
   setupMenuHoverMood();
   setupOrderStatusBar();
+  setupPaymentAddAccordion();
+  setupProfileNameFit();
   if (document.body.classList.contains("page-index")) {
     const { setupIndexSummaryHydration } = await import("./modules/indexSummaryHydration.js");
     await setupIndexSummaryHydration(setupOrderStatusBar);
@@ -300,6 +304,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       usePoints,
       availablePoints,
       checkoutPointsApplied,
+      checkoutBonusEarned: document.getElementById("checkoutBonusEarned"),
       checkoutPayable,
       goToPayment,
       serveCustomTime,
