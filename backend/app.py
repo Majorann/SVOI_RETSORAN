@@ -4,20 +4,14 @@ Restaurant demo app (Flask).
 - Bookings/users stored in JSON files
 """
 
-from flask import Flask, render_template, url_for, request, jsonify, session, redirect, g
-from datetime import datetime, date, timedelta
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from datetime import datetime, timedelta
 from pathlib import Path
-from contextlib import contextmanager
-import json
-import hashlib
 import os
-import re
-import secrets
 import threading
 import time
-from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from itsdangerous import URLSafeTimedSerializer
 from werkzeug.middleware.proxy_fix import ProxyFix
-from werkzeug.security import check_password_hash, generate_password_hash
 from routes.auth_routes import login_route, register_route, logout_route
 from routes.booking_routes import (
     availability_route,
@@ -91,25 +85,26 @@ from services.business_logic import (
     parse_serving_option_value,
     resolve_order_items_value,
 )
+from services.auth_session import AuthSessionService
+from services.menu_content import MenuContentService
+from services.passwords import (
+    hash_password as hash_password_value,
+    verify_password as verify_password_value,
+    verify_and_upgrade_password as verify_and_upgrade_password_value,
+)
+from services.storage_facade import StorageFacade
 from config import (
     BOOKINGS_PATH,
     BOOKING_DURATION_MINUTES,
     DATA_DIR,
-    MENU_ITEMS_PATH,
-    MENU_META_NAME,
-    MENU_PHOTO_NAMES,
     NEWS_CARDS,
     POPULAR_MENU_LIMIT,
     ORDERS_PATH,
     ORDER_STATUS_STEPS,
-    PROMO_ITEMS_PATH,
-    PROMO_META_NAME,
-    PROMO_PHOTO_NAMES,
     TABLES,
     USERS_PATH,
     WALLS,
 )
-from models import MenuItem, PromoItem
 
 
 def _env_int_early(name: str, default: int) -> int:
@@ -251,10 +246,6 @@ PASSWORD_HASH_METHOD = env_str("PASSWORD_HASH_METHOD", "pbkdf2:sha256:600000")
 _AUTH_SESSION_SERIALIZER = URLSafeTimedSerializer(app.secret_key, salt="auth-session-v1")
 CHECKOUT_PREVIEW_MAX_AGE_SECONDS = max(300, env_int("CHECKOUT_PREVIEW_MAX_AGE_SECONDS", 30 * 60))
 _CHECKOUT_PREVIEW_SERIALIZER = URLSafeTimedSerializer(app.secret_key, salt="checkout-preview-v1")
-_PROCESS_LOCKS = {}
-_PROCESS_LOCKS_GUARD = threading.RLock()
-_ORDER_PRUNE_LOCK = threading.RLock()
-_LAST_ORDER_PRUNE_AT = 0.0
 ORDER_RETENTION_DAYS = max(0, env_int("ORDER_RETENTION_DAYS", 7))
 ORDER_PRUNE_INTERVAL_SECONDS = max(15, env_int("ORDER_PRUNE_INTERVAL_SECONDS", 60))
 LOGIN_DEBUG_ENABLED = env_bool("LOGIN_DEBUG_ENABLED", False)
@@ -275,8 +266,6 @@ DEBUG_STORAGE_ENABLED = env_bool("DEBUG_STORAGE_ENABLED", False)
 MENU_CACHE_ENABLED = env_bool("MENU_CACHE_ENABLED", True)
 MENU_CACHE_TTL_SECONDS = max(30, env_int("MENU_CACHE_TTL_SECONDS", 600))
 MENU_CACHE_KEY = env_str("MENU_CACHE_KEY", "menu:items:v1")
-_REDIS_CLIENT = None
-_REDIS_CLIENT_LOCK = threading.Lock()
 
 print(
     "[storage] backend={0} users={1} bookings={2} orders={3} cookie_secure={4} cookie_samesite={5} cookie_partitioned={6} login_debug={7} session_debug={8} auth_session_cookie={9}".format(
@@ -297,240 +286,55 @@ if LOGIN_DEBUG_ENABLED:
 if SESSION_DEBUG_ENABLED:
     print(f"[session-debug] session log path={SESSION_DEBUG_LOG_PATH}")
 
+storage = StorageFacade(
+    active_storage=ACTIVE_STORAGE,
+    bookings_path=BOOKINGS_PATH,
+    booking_duration_minutes=BOOKING_DURATION_MINUTES,
+    orders_path=ORDERS_PATH,
+    users_path=USERS_PATH,
+    order_retention_days=ORDER_RETENTION_DAYS,
+    order_prune_interval_seconds=ORDER_PRUNE_INTERVAL_SECONDS,
+    parse_datetime_fn=parse_datetime_value,
+    current_time_fn=current_time_value,
+    parse_iso_datetime_fn=parse_iso_datetime_value,
+    build_order_status_timeline_fn=lambda order, now: build_order_status_timeline_value(
+        order,
+        now,
+        ORDER_STATUS_STEPS,
+        parse_iso_datetime_value,
+    ),
+    store_load_bookings=store_load_bookings,
+    store_load_bookings_raw=store_load_bookings_raw,
+    store_load_orders=store_load_orders,
+    store_load_users=store_load_users,
+    store_next_order_id=store_next_order_id,
+    store_next_user_id=store_next_user_id,
+    store_save_bookings=store_save_bookings,
+    store_save_orders=store_save_orders,
+    store_save_users=store_save_users,
+)
+menu_content = MenuContentService(
+    menu_cache_enabled=MENU_CACHE_ENABLED,
+    menu_cache_key=MENU_CACHE_KEY,
+    menu_cache_ttl_seconds=MENU_CACHE_TTL_SECONDS,
+    redis_module=_redis_module,
+    redis_url=_REDIS_URL,
+)
 
-def debug_login_failure(reason: str, phone_raw: str = "", normalized_phone: str | None = None):
-    if not LOGIN_DEBUG_ENABLED:
-        return
-
-    log_entry = {
-        "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-        "reason": reason,
-        "phone_raw": phone_raw,
-        "normalized_phone": normalized_phone,
-        "request": {
-            "method": request.method,
-            "path": request.path,
-            "scheme": request.scheme,
-            "host": request.host,
-            "remote_addr": request.remote_addr,
-            "forwarded_for": request.headers.get("X-Forwarded-For"),
-            "real_ip": request.headers.get("X-Real-Ip"),
-            "cf_connecting_ip": request.headers.get("CF-Connecting-IP"),
-            "user_agent": request.headers.get("User-Agent"),
-            "referer": request.headers.get("Referer"),
-            "origin": request.headers.get("Origin"),
-        },
-    }
-
-    try:
-        LOGIN_DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(log_entry, ensure_ascii=False)
-        with _LOGIN_DEBUG_LOCK:
-            with LOGIN_DEBUG_LOG_PATH.open("a", encoding="utf-8") as fh:
-                fh.write(payload + "\n")
-    except OSError as exc:
-        print(f"[auth-debug] failed to write login debug log ({exc})")
-
-
-def log_session_debug(event: str, extra: dict | None = None):
-    if not SESSION_DEBUG_ENABLED:
-        return
-
-    session_keys = sorted(session.keys())
-    log_entry = {
-        "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-        "event": event,
-        "request": {
-            "method": request.method,
-            "path": request.path,
-            "query_string": request.query_string.decode("utf-8", errors="ignore"),
-            "scheme": request.scheme,
-            "host": request.host,
-            "remote_addr": request.remote_addr,
-            "forwarded_for": request.headers.get("X-Forwarded-For"),
-            "real_ip": request.headers.get("X-Real-Ip"),
-            "cf_connecting_ip": request.headers.get("CF-Connecting-IP"),
-            "forwarded_proto": request.headers.get("X-Forwarded-Proto"),
-            "user_agent": request.headers.get("User-Agent"),
-            "referer": request.headers.get("Referer"),
-            "origin": request.headers.get("Origin"),
-        },
-        "session": {
-            "has_user_id": "user_id" in session,
-            "user_id": session.get("user_id"),
-            "user_name": session.get("user_name"),
-            "has_csrf_token": "csrf_token" in session,
-            "session_keys": session_keys,
-            "permanent": session.permanent,
-            "cookie_secure": app.config["SESSION_COOKIE_SECURE"],
-            "cookie_samesite": app.config["SESSION_COOKIE_SAMESITE"],
-            "cookie_partitioned": app.config["SESSION_COOKIE_PARTITIONED"],
-        },
-    }
-    if extra:
-        log_entry["extra"] = extra
-
-    try:
-        SESSION_DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(log_entry, ensure_ascii=False)
-        with _SESSION_DEBUG_LOCK:
-            with SESSION_DEBUG_LOG_PATH.open("a", encoding="utf-8") as fh:
-                fh.write(payload + "\n")
-    except OSError as exc:
-        print(f"[session-debug] failed to write session debug log ({exc})")
-
-
-def issue_auth_session_cookie(user_id: int) -> str:
-    return _AUTH_SESSION_SERIALIZER.dumps({"user_id": int(user_id), "v": 1})
-
-
-def verify_auth_session_cookie(cookie_value: str | None):
-    if not cookie_value:
-        return None
-    try:
-        payload = _AUTH_SESSION_SERIALIZER.loads(
-            cookie_value,
-            max_age=AUTH_SESSION_COOKIE_MAX_AGE_SECONDS,
-        )
-    except (BadSignature, SignatureExpired):
-        return None
-    try:
-        user_id = int(payload.get("user_id"))
-    except (TypeError, ValueError, AttributeError):
-        return None
-    if user_id <= 0:
-        return None
-    return {"user_id": user_id}
-
-
-def issue_checkout_preview_token(preview: dict) -> str:
-    return _CHECKOUT_PREVIEW_SERIALIZER.dumps({"preview": preview, "v": 1})
-
-
-def verify_checkout_preview_token(token: str | None):
-    if not token:
-        return None
-    try:
-        payload = _CHECKOUT_PREVIEW_SERIALIZER.loads(
-            token,
-            max_age=CHECKOUT_PREVIEW_MAX_AGE_SECONDS,
-        )
-    except (BadSignature, SignatureExpired):
-        return None
-    preview = payload.get("preview")
-    return preview if isinstance(preview, dict) else None
-
-
-def apply_session_user(user: dict):
-    preserved_csrf = session.get("csrf_token")
-    session.clear()
-    if preserved_csrf:
-        session["csrf_token"] = preserved_csrf
-    session["user_id"] = user.get("id")
-    session["user_name"] = user.get("name")
-    session.permanent = True
-
-
-def build_auth_session_cookie_kwargs(max_age=None):
-    cookie_kwargs = {
-        "httponly": True,
-        "path": "/",
-        "secure": app.config["SESSION_COOKIE_SECURE"],
-        "samesite": app.config["SESSION_COOKIE_SAMESITE"],
-    }
-    if max_age is not None:
-        cookie_kwargs["max_age"] = max_age
-    if app.config["SESSION_COOKIE_PARTITIONED"]:
-        cookie_kwargs["partitioned"] = True
-    return cookie_kwargs
-
-
-def set_auth_session_cookie(response, user_id: int):
-    cookie_kwargs = build_auth_session_cookie_kwargs(
-        max_age=AUTH_SESSION_COOKIE_MAX_AGE_SECONDS
-    )
-    cookie_value = issue_auth_session_cookie(user_id)
-    try:
-        response.set_cookie(
-            AUTH_SESSION_COOKIE_NAME,
-            cookie_value,
-            **cookie_kwargs,
-        )
-    except TypeError:
-        cookie_kwargs.pop("partitioned", None)
-        response.set_cookie(
-            AUTH_SESSION_COOKIE_NAME,
-            cookie_value,
-            **cookie_kwargs,
-        )
-
-
-def clear_auth_session_cookie(response):
-    cookie_kwargs = build_auth_session_cookie_kwargs()
-    try:
-        response.set_cookie(
-            AUTH_SESSION_COOKIE_NAME,
-            "",
-            expires=0,
-            max_age=0,
-            **cookie_kwargs,
-        )
-    except TypeError:
-        cookie_kwargs.pop("partitioned", None)
-        response.set_cookie(
-            AUTH_SESSION_COOKIE_NAME,
-            "",
-            expires=0,
-            max_age=0,
-            **cookie_kwargs,
-        )
-
-
-def _set_request_user(user: dict | None):
-    g.current_user_loaded = True
-    g.current_user = user
-    try:
-        g.current_user_id = int(user.get("id")) if user else None
-    except (TypeError, ValueError, AttributeError):
-        g.current_user_id = None
-
-
-def get_request_user(user_id=None):
-    try:
-        normalized_user_id = int(user_id if user_id is not None else session.get("user_id"))
-    except (TypeError, ValueError):
-        _set_request_user(None)
-        return None
-
-    if normalized_user_id <= 0:
-        _set_request_user(None)
-        return None
-
-    if getattr(g, "current_user_loaded", False) and getattr(g, "current_user_id", None) == normalized_user_id:
-        return getattr(g, "current_user", None)
-
-    user = next((u for u in load_users() if u.get("id") == normalized_user_id), None)
-    _set_request_user(user)
-    return user
-
-
-def get_request_notification_data():
-    if getattr(g, "notifications_loaded", False):
-        return getattr(g, "notification_bookings", []), getattr(g, "notification_preparing_orders", [])
-
-    user_id = session.get("user_id")
-    if not user_id:
-        g.notifications_loaded = True
-        g.notification_bookings = []
-        g.notification_preparing_orders = []
-        return g.notification_bookings, g.notification_preparing_orders
-
-    bookings = [b for b in load_bookings() if b.get("user_id") == user_id]
-    preparing_orders = get_user_preparing_orders(user_id)
-    g.notifications_loaded = True
-    g.notification_bookings = bookings
-    g.notification_preparing_orders = preparing_orders
-    return bookings, preparing_orders
+load_bookings = storage.load_bookings
+load_bookings_raw = storage.load_bookings_raw
+save_bookings = storage.save_bookings
+load_orders = storage.load_orders
+save_orders = storage.save_orders
+load_users = storage.load_users
+save_users = storage.save_users
+next_user_id = storage.next_user_id
+next_order_id = storage.next_order_id
+json_file_lock = storage.json_file_lock
+storage_write_lock = storage.storage_write_lock
+load_menu_items = menu_content.load_menu_items
+load_promo_items = menu_content.load_promo_items
+promo_items_to_news_cards = menu_content.promo_items_to_news_cards
 
 
 def _db_keepalive_loop():
@@ -566,344 +370,6 @@ def start_db_keepalive():
             )
         )
 
-
-def get_redis_client():
-    global _REDIS_CLIENT
-    if not MENU_CACHE_ENABLED or not _REDIS_URL or _redis_module is None:
-        return None
-
-    with _REDIS_CLIENT_LOCK:
-        if _REDIS_CLIENT is not None:
-            return _REDIS_CLIENT
-        try:
-            client = _redis_module.Redis.from_url(
-                _REDIS_URL,
-                decode_responses=True,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-            )
-            client.ping()
-        except Exception as exc:
-            print(f"[cache] redis connect failed ({exc}), menu cache disabled")
-            return None
-        _REDIS_CLIENT = client
-        print(
-            "[cache] redis menu cache enabled ttl={0}s key={1}".format(
-                MENU_CACHE_TTL_SECONDS,
-                MENU_CACHE_KEY,
-            )
-        )
-        return _REDIS_CLIENT
-
-
-def load_menu_items_from_disk():
-    items_with_meta = []
-    if not MENU_ITEMS_PATH.exists():
-        return []
-
-    for item_dir in sorted(MENU_ITEMS_PATH.iterdir()):
-        if not item_dir.is_dir():
-            continue
-        meta_path = item_dir / MENU_META_NAME
-        photo_name = resolve_photo_name(item_dir, MENU_PHOTO_NAMES)
-        if not meta_path.exists() or not photo_name:
-            continue
-
-        meta = parse_menu_meta(meta_path)
-        menu_item = parse_menu_item(meta, item_dir.name, photo_name)
-        if menu_item is None:
-            continue
-        items_with_meta.append((menu_item, meta_path))
-
-    items = ensure_unique_menu_item_ids(items_with_meta)
-    items.sort(key=lambda item: item["id"])
-    return items
-
-
-def update_menu_meta_id(meta_path: Path, new_id: int):
-    raw_text = read_text_with_fallback(meta_path, ("utf-8", "utf-8-sig", "cp1251"))
-    lines = raw_text.splitlines(keepends=True)
-    updated = False
-
-    for index, raw_line in enumerate(lines):
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in raw_line:
-            continue
-        key, _value = raw_line.split("=", 1)
-        normalized_key = key.strip().lower().lstrip("\ufeff")
-        if normalized_key != "id":
-            continue
-        line_ending = "\n" if raw_line.endswith("\n") else ""
-        lines[index] = f"id={int(new_id)}{line_ending}"
-        updated = True
-        break
-
-    if not updated:
-        prefix = f"id={int(new_id)}\n"
-        lines.insert(0, prefix)
-
-    payload = "".join(lines)
-    if payload == raw_text:
-        return
-
-    tmp_path = meta_path.with_suffix(meta_path.suffix + ".tmp")
-    tmp_path.write_text(payload, encoding="utf-8")
-    os.replace(tmp_path, meta_path)
-
-
-def ensure_unique_menu_item_ids(items_with_meta):
-    items = [item for item, _meta_path in items_with_meta]
-    used_ids = set()
-    max_id = max(
-        (
-            item_id
-            for item, _meta_path in items_with_meta
-            for item_id in [item.get("id")]
-            if isinstance(item_id, int) and item_id > 0
-        ),
-        default=0,
-    )
-
-    for item, meta_path in items_with_meta:
-        item_id = item.get("id")
-        if isinstance(item_id, int) and item_id > 0 and item_id not in used_ids:
-            used_ids.add(item_id)
-            continue
-
-        new_id = max_id + 1
-        while new_id in used_ids:
-            new_id += 1
-
-        if isinstance(item_id, int) and item_id > 0:
-            message = "[menu] duplicate item id detected for '{0}': {1} -> {2}"
-        else:
-            message = "[menu] invalid item id detected for '{0}': {1} -> {2}"
-
-        print(
-            message.format(
-                item.get("name", "unknown"),
-                item_id,
-                new_id,
-            )
-        )
-        item["id"] = new_id
-        try:
-            update_menu_meta_id(meta_path, new_id)
-        except OSError as exc:
-            print(
-                "[menu] failed to persist item id for '{0}' in {1} ({2})".format(
-                    item.get("name", "unknown"),
-                    meta_path,
-                    exc,
-                )
-            )
-        used_ids.add(new_id)
-        max_id = new_id
-
-    return items
-
-
-def load_menu_items():
-    client = get_redis_client()
-    if client is not None:
-        try:
-            cached_payload = client.get(MENU_CACHE_KEY)
-            if cached_payload:
-                items = json.loads(cached_payload)
-                if isinstance(items, list):
-                    return items
-        except Exception as exc:
-            print(f"[cache] redis menu read failed ({exc}), fallback=disk")
-
-    items = load_menu_items_from_disk()
-
-    if client is not None:
-        try:
-            client.setex(
-                MENU_CACHE_KEY,
-                MENU_CACHE_TTL_SECONDS,
-                json.dumps(items, ensure_ascii=False),
-            )
-        except Exception as exc:
-            print(f"[cache] redis menu write failed ({exc})")
-    return items
-
-
-@contextmanager
-def json_file_lock(path: Path, timeout_seconds: float = 5.0, poll_interval: float = 0.05):
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    lock_key = str(path.resolve())
-    with _PROCESS_LOCKS_GUARD:
-        process_lock = _PROCESS_LOCKS.setdefault(lock_key, threading.RLock())
-
-    with process_lock:
-        started_at = time.monotonic()
-        lock_fd = None
-        while True:
-            try:
-                lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(lock_fd, f"{os.getpid()}:{threading.get_ident()}".encode("utf-8"))
-                os.close(lock_fd)
-                lock_fd = None
-                break
-            except FileExistsError:
-                if time.monotonic() - started_at >= timeout_seconds:
-                    raise TimeoutError(f"Timeout while waiting lock for {path.name}")
-                time.sleep(poll_interval)
-
-        try:
-            yield
-        finally:
-            if lock_fd is not None:
-                os.close(lock_fd)
-            try:
-                lock_path.unlink()
-            except FileNotFoundError:
-                pass
-
-
-@contextmanager
-def storage_write_lock(path: Path, timeout_seconds: float = 5.0, poll_interval: float = 0.05):
-    if ACTIVE_STORAGE == "json":
-        with json_file_lock(path, timeout_seconds=timeout_seconds, poll_interval=poll_interval):
-            yield
-        return
-    yield
-
-
-@app.before_request
-def restore_auth_from_cookie():
-    if request.endpoint == "static":
-        return
-
-    current_user_id = session.get("user_id")
-    cookie_value = request.cookies.get(AUTH_SESSION_COOKIE_NAME)
-    if not cookie_value:
-        return
-
-    payload = verify_auth_session_cookie(cookie_value)
-    if payload is None:
-        g.clear_auth_session_cookie = True
-        if SESSION_DEBUG_ENABLED:
-            log_session_debug(
-                "auth_session_cookie_invalid",
-                extra={"cookie_name": AUTH_SESSION_COOKIE_NAME},
-            )
-        return
-
-    user_id = payload["user_id"]
-    source = "auth_session_cookie"
-    if current_user_id == user_id and session.get("user_name"):
-        session.permanent = True
-        if SESSION_DEBUG_ENABLED:
-            log_session_debug(
-                "auth_session_confirmed",
-                extra={"source": source, "user_id": user_id},
-            )
-        return
-
-    user = get_request_user(user_id)
-    if not user:
-        if source == "auth_session_cookie":
-            g.clear_auth_session_cookie = True
-        if SESSION_DEBUG_ENABLED:
-            log_session_debug("auth_user_missing", extra={"source": source, "user_id": user_id})
-        return
-
-    apply_session_user(user)
-    _set_request_user(user)
-    if SESSION_DEBUG_ENABLED:
-        log_session_debug(
-            "auth_session_restored",
-            extra={
-                "source": source,
-                "user_id": user_id,
-                "previous_user_id": current_user_id,
-            },
-        )
-
-
-@app.before_request
-def hydrate_current_user():
-    if request.endpoint == "static":
-        return
-
-    user_id = session.get("user_id")
-    if not user_id:
-        _set_request_user(None)
-        return
-
-    get_request_user(user_id)
-
-
-@app.before_request
-def keep_user_session():
-    if request.endpoint == "static":
-        return
-
-    if SESSION_DEBUG_ENABLED and request.endpoint in {"login", "profile", "index"}:
-        log_session_debug("before_request")
-
-    user_id = session.get("user_id")
-    if not user_id:
-        return
-
-    session.permanent = True
-    if session.get("user_name"):
-        return
-
-    user = get_request_user(user_id)
-    if not user:
-        # Do not hard-drop session on a single miss.
-        # A concurrent JSON write may produce a transient empty read.
-        return
-    if not session.get("user_name"):
-        session["user_name"] = user.get("name")
-        if SESSION_DEBUG_ENABLED and request.endpoint in {"login", "profile", "index"}:
-            log_session_debug("user_name_restored")
-
-
-@app.before_request
-def ensure_csrf_token():
-    if "csrf_token" not in session:
-        session["csrf_token"] = secrets.token_urlsafe(32)
-
-
-@app.before_request
-def validate_csrf_token():
-    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
-        return
-    if request.endpoint == "static":
-        return
-
-    token = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
-    if token and token == session.get("csrf_token"):
-        return
-
-    if request.is_json:
-        return jsonify({"ok": False, "error": "CSRF token is missing or invalid."}), 400
-    return redirect(url_for("index"))
-
-
-@app.after_request
-def sync_auth_session_cookie_response(response):
-    if request.endpoint == "static":
-        return response
-
-    session_user_id = session.get("user_id")
-    try:
-        normalized_user_id = int(session_user_id)
-    except (TypeError, ValueError):
-        normalized_user_id = None
-
-    if normalized_user_id and normalized_user_id > 0:
-        set_auth_session_cookie(response, normalized_user_id)
-        return response
-
-    has_auth_cookie = bool(request.cookies.get(AUTH_SESSION_COOKIE_NAME))
-    if has_auth_cookie or getattr(g, "clear_auth_session_cookie", False):
-        clear_auth_session_cookie(response)
-    return response
 
 @app.route("/")
 def index():
@@ -1209,368 +675,6 @@ def book_table():
     )
 
 
-def load_promo_items():
-    # Загружаем promo из static/promo_items/**/item.txt (включая вложенные папки)
-    items = []
-    if not PROMO_ITEMS_PATH.exists():
-        return items
-
-    meta_paths = sorted(PROMO_ITEMS_PATH.rglob(PROMO_META_NAME))
-    for meta_path in meta_paths:
-        item_dir = meta_path.parent
-        relative_slug = item_dir.relative_to(PROMO_ITEMS_PATH).as_posix()
-        photo_name = resolve_photo_name(item_dir, PROMO_PHOTO_NAMES)
-
-        meta = parse_menu_meta(meta_path)
-        promo_item = parse_promo_item(meta, relative_slug, photo_name)
-        if promo_item is None:
-            continue
-        if not promo_item.get("active", True):
-            continue
-        items.append(promo_item)
-
-    items.sort(key=lambda item: (item.get("priority", 100), item["id"]))
-    return items
-
-
-def is_placeholder_promo(meta: dict) -> bool:
-    item_class = (meta.get("class", "") or "").strip().lower()
-    if item_class == "reklama":
-        text = (meta.get("text", "") or "").strip()
-        link = (meta.get("link", "") or "").strip()
-        return text == "Текст рекламного блока." and link == "https://example.com"
-    if item_class == "akciya":
-        name = (meta.get("name", "") or "").strip()
-        lore = (meta.get("lore", "") or "").strip()
-        return name == "Название акции" and lore == "Описание акции и условия."
-    return False
-
-
-def parse_menu_meta(meta_path: Path):
-    # Формат item.txt: key=value, пустые строки и # комментарии игнорируются
-    data = {}
-    raw_text = read_text_with_fallback(meta_path, ("utf-8", "utf-8-sig", "cp1251"))
-    for raw_line in raw_text.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        normalized_key = key.strip().lower().lstrip("\ufeff")
-        data[normalized_key] = value.strip()
-    return data
-
-
-def read_text_with_fallback(path: Path, encodings):
-    for encoding in encodings:
-        try:
-            return path.read_text(encoding=encoding)
-        except UnicodeDecodeError:
-            continue
-    return path.read_text(encoding="utf-8", errors="replace")
-
-
-def resolve_photo_name(item_dir: Path, photo_names):
-    for photo_name in photo_names:
-        if (item_dir / photo_name).exists():
-            return photo_name
-    # Фолбэк: подхватываем любое изображение в папке, если нет стандартного photo.*
-    for extension in ("*.webp", "*.png", "*.jpg", "*.jpeg"):
-        candidates = sorted(item_dir.glob(extension))
-        if candidates:
-            return candidates[0].name
-    return None
-
-
-def normalize_portion_label(raw_value: str) -> str:
-    value = (raw_value or "").strip()
-    if not value:
-        return ""
-
-    numeric_match = re.fullmatch(r"(\d{2,4})(?:[.,]\d+)?", value)
-    if numeric_match:
-        return f"{numeric_match.group(1)} г"
-
-    unit_match = re.fullmatch(r"(\d{2,4})(?:[.,]\d+)?\s*(г|гр|g|мл|ml)", value, re.IGNORECASE)
-    if unit_match:
-        unit = unit_match.group(2).lower()
-        normalized_unit = "мл" if unit in {"ml", "мл"} else "г"
-        return f"{unit_match.group(1)} {normalized_unit}"
-
-    return value
-
-
-def resolve_menu_portion_label(meta: dict) -> str:
-    for key in ("portion", "weight", "grams", "gram", "volume", "serving", "yield"):
-        value = normalize_portion_label(meta.get(key, ""))
-        if value:
-            return value
-    return ""
-
-
-def extract_portion_amount(portion_label: str) -> float | None:
-    match = re.search(r"(\d{2,4})(?:[.,]\d+)?", portion_label or "")
-    if not match:
-        return None
-    try:
-        return float(match.group(1).replace(",", "."))
-    except ValueError:
-        return None
-
-
-def build_portion_tone_rgb(portion_label: str) -> str:
-    amount = extract_portion_amount(portion_label)
-    if amount is None:
-        return "194, 168, 144"
-
-    # Smoothly shift from creamy coffee to terracotta orange as the portion grows.
-    min_amount = 160.0
-    max_amount = 420.0
-    t = max(0.0, min(1.0, (amount - min_amount) / (max_amount - min_amount)))
-
-    start = (194, 168, 144)
-    end = (214, 112, 74)
-    rgb = tuple(round(start[i] + (end[i] - start[i]) * t) for i in range(3))
-    return f"{rgb[0]}, {rgb[1]}, {rgb[2]}"
-
-
-def parse_menu_item(meta: dict, slug: str, photo_name: str):
-    try:
-        price = int(meta.get("price", ""))
-    except ValueError:
-        return None
-    try:
-        item_id = int(meta.get("id", ""))
-        if item_id <= 0:
-            item_id = None
-    except ValueError:
-        item_id = None
-    try:
-        popularity = int(meta.get("popularity", meta.get("orders_count", "0")))
-    except ValueError:
-        popularity = 0
-
-    name = meta.get("name", "")
-    lore = meta.get("lore", "")
-    dish_type = meta.get("type", "")
-    if not all([name, lore, dish_type]):
-        return None
-
-    featured_value = meta.get("featured", "false").lower()
-    featured = featured_value in {"1", "true", "yes", "y", "on"}
-    portion_label = resolve_menu_portion_label(meta)
-    portion_tone_rgb = build_portion_tone_rgb(portion_label) if portion_label else ""
-    item = MenuItem(
-        id=item_id,
-        name=name,
-        lore=lore,
-        type=dish_type,
-        price=price,
-        photo=f"menu_items/{slug}/{photo_name}",
-        portion_label=portion_label,
-        portion_tone_rgb=portion_tone_rgb,
-        popularity=popularity,
-        featured=featured,
-    )
-    return item.to_dict()
-
-
-def parse_promo_item(meta: dict, slug: str, photo_name):
-    try:
-        item_id = int(meta.get("id", ""))
-    except ValueError:
-        return None
-
-    item_class = (meta.get("class", "") or "").strip().lower()
-    if item_class not in {"reklama", "akciya"}:
-        return None
-    if is_placeholder_promo(meta):
-        return None
-
-    try:
-        priority = int(meta.get("priority", "100"))
-    except ValueError:
-        priority = 100
-
-    active_value = (meta.get("active", "true") or "").lower()
-    active = active_value in {"1", "true", "yes", "y", "on"}
-    photo = f"promo_items/{slug}/{photo_name}" if photo_name else None
-
-    if item_class == "reklama":
-        text = (meta.get("text", "") or "").strip()
-        link = (meta.get("link", "") or "").strip()
-        if not text:
-            return None
-        item = PromoItem(
-            id=item_id,
-            class_name=item_class,
-            priority=priority,
-            active=active,
-            photo=photo,
-            text=text,
-            link=link,
-        )
-        return item.to_dict()
-
-    name = (meta.get("name", "") or "").strip()
-    lore = (meta.get("lore", "") or "").strip()
-    if not name or not lore:
-        return None
-    item = PromoItem(
-        id=item_id,
-        class_name=item_class,
-        priority=priority,
-        active=active,
-        photo=photo,
-        name=name,
-        lore=lore,
-    )
-    return item.to_dict()
-
-
-def promo_items_to_news_cards(items):
-    # Приводим promo-элементы к формату карточек главной страницы
-    cards = []
-    for item in items:
-        if item.get("class") == "reklama":
-            cards.append(
-                {
-                    "title": "Реклама",
-                    "text": item.get("text", ""),
-                    "accent": "Реклама",
-                    "photo": item.get("photo"),
-                    "link": item.get("link"),
-                }
-            )
-            continue
-        cards.append(
-            {
-                "title": item.get("name", ""),
-                "text": item.get("lore", ""),
-                "accent": "Акция",
-                "photo": item.get("photo"),
-                "link": "",
-            }
-        )
-    return cards[:3]
-
-
-def load_bookings():
-    return store_load_bookings(BOOKINGS_PATH, parse_datetime, BOOKING_DURATION_MINUTES)
-
-
-def load_bookings_raw():
-    return store_load_bookings_raw(BOOKINGS_PATH)
-
-
-def save_bookings(bookings):
-    store_save_bookings(BOOKINGS_PATH, bookings)
-
-
-def load_orders():
-    orders = store_load_orders(ORDERS_PATH)
-    return prune_orders(orders)
-
-
-def save_orders(orders):
-    store_save_orders(ORDERS_PATH, orders)
-
-
-def prune_orders(orders):
-    global _LAST_ORDER_PRUNE_AT
-    if ORDER_RETENTION_DAYS <= 0:
-        return orders
-
-    now_monotonic = time.monotonic()
-    with _ORDER_PRUNE_LOCK:
-        if now_monotonic - _LAST_ORDER_PRUNE_AT < ORDER_PRUNE_INTERVAL_SECONDS:
-            return orders
-        _LAST_ORDER_PRUNE_AT = now_monotonic
-
-    now_dt = current_time_value()
-    retention_delta = timedelta(days=ORDER_RETENTION_DAYS)
-    cleaned = []
-    changed = False
-
-    for order in orders:
-        if not isinstance(order, dict):
-            changed = True
-            continue
-
-        created_at = parse_iso_datetime_value(order.get("created_at"))
-        if created_at is None:
-            cleaned.append(order)
-            continue
-
-        timeline = build_order_status_timeline_value(order, now_dt, ORDER_STATUS_STEPS, parse_iso_datetime_value)
-        is_active = timeline is not None
-        is_fresh = (now_dt - created_at) <= retention_delta
-
-        if is_active or is_fresh:
-            cleaned.append(order)
-            continue
-        changed = True
-
-    if changed:
-        try:
-            store_save_orders(ORDERS_PATH, cleaned)
-        except Exception:
-            return orders
-        return cleaned
-    return orders
-
-
-def load_users():
-    return store_load_users(USERS_PATH)
-
-
-def save_users(users):
-    store_save_users(USERS_PATH, users)
-
-
-def next_user_id(users):
-    return store_next_user_id(users)
-
-
-def next_order_id(orders):
-    return store_next_order_id(orders)
-
-
-def hash_password(password):
-    return generate_password_hash(password, method=PASSWORD_HASH_METHOD)
-
-
-def hash_password_legacy(password):
-    return hashlib.sha256((password or "").encode("utf-8")).hexdigest()
-
-
-def is_legacy_password_hash(password_hash):
-    return bool(re.fullmatch(r"[0-9a-f]{64}", str(password_hash or "")))
-
-
-def verify_password(password, password_hash):
-    stored_hash = str(password_hash or "")
-    if not stored_hash:
-        return False, False
-    if is_legacy_password_hash(stored_hash):
-        return secrets.compare_digest(stored_hash, hash_password_legacy(password)), True
-    try:
-        return check_password_hash(stored_hash, password), False
-    except (TypeError, ValueError):
-        return False, False
-
-
-def verify_and_upgrade_password(user, password):
-    if not isinstance(user, dict):
-        return False, False
-    matches, needs_upgrade = verify_password(password, user.get("password_hash"))
-    if not matches:
-        return False, False
-    if needs_upgrade:
-        user["password_hash"] = hash_password(password)
-        return True, True
-    return True, False
-
-
 def parse_datetime(date_str, time_str):
     return parse_datetime_value(date_str, time_str)
 
@@ -1638,6 +742,46 @@ def parse_serving_option(serve_mode, serve_custom_time, booking):
         parse_datetime,
         BOOKING_DURATION_MINUTES,
     )
+
+
+def hash_password(password):
+    return hash_password_value(password, PASSWORD_HASH_METHOD)
+
+
+def verify_password(password, password_hash):
+    return verify_password_value(password, password_hash)
+
+
+def verify_and_upgrade_password(user, password):
+    return verify_and_upgrade_password_value(user, password, PASSWORD_HASH_METHOD)
+
+
+auth_session = AuthSessionService(
+    app=app,
+    auth_session_cookie_name=AUTH_SESSION_COOKIE_NAME,
+    auth_session_cookie_max_age_seconds=AUTH_SESSION_COOKIE_MAX_AGE_SECONDS,
+    auth_session_serializer=_AUTH_SESSION_SERIALIZER,
+    checkout_preview_max_age_seconds=CHECKOUT_PREVIEW_MAX_AGE_SECONDS,
+    checkout_preview_serializer=_CHECKOUT_PREVIEW_SERIALIZER,
+    login_debug_enabled=LOGIN_DEBUG_ENABLED,
+    login_debug_log_path=LOGIN_DEBUG_LOG_PATH,
+    login_debug_lock=_LOGIN_DEBUG_LOCK,
+    session_debug_enabled=SESSION_DEBUG_ENABLED,
+    session_debug_log_path=SESSION_DEBUG_LOG_PATH,
+    session_debug_lock=_SESSION_DEBUG_LOCK,
+    load_users=load_users,
+    load_bookings=load_bookings,
+    get_user_preparing_orders=get_user_preparing_orders,
+)
+debug_login_failure = auth_session.debug_login_failure
+log_session_debug = auth_session.log_session_debug
+issue_auth_session_cookie = auth_session.issue_auth_session_cookie
+verify_auth_session_cookie = auth_session.verify_auth_session_cookie
+issue_checkout_preview_token = auth_session.issue_checkout_preview_token
+verify_checkout_preview_token = auth_session.verify_checkout_preview_token
+get_request_user = auth_session.get_request_user
+get_request_notification_data = auth_session.get_request_notification_data
+auth_session.register_hooks()
 
 
 @app.post("/release")

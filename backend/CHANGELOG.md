@@ -1,6 +1,34 @@
 # История изменений
 
 
+## 19.03.2026
+
+### Рефакторинг backend-структуры
+
+- `backend/app.py` раздроблен на более узкие сервисные модули без изменения пользовательского поведения.
+- Из `backend/app.py` вынесены:
+  - `backend/services/auth_session.py` - signed cookie, восстановление session, CSRF и request-scoped auth helpers;
+  - `backend/services/menu_content.py` - загрузка меню и promo, чтение `item.txt`, Redis-кэш меню;
+  - `backend/services/storage_facade.py` - фасад JSON/Postgres storage, prune заказов и file-locking;
+  - `backend/services/passwords.py` - password hashing, проверка и мягкий апгрейд legacy hash.
+- `backend/app.py` сокращён до роли точки сборки Flask-приложения, конфигурации и регистрации маршрутов.
+
+### Совместимость и проверка
+
+- Сохранены совместимые экспортируемые helper-функции из `app.py`, на которые опираются тесты и внутренние сценарии:
+  - `hash_password`
+  - `verify_password`
+  - `verify_and_upgrade_password`
+  - `issue_auth_session_cookie`
+  - `verify_auth_session_cookie`
+  - `issue_checkout_preview_token`
+  - `verify_checkout_preview_token`
+- После рефакторинга выполнена перепроверка:
+  - импорт приложения;
+  - smoke-check через Flask `test_client`;
+  - `pytest` - результат `6 passed`.
+
+
 ## 11.02.2026
 
 ### Редизайн UI (тёплая тёмная тема)
