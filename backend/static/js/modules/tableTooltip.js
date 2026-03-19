@@ -42,6 +42,8 @@ const setupTableTooltip = () => {
   });
 
   const isMobileViewport = () => window.matchMedia("(max-width: 767px)").matches;
+  const OPENING_TIME = "09:00";
+  const CLOSING_TIME = "22:00";
 
   const pad = (value) => String(value).padStart(2, "0");
   const toDateInput = (date) =>
@@ -235,6 +237,7 @@ const setupTableTooltip = () => {
     const now = new Date();
     const today = toDateInput(now);
     bookingDate.min = today;
+    bookingTime.max = CLOSING_TIME;
     if (bookingDateTop) bookingDateTop.min = today;
     if (bookingDateMobilePicker) bookingDateMobilePicker.min = today;
 
@@ -244,13 +247,17 @@ const setupTableTooltip = () => {
     if (!bookingDateMobilePicker?.value && bookingDateMobilePicker) bookingDateMobilePicker.value = bookingDate.value;
 
     if (bookingDate.value === today) {
-      bookingTime.min = toTimeInput(now);
+      bookingTime.min = OPENING_TIME > toTimeInput(now) ? OPENING_TIME : toTimeInput(now);
       if (!bookingTime.value || bookingTime.value < bookingTime.min) {
         setTimeValue(toTimeInput(now));
       }
     } else {
-      bookingTime.min = "00:00";
+      bookingTime.min = OPENING_TIME;
       if (!bookingTime.value) setTimeValue("12:00");
+    }
+
+    if (bookingTime.value > CLOSING_TIME) {
+      setTimeValue(CLOSING_TIME);
     }
 
     updateDateValidation();

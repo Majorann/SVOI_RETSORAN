@@ -57,9 +57,26 @@
       </div>
       {% endfor %}
     </div>
+    {% if order.order_type == "delivery" %}
+      {% set delivery_service_fee = (order.get("payable_total") or 0) - (order.get("items_total") or 0) %}
+      <div class="checkout-item">
+        <div class="checkout-item__meta">
+          <p class="checkout-item__name">Сумма заказа</p>
+        </div>
+        <strong>{{ order.get("items_total", 0) }} ₽</strong>
+      </div>
+      {% if delivery_service_fee > 0 %}
+      <div class="checkout-item">
+        <div class="checkout-item__meta">
+          <p class="checkout-item__name">Сервисный сбор</p>
+        </div>
+        <strong>{{ delivery_service_fee }} ₽</strong>
+      </div>
+      {% endif %}
+    {% endif %}
     <div class="checkout-summary">
       <span>Итого</span>
-      <strong>{{ order.payable_total or order.items_total }} ₽</strong>
+      <strong>{{ order.get("payable_total") if order.get("payable_total") is not none else order.get("items_total") }} ₽</strong>
     </div>
   </div>
 </section>

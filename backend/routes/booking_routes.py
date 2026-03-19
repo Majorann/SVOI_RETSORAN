@@ -1,15 +1,19 @@
-from datetime import date, datetime
-
 from flask import jsonify, redirect, render_template, request, session, url_for
+from services.business_logic import (
+    current_local_date_time_strings_value,
+    current_timestamp_value,
+)
 
 
 def reserve_route(load_bookings, parse_datetime, overlaps_booking, tables, walls):
     selected_date = request.args.get("date")
     if selected_date is None:
-        selected_date = date.today().isoformat()
+        selected_date, default_time = current_local_date_time_strings_value()
+    else:
+        default_time = None
     selected_time = request.args.get("time")
     if selected_time is None:
-        selected_time = datetime.now().strftime("%H:%M")
+        selected_time = default_time or current_local_date_time_strings_value()[1]
 
     bookings = load_bookings()
     selected_dt = parse_datetime(selected_date, selected_time)
@@ -37,7 +41,7 @@ def availability_route(load_bookings, parse_datetime, overlaps_booking):
     bookings = load_bookings()
     selected_dt = parse_datetime(selected_date, selected_time)
     if selected_dt is None:
-        return jsonify({"ok": False, "error": "Invalid date/time"}), 400
+        return jsonify({"ok": False, "error": "Некорректные дата или время."}), 400
     reserved_ids = [
         item["table_id"]
         for item in bookings
@@ -46,7 +50,14 @@ def availability_route(load_bookings, parse_datetime, overlaps_booking):
     return jsonify({"ok": True, "reserved": reserved_ids})
 
 
-def book_table_route(load_bookings, save_bookings, overlaps_booking, json_file_lock, bookings_path):
+def book_table_route(
+    load_bookings,
+    save_bookings,
+    overlaps_booking,
+    parse_datetime,
+    json_file_lock,
+    bookings_path,
+):
     data = request.get_json(silent=True) or {}
     user_id = session.get("user_id")
     table_id = data.get("table_id")
@@ -55,17 +66,18 @@ def book_table_route(load_bookings, save_bookings, overlaps_booking, json_file_l
     name = (data.get("name") or "").strip()
 
     if not user_id:
-        return jsonify({"ok": False, "error": "Login is required."}), 401
+        return jsonify({"ok": False, "error": "Нужно войти в аккаунт."}), 401
     if not all([table_id, date_str, time_str, name]):
-        return jsonify({"ok": False, "error": "Fill in all fields."}), 400
+        return jsonify({"ok": False, "error": "Заполните все поля."}), 400
 
-    try:
-        booking_dt = datetime.fromisoformat(f"{date_str}T{time_str}")
-    except ValueError:
-        return jsonify({"ok": False, "error": "Invalid date/time."}), 400
+    booking_dt = parse_datetime(date_str, time_str)
+    if booking_dt is None:
+        return jsonify({"ok": False, "error": "Некорректные дата или время."}), 400
 
-    if booking_dt < datetime.now():
-        return jsonify({"ok": False, "error": "Time cannot be in the past."}), 400
+    current_date, current_time = current_local_date_time_strings_value()
+    current_dt = parse_datetime(current_date, current_time)
+    if current_dt is not None and booking_dt < current_dt:
+        return jsonify({"ok": False, "error": "Время не может быть в прошлом."}), 400
 
     with json_file_lock(bookings_path):
         bookings = load_bookings()
@@ -73,7 +85,7 @@ def book_table_route(load_bookings, save_bookings, overlaps_booking, json_file_l
             b.get("table_id") == table_id and overlaps_booking(b, booking_dt)
             for b in bookings
         ):
-            return jsonify({"ok": False, "error": "Table is already reserved for this time."}), 409
+            return jsonify({"ok": False, "error": "Стол уже забронирован на это время."}), 409
 
         bookings.append(
             {
@@ -82,7 +94,7 @@ def book_table_route(load_bookings, save_bookings, overlaps_booking, json_file_l
                 "time": time_str,
                 "name": name,
                 "user_id": user_id,
-                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "created_at": current_timestamp_value(),
             }
         )
         save_bookings(bookings)
@@ -162,7 +174,7 @@ def cancel_booking_with_orders_route(
         with json_file_lock(orders_path):
             orders = load_orders()
             changed = False
-            cancelled_at = datetime.now().isoformat(timespec="seconds")
+            cancelled_at = current_timestamp_value()
             for order in orders:
                 if order.get("user_id") != user_id:
                     continue

@@ -13,6 +13,7 @@ const setupCheckoutPage = ({
   usePoints,
   availablePoints,
   checkoutPointsApplied,
+  checkoutBonusEarned,
   checkoutPayable,
   goToPayment,
   serveCustomTime,
@@ -73,6 +74,7 @@ const setupCheckoutPage = ({
     const balance = Number(availablePoints?.textContent || 0);
     const pointsApplied = usePoints?.checked ? Math.min(balance, total) : 0;
     const payableTotal = Math.max(0, total - pointsApplied);
+    const bonusEarned = Math.max(0, Math.floor(payableTotal * 0.05));
 
     if (checkoutItemsJson) {
       checkoutItemsJson.value = JSON.stringify(
@@ -83,6 +85,7 @@ const setupCheckoutPage = ({
     if (checkoutItemsTotal) checkoutItemsTotal.textContent = String(total);
     if (checkoutTotal) checkoutTotal.textContent = String(total);
     if (checkoutPointsApplied) checkoutPointsApplied.textContent = String(pointsApplied);
+    if (checkoutBonusEarned) checkoutBonusEarned.textContent = String(bonusEarned);
     if (checkoutPayable) checkoutPayable.textContent = String(payableTotal);
     if (checkoutEmpty) {
       checkoutEmpty.hidden = cart.length > 0;

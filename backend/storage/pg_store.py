@@ -4,6 +4,7 @@ import time
 from datetime import date, datetime, time as dt_time, timedelta
 
 import psycopg
+from services.business_logic import current_time_value
 
 
 _SCHEMA_READY = False
@@ -660,7 +661,7 @@ def save_bookings(_bookings_path, bookings):
 
 def load_bookings(bookings_path, parse_datetime_fn, booking_duration_minutes):
     bookings = load_bookings_raw(bookings_path)
-    now = datetime.now()
+    now = current_time_value()
     active = []
     for booking in bookings:
         booking_dt = parse_datetime_fn(booking.get("date"), booking.get("time"))

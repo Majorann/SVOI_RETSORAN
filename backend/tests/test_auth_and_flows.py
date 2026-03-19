@@ -175,6 +175,7 @@ def test_booking_payment_and_delivery_flows(app_module, client):
     orders = read_json(app_module.ORDERS_PATH)
     assert len(orders) == 1
     assert orders[0]["payable_total"] == max(0, menu_item["price"] * 2 - 120)
+    assert orders[0]["bonus_earned"] == int(orders[0]["payable_total"] * 0.05)
 
     users_after_payment = read_json(app_module.USERS_PATH)
     assert users_after_payment[0]["balance"] >= 0
@@ -211,3 +212,104 @@ def test_booking_payment_and_delivery_flows(app_module, client):
     orders_after_delivery = read_json(app_module.ORDERS_PATH)
     assert len(orders_after_delivery) == 2
     assert orders_after_delivery[1]["order_type"] == "delivery"
+    assert orders_after_delivery[1]["service_fee"] == 42
+    assert orders_after_delivery[1]["payable_total"] == menu_item["price"] + 42
+    assert orders_after_delivery[1]["bonus_earned"] == int((menu_item["price"] + 42) * 0.05)
+
+
+def test_order_totals_helper_reuses_same_rules_for_points_and_delivery(app_module):
+    from services.order_totals import calculate_order_totals, summarize_saved_order_totals
+
+    items = [
+        {"id": 1, "price": 100, "qty": 2},
+        {"id": 2, "price": 50, "qty": 1},
+    ]
+
+    totals = calculate_order_totals(items, service_fee=42, points_balance=180, use_points=True)
+    assert totals == {
+        "items_total": 250,
+        "service_fee": 42,
+        "gross_total": 292,
+        "points_applied": 180,
+        "payable_total": 112,
+        "bonus_earned": 5,
+    }
+
+    restored = summarize_saved_order_totals(
+        {
+            "order_type": "delivery",
+            "items": items,
+            "items_total": 250,
+            "payable_total": 292,
+            "points_applied": 0,
+            "bonus_earned": 0,
+        },
+        recompute_zero_bonus=True,
+    )
+    assert restored["service_fee"] == 42
+    assert restored["bonus_earned"] == 14
+
+    fully_paid = summarize_saved_order_totals(
+        {
+            "items_total": 250,
+            "payable_total": 0,
+            "points_applied": 250,
+            "bonus_earned": 0,
+        },
+        recompute_zero_bonus=True,
+    )
+    assert fully_paid["bonus_earned"] == 0
+
+
+def test_booking_time_checks_use_app_timezone_helpers(app_module, monkeypatch, tmp_path):
+    from services import business_logic
+    from storage import json_store
+
+    bookings_path = tmp_path / "bookings.json"
+    booking = {
+        "user_id": 1,
+        "table_id": 7,
+        "date": "2026-03-19",
+        "time": "12:00",
+        "name": "Тест",
+        "created_at": "2026-03-19T08:00:00",
+    }
+    write_json(bookings_path, [booking])
+
+    active_now = business_logic.parse_datetime_value("2026-03-19", "13:59")
+    monkeypatch.setattr(business_logic, "current_time_value", lambda: active_now)
+    monkeypatch.setattr(json_store, "current_time_value", lambda: active_now)
+
+    active_bookings = json_store.load_bookings(
+        bookings_path,
+        business_logic.parse_datetime_value,
+        120,
+    )
+    assert active_bookings == [booking]
+
+    active_status = business_logic.latest_user_booking_status_value(
+        1,
+        lambda: [booking],
+        business_logic.parse_datetime_value,
+        120,
+    )
+    assert active_status["state"] == "active"
+
+    expired_now = business_logic.parse_datetime_value("2026-03-19", "14:00")
+    monkeypatch.setattr(business_logic, "current_time_value", lambda: expired_now)
+    monkeypatch.setattr(json_store, "current_time_value", lambda: expired_now)
+
+    expired_status = business_logic.latest_user_booking_status_value(
+        1,
+        lambda: [booking],
+        business_logic.parse_datetime_value,
+        120,
+    )
+    assert expired_status["state"] == "expired_booking"
+
+    pruned_bookings = json_store.load_bookings(
+        bookings_path,
+        business_logic.parse_datetime_value,
+        120,
+    )
+    assert pruned_bookings == []

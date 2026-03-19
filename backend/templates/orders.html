@@ -24,9 +24,9 @@
             </p>
             <p class="booking-card__meta">{{ order.created_at.replace('T', ' ') }}</p>
             {% if order.order_type == "delivery" %}
-              <p class="booking-card__meta">Тип: Доставка</p>
+              <p class="booking-card__meta"><span class="order-kind-badge">🚚 Доставка</span> <span class="order-status-inline">Оплачен</span></p>
             {% else %}
-              <p class="booking-card__meta">Тип: В зале</p>
+              <p class="booking-card__meta"><span class="order-kind-badge">🍽 В зале</span> <span class="order-status-inline">Оплачен</span></p>
             {% endif %}
           </div>
           <div>
@@ -35,7 +35,7 @@
             {% else %}
               <p class="booking-card__meta">Стол №{{ order.booking.table_id or "—" }}</p>
             {% endif %}
-            <p class="price">{{ order.payable_total or order.items_total }} ₽</p>
+            <p class="price">{{ order.get("payable_total") if order.get("payable_total") is not none else order.get("items_total") }} ₽</p>
           </div>
         </a>
       {% endfor %}

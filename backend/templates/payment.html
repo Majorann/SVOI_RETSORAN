@@ -61,7 +61,12 @@
     </section>
 
     <section class="payment-block payment-block--total" id="paymentTotalBlock">
+      <p class="payment-total">Сумма заказа: <strong>{{ preview.get("items_total", 0) }} ₽</strong></p>
+      {% if preview.get("points_applied", 0) %}
+      <p class="payment-total">Списано баллов: <strong>{{ preview.get("points_applied", 0) }} ₽</strong></p>
+      {% endif %}
       <p class="payment-total">К оплате: <strong>{{ preview.get("payable_total", 0) }} ₽</strong></p>
+      <p class="payment-total">Начислится бонусов: <strong>{{ preview.get("bonus_earned", 0) }} ₽</strong></p>
     </section>
 
     <section class="payment-block payment-block--actions">
@@ -86,6 +91,7 @@
     <p>Ваш заказ принят и будет подан к выбранному времени</p>
     <div class="payment-result__actions">
       <a class="booking-card__action" href="{{ url_for('orders') }}">К заказам</a>
+      <a class="primary-action payment-result__home" href="{{ url_for('index') }}">Домой</a>
       <a class="booking-card__action" href="{{ url_for('menu') }}">В меню</a>
     </div>
   </article>

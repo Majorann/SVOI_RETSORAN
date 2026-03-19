@@ -22,7 +22,7 @@
         <div class="notice__meta">
           Стол №{{ booking.table_id }} · {{ booking.date_display }} · {{ booking.time }}
         </div>
-        <div class="notice__text">Ждём вас!</div>
+        <div class="notice__text">Ждём вас! Бронь на {{ booking_duration_minutes // 60 }} часа</div>
       </div>
     {% endfor %}
     {% for order in preparing_orders %}
@@ -35,23 +35,42 @@
           Дата: {{ order.get("notice_date_display") or order.get("created_at_display") }} · {{ order.get("notice_time_display") or "—" }}
         </div>
         <div class="notice__text">{{ order.get("status_text", "Осталось") }}: {{ order.get("status_remaining_mmss", "00:00") }}</div>
-        <div class="notice__meta">Сумма: {{ order.get("payable_total") or order.get("items_total") }} ₽</div>
+        <div class="notice__meta">Сумма: {{ order.get("display_total", 0) }} ₽</div>
         <div class="notice__meta">Бонусы: +{{ order.get("bonus_earned", 0) }} ₽</div>
       </div>
     {% endfor %}
-    <div class="notice notice--ad">
-      <div class="notice__title">Реклама</div>
-      <div class="notice__meta">Место для будущих акций и партнёров.</div>
-    </div>
   {% else %}
     <div class="notice notice--empty">
-      Пока нет уведомлений о бронировании.
-    </div>
-    <div class="notice notice--ad">
-      <div class="notice__title">Реклама</div>
-      <div class="notice__meta">Место для будущих акций и партнёров.</div>
+      Пока нет уведомлений о бронировании
+      <a class="primary-action notice__cta" href="{{ url_for('reserve') }}">Забронировать столик</a>
     </div>
   {% endif %}
+
+  {% for promo in promo_notifications %}
+    {% set promo_href = promo.get("link") %}
+    <article class="notice notice--promo{% if promo_href %} notice--promo-clickable{% endif %}">
+      {% if promo_href %}
+        <a class="notice__promo-overlay-link" href="{{ promo_href }}" target="_blank" rel="noopener noreferrer" aria-label="{{ promo.get('title') }}"></a>
+      {% endif %}
+      {% if promo.get("photo") %}
+        <div class="notice__promo-media">
+          <img
+            class="notice__promo-img"
+            src="{{ url_for('static', filename=promo.get('photo')) }}"
+            alt="{{ promo.get('title') }}"
+          />
+          <span class="notice__promo-badge">{{ promo.get("badge") }}</span>
+        </div>
+      {% endif %}
+      <div class="notice__promo-content">
+        {% if not promo.get("photo") %}
+          <span class="notice__promo-badge notice__promo-badge--inline">{{ promo.get("badge") }}</span>
+        {% endif %}
+        <div class="notice__title">{{ promo.get("title") }}</div>
+        <div class="notice__text">{{ promo.get("text") }}</div>
+      </div>
+    </article>
+  {% endfor %}
 </section>
 
 <nav class="bottom-nav">

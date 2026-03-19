@@ -43,7 +43,9 @@
     </section>
 
     <section class="payment-block payment-block--total" id="paymentTotalBlock">
-      <p class="payment-total">К оплате: <strong>{{ preview.get("items_total", 0) }} ₽</strong></p>
+      <p class="payment-total">Сумма заказа: <strong>{{ preview.get("items_total", 0) }} ₽</strong></p>
+      <p class="payment-total">Сервисный сбор: <strong>{{ preview.get("service_fee", 42) }} ₽</strong></p>
+      <p class="payment-total">К оплате: <strong>{{ preview.get("payable_total", preview.get("items_total", 0)) }} ₽</strong></p>
     </section>
 
     <section class="payment-block payment-block--actions">
@@ -66,6 +68,7 @@
     <p>Заказ доставки принят и передан в работу.</p>
     <div class="payment-result__actions">
       <a class="booking-card__action" href="{{ url_for('orders') }}">К заказам</a>
+      <a class="primary-action payment-result__home" href="{{ url_for('index') }}">Домой</a>
       <a class="booking-card__action" href="{{ url_for('delivery') }}">В меню доставки</a>
     </div>
   </article>
