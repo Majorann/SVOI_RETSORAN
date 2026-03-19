@@ -53,7 +53,7 @@ class MenuContentService:
             )
             return self._redis_client
 
-    def load_menu_items_from_disk(self):
+    def load_menu_items_from_disk(self, include_inactive: bool = False):
         items_with_meta = []
         if not MENU_ITEMS_PATH.exists():
             return []
@@ -69,6 +69,8 @@ class MenuContentService:
             meta = self.parse_menu_meta(meta_path)
             menu_item = self.parse_menu_item(meta, item_dir.name, photo_name)
             if menu_item is None:
+                continue
+            if not include_inactive and not menu_item.get("active", True):
                 continue
             items_with_meta.append((menu_item, meta_path))
 
@@ -168,7 +170,7 @@ class MenuContentService:
             except Exception as exc:
                 print(f"[cache] redis menu read failed ({exc}), fallback=disk")
 
-        items = self.load_menu_items_from_disk()
+        items = self.load_menu_items_from_disk(include_inactive=False)
 
         if client is not None:
             try:
@@ -181,7 +183,10 @@ class MenuContentService:
                 print(f"[cache] redis menu write failed ({exc})")
         return items
 
-    def load_promo_items(self):
+    def load_menu_items_admin(self):
+        return self.load_menu_items_from_disk(include_inactive=True)
+
+    def load_promo_items(self, include_inactive: bool = False):
         items = []
         if not PROMO_ITEMS_PATH.exists():
             return items
@@ -196,7 +201,7 @@ class MenuContentService:
             promo_item = self.parse_promo_item(meta, relative_slug, photo_name)
             if promo_item is None:
                 continue
-            if not promo_item.get("active", True):
+            if not include_inactive and not promo_item.get("active", True):
                 continue
             items.append(promo_item)
 
@@ -316,6 +321,8 @@ class MenuContentService:
 
         featured_value = meta.get("featured", "false").lower()
         featured = featured_value in {"1", "true", "yes", "y", "on"}
+        active_value = meta.get("active", meta.get("available", "true")).lower()
+        active = active_value in {"1", "true", "yes", "y", "on"}
         portion_label = self.resolve_menu_portion_label(meta)
         portion_tone_rgb = self.build_portion_tone_rgb(portion_label) if portion_label else ""
         item = MenuItem(
@@ -329,6 +336,7 @@ class MenuContentService:
             portion_tone_rgb=portion_tone_rgb,
             popularity=popularity,
             featured=featured,
+            active=active,
         )
         return item.to_dict()
 

@@ -1,6 +1,6 @@
 # SVOI_RETSORAN
 
-Учебный веб-проект ресторана на Flask с главной страницей, бронированием столов, меню, корзиной, заказами, уведомлениями, профилем и доставкой.
+Учебный веб-проект ресторана на Flask с главной страницей, бронированием столов, меню, корзиной, заказами, уведомлениями, профилем, доставкой и отдельной desktop-first admin panel.
 
 ## Возможности
 
@@ -12,6 +12,7 @@
 - Доставка с сервисным сбором `42 ₽`, ETA и отдельным флоу подтверждения
 - Уведомления о бронированиях, активных заказах и promo-рекламе
 - Профиль пользователя с привязкой и удалением карт, анимированным accordion-блоком и live-валидацией карты
+- Desktop-first admin panel под `/admin` с dashboard, заказами, бронями, доставкой, меню, promo, аналитикой, пользователями и audit log
 - Авторизация и регистрация
 - Cookie-only авторизация на Flask session
 - Signed `auth_session` cookie для восстановления server-side session на первом запросе
@@ -42,8 +43,11 @@
 - `backend/storage/pg_store.py` - хранилище Postgres
 - `backend/models/` - dataclass-модели
 - `backend/templates/` - HTML-шаблоны страниц
+- `backend/templates/admin/` - HTML-шаблоны admin panel
 - `backend/static/css/style.css` - стили интерфейса
+- `backend/static/css/admin.css` - стили admin panel
 - `backend/static/js/app.js` - лёгкая фронтенд-инициализация и подключение модулей страниц
+- `backend/static/js/admin.js` - фронтенд-логика admin panel
 - `backend/static/js/modules/` - JS-модули интерфейса
 - `backend/static/menu_items/` - карточки блюд (`item.txt` + изображение)
 - `backend/static/promo_items/` - промо и акции (`item.txt` + изображение)
@@ -184,6 +188,20 @@ backend\.venv\Scripts\python -m pytest backend\tests -q
 - `/orders` - история заказов
 - `/orders/<id>` - детали заказа
 - `/profile` - профиль
+- `/admin` - вход в админ-зону
+- `/admin/dashboard` - dashboard
+- `/admin/orders` - список заказов
+- `/admin/orders/<id>` - детали заказа
+- `/admin/bookings` - список броней
+- `/admin/bookings/<id>` - детали брони
+- `/admin/delivery` - доставка
+- `/admin/menu` - управление меню
+- `/admin/promo` - акции и реклама
+- `/admin/analytics` - аналитика
+- `/admin/users` - пользователи
+- `/admin/users/<id>` - карточка пользователя
+- `/admin/content` - scaffold контента
+- `/admin/audit-log` - журнал действий
 - `/login` - вход
 - `/register` - регистрация
 
@@ -214,6 +232,7 @@ featured=true
 - `price` - цена
 - `lore` - описание
 - `featured` - попадание в блок популярных блюд
+- `active` - безопасное скрытие блюда без ломки текущего parser/public menu
 - `weight`, `portion`, `grams`, `volume`, `serving`, `yield` - источник бейджа порции на карточке
 
 Если `id` некорректный или конфликтует с другим блюдом, backend автоматически назначает следующий свободный числовой ID и сохраняет исправление обратно в `item.txt` в UTF-8.
@@ -230,6 +249,13 @@ featured=true
 - `reklama`
 - `akciya`
 
+Дополнительно поддерживаются:
+
+- `priority`
+- `active`
+- `start_at`
+- `end_at`
+
 Шаблонные заглушки для промо backend автоматически отфильтровывает и не показывает на сайте.
 
 ## Хранилища данных
@@ -245,6 +271,19 @@ featured=true
 ### Postgres
 
 Если задан `DATABASE_URL`, приложение работает через Postgres backend.
+
+Admin panel использует Postgres как source of truth для:
+
+- `admin_users`
+- `admin_actions`
+- `users`
+- `bookings`
+- `orders`
+- `order_items`
+- `user_cards`
+
+Доступ в `/admin` считается валидным, если `users.id` текущего пользователя присутствует в `admin_users.user_id`.
+Если пользователь не админ, admin-страницы возвращают friendly `403`, а admin API - JSON-ошибку доступа.
 
 Для инициализации схемы используется:
 
@@ -398,6 +437,37 @@ python backend/ops/migrate_json_to_neon.py
 
 Практически это нужно, чтобы локальная среда, прод и разные timezone сервера не давали разные результаты для одних и тех же бронирований и заказов.
 
+### Admin panel
+
+Admin panel реализована как отдельная зона внутри текущего Flask + Jinja приложения и не заменяет клиентский интерфейс.
+
+Основные принципы:
+
+- отдельный namespace `/admin`;
+- desktop-first layout;
+- backend-проверка прав по `admin_users`;
+- audit logging через `admin_actions`;
+- без новой role/persistence-модели для delivery statuses;
+- без новой CMS для `/admin/content`;
+- menu/promo редактируются form-based интерфейсом поверх файлов `item.txt`.
+
+Сейчас в admin UI доступны:
+
+- dashboard и KPI;
+- управление заказами, бронями и доставкой;
+- пользователи и корректировка бонусов;
+- analytics по реальным данным;
+- аудит действий администраторов;
+- admin menu с live-preview карточки блюда;
+- promo editor с type-aware полями и live-preview.
+
+Ограничения текущей реализации:
+
+- полноценная admin-зона работает только при `DATABASE_URL` / Postgres;
+- мобильная версия админки намеренно не поддерживается;
+- delivery-статусы в UI маппятся на существующий `orders.status`;
+- `/admin/content` пока оставлен scaffold/TODO.
+
 ## Frontend-модули
 
 Тяжёлая клиентская логика разнесена по page-specific модулям, чтобы не грузить весь код на каждой странице.
@@ -405,6 +475,7 @@ python backend/ops/migrate_json_to_neon.py
 Ключевые модули:
 
 - `backend/static/js/modules/menuCatalog.js` - фильтрация, сортировка и анимации каталога меню
+- `backend/static/js/admin.js` - modals, drawers, toasts, admin charts и live-preview в admin menu/promo
 - `backend/static/js/modules/cartDrawer.js` - корзина, mobile drawer и синхронизация кнопок `В корзину`
 - `backend/static/js/modules/checkoutPaymentFlow.js` - checkout и экран оплаты
 - `backend/static/js/modules/deliveryFlow.js` - экран оформления доставки и live-пересчёт итогов
@@ -431,6 +502,7 @@ python backend/ops/migrate_json_to_neon.py
 - Главная страница не полагается только на первый server-render для баллов и status bar:
   - `/api/index-summary` вызывается один раз после загрузки;
   - постоянный polling `/api/order-statuses` работает только когда реально есть активный заказ.
+- В клиентском `/menu` добавлен поиск по блюдам без перезагрузки, поверх существующего `menuCatalog.js`.
 
 ## Проверка auth
 

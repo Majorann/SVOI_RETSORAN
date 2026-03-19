@@ -1,0 +1,13 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-card admin-state admin-state--warning">
+  <span class="admin-state__mark"></span>
+  <h2>Content scaffold / TODO</h2>
+  <p>В этой фазе раздел intentionally ограничен, без новой CMS и без внедрения отдельного content store.</p>
+  <ul class="admin-todo-list">
+    {% for item in content.todo_blocks %}
+      <li>{{ item }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

@@ -1,0 +1,80 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-grid admin-grid--menu">
+  <article class="admin-card admin-card--form">
+    <div class="admin-section-head"><h2>Сохранить блюдо</h2></div>
+    <form class="admin-form" id="adminMenuForm" method="post" action="{{ url_for('admin.menu_save') }}" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div class="admin-form__grid">
+        <label class="admin-field"><span>ID</span><input class="admin-input" type="number" name="id" value="{{ next_menu_item_id }}" placeholder="Автозаполнение" /></label>
+        <label class="admin-field"><span>Slug папки</span><input class="admin-input" type="text" name="slug" placeholder="Необязательно" /></label>
+        <label class="admin-field"><span>Название</span><input class="admin-input" type="text" name="name" required /></label>
+        <label class="admin-field">
+          <span>Категория</span>
+          <select class="admin-select" name="type" required>
+            <option value="">Выберите категорию</option>
+            {% for category in categories %}
+              <option value="{{ category }}">{{ category }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="admin-field"><span>Цена</span><input class="admin-input" type="number" name="price" min="0" required /></label>
+        <label class="admin-field"><span>Вес / порция</span><input class="admin-input" type="text" name="weight" /></label>
+        <label class="admin-field"><span>Популярность</span><input class="admin-input" type="number" name="popularity" min="0" value="0" /></label>
+        <label class="admin-field"><span>Фото</span><input class="admin-input" type="file" name="photo" accept=".png,.jpg,.jpeg,.webp" /></label>
+      </div>
+      <label class="admin-field"><span>Описание</span><textarea class="admin-textarea" name="lore" rows="4"></textarea></label>
+      <div class="admin-checkbox-row admin-checkbox-row--menu">
+        <label class="admin-check">
+          <input type="checkbox" name="featured" value="1" />
+          <span>Featured</span>
+        </label>
+        <label class="admin-check">
+          <input type="checkbox" name="active" value="1" checked />
+          <span>Активно</span>
+        </label>
+      </div>
+      <label class="admin-field"><span>Причина</span><textarea class="admin-textarea" name="reason" rows="2" required></textarea></label>
+      <button class="admin-button" type="submit">Сохранить блюдо</button>
+    </form>
+    <a class="admin-button admin-button--ghost admin-button--block" href="{{ url_for('menu') }}" target="_blank" rel="noopener noreferrer">Открыть меню</a>
+  </article>
+
+  <article class="admin-card admin-card--content admin-menu-preview-panel">
+    <div class="admin-section-head"><h2>Конструктор карточки</h2></div>
+    <div class="admin-menu-preview">
+      <article class="admin-menu-preview-card" id="adminMenuPreviewCard">
+        <div class="admin-menu-preview-card__media" id="adminMenuPreviewMedia"></div>
+        <div class="admin-menu-preview-card__content">
+          <div class="admin-chip-row">
+            <span class="admin-badge" id="adminMenuPreviewType">Категория</span>
+            <span class="admin-badge admin-badge--accent" id="adminMenuPreviewFeatured" hidden>Featured</span>
+            <span class="admin-badge admin-badge--danger" id="adminMenuPreviewHidden" hidden>Скрыто</span>
+          </div>
+          <h3 id="adminMenuPreviewName">Новое блюдо</h3>
+          <p id="adminMenuPreviewLore">Здесь появится описание блюда, чтобы можно было сразу оценить общий вид карточки.</p>
+          <div class="admin-menu-preview-card__meta">
+            <strong id="adminMenuPreviewPrice">0 ₽</strong>
+            <span id="adminMenuPreviewWeight">—</span>
+          </div>
+          <div class="admin-menu-preview-card__stats">
+            <div class="admin-menu-preview-stat">
+              <span>ID</span>
+              <strong id="adminMenuPreviewId">{{ next_menu_item_id }}</strong>
+            </div>
+            <div class="admin-menu-preview-stat">
+              <span>Популярность</span>
+              <strong id="adminMenuPreviewPopularity">0</strong>
+            </div>
+          </div>
+          <div class="admin-menu-preview-card__foot">
+            <small>Карточка обновляется в реальном времени</small>
+            <small>Premium dark preview</small>
+          </div>
+        </div>
+      </article>
+      <div class="admin-note">Карточка обновляется по мере ввода полей и после загрузки фото.</div>
+    </div>
+  </article>
+</section>
+{% endblock %}

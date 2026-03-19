@@ -1,0 +1,74 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-grid admin-grid--detail">
+  <article class="admin-card">
+    <div class="admin-section-head">
+      <div>
+        <p class="admin-topbar__eyebrow">User</p>
+        <h2>{{ user.name }}</h2>
+      </div>
+      {% if user.is_admin %}<span class="admin-badge admin-badge--accent">admin</span>{% endif %}
+    </div>
+    <div class="admin-detail-grid">
+      <div><span>ID</span><strong>{{ user.id }}</strong></div>
+      <div><span>Телефон</span><strong>{{ user.phone }}</strong></div>
+      <div><span>Баланс</span><strong>{{ user.balance }}</strong></div>
+      <div><span>Дата регистрации</span><strong>{{ user.created_at|ru_datetime }}</strong></div>
+    </div>
+    <div class="admin-inline-form">
+      <input class="admin-input" type="number" id="balanceDelta" value="100" />
+      <button class="admin-button" type="button" data-admin-api="{{ url_for('admin.api_user_balance', user_id=user.id) }}" data-admin-payload-source="balanceDelta" data-admin-payload-key="delta" data-admin-title="Скорректировать бонусный баланс" data-admin-message="Изменение баланса будет записано в admin_actions.">Изменить баланс</button>
+    </div>
+  </article>
+
+  <article class="admin-card">
+    <div class="admin-section-head"><h2>Карты</h2></div>
+    {% if user.cards %}
+      <div class="admin-list">
+        {% for card in user.cards %}
+          <div class="admin-list__item">
+            <strong>{{ card.brand }} •••• {{ card.last4 }}</strong>
+            <span>{{ card.holder or "—" }} · {{ card.expiry or "—" }} {% if card.active %}· active{% endif %}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="admin-empty">Привязанных карт нет.</div>
+    {% endif %}
+  </article>
+</section>
+
+<section class="admin-grid admin-grid--two">
+  <article class="admin-card">
+    <div class="admin-section-head"><h2>Последние заказы</h2></div>
+    {% if user.orders %}
+      <div class="admin-list">
+        {% for order in user.orders %}
+          <a class="admin-list__item" href="{{ url_for('admin.order_detail', order_id=order.id) }}">
+            <strong>Заказ #{{ order.id }}</strong>
+            <span>{{ order.order_type }} · {{ order.created_at|ru_datetime }} · {{ order.payable_total }} ₽</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="admin-empty">Заказов пока нет.</div>
+    {% endif %}
+  </article>
+
+  <article class="admin-card">
+    <div class="admin-section-head"><h2>Последние брони</h2></div>
+    {% if user.bookings %}
+      <div class="admin-list">
+        {% for booking in user.bookings %}
+          <a class="admin-list__item" href="{{ url_for('admin.booking_detail', booking_id=booking.id) }}">
+            <strong>Бронь #{{ booking.id }}</strong>
+            <span>Стол {{ booking.table_id }} · {{ booking.booking_date|ru_date }} {{ booking.booking_time|ru_time }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="admin-empty">Броней пока нет.</div>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

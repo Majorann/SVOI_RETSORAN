@@ -1,0 +1,60 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-card admin-toolbar admin-toolbar--compact">
+  <form class="admin-filters admin-filters--stacked admin-filters--tight" method="get">
+    <div class="admin-filters__grid admin-filters__grid--bookings-compact">
+      <label class="admin-field admin-field--compact">
+        <span>Дата</span>
+        <input class="admin-input" type="date" name="booking_date" value="{{ filters.booking_date }}" />
+      </label>
+      <label class="admin-field admin-field--compact">
+        <span>Имя</span>
+        <input class="admin-input" type="search" name="name" value="{{ filters.name }}" placeholder="Имя гостя" />
+      </label>
+      <label class="admin-field admin-field--compact">
+        <span>Телефон</span>
+        <input class="admin-input" type="search" name="phone" value="{{ filters.phone }}" placeholder="+7..." />
+      </label>
+      <label class="admin-field admin-field--compact">
+        <span>Стол</span>
+        <input class="admin-input" type="search" name="table_id" value="{{ filters.table_id }}" placeholder="Номер стола" />
+      </label>
+      <label class="admin-field admin-field--compact admin-field--status">
+        <span>Состояние</span>
+        <select class="admin-select admin-select--compact-wide" name="state">
+          <option value="">Все состояния</option>
+          <option value="active" {% if filters.state == 'active' %}selected{% endif %}>Активные</option>
+          <option value="past" {% if filters.state == 'past' %}selected{% endif %}>Прошедшие</option>
+        </select>
+      </label>
+      <button class="admin-button admin-button--apply admin-button--compact" type="submit">Применить</button>
+    </div>
+  </form>
+</section>
+
+<section class="admin-card">
+  {% if bookings %}
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead><tr><th>ID</th><th>Клиент</th><th>Телефон</th><th>Стол</th><th>Дата</th><th>Статус</th><th>Связанные заказы</th><th></th></tr></thead>
+        <tbody>
+          {% for booking in bookings %}
+            <tr>
+              <td><a href="{{ url_for('admin.booking_detail', booking_id=booking.id) }}">#{{ booking.id }}</a></td>
+              <td>{{ booking.user_name or booking.name }}</td>
+              <td>{{ booking.user_phone or "—" }}</td>
+              <td>{{ booking.table_id }}</td>
+              <td>{{ booking.booking_date|ru_date }} {{ booking.booking_time|ru_time }}</td>
+              <td><span class="admin-badge">{{ booking.state_label }}</span></td>
+              <td>{{ booking.related_orders_count }}</td>
+              <td><a class="admin-table-link" href="{{ url_for('admin.booking_detail', booking_id=booking.id) }}">Открыть</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="admin-empty">Брони не найдены.</div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -7,6 +7,7 @@
     <meta name="referrer" content="origin" />
     <title>{{ title or "Свои — ресторан" }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+    {% block extra_head %}{% endblock %}
     <style>
       body.auth-sync-pending .page {
         opacity: 0;
@@ -22,5 +23,6 @@
       window.__SESSION_USER_ID = {{ current_user_id|tojson }};
     </script>
     <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
+    {% block extra_scripts %}{% endblock %}
   </body>
 </html>

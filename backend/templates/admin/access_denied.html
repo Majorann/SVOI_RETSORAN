@@ -1,0 +1,9 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-state admin-state--error">
+  <span class="admin-state__mark"></span>
+  <h2>Нет доступа</h2>
+  <p>Текущий пользователь не найден в таблице <code>admin_users</code>.</p>
+  <a class="admin-button" href="{{ url_for('index') }}">Вернуться на сайт</a>
+</section>
+{% endblock %}
