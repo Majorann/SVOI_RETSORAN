@@ -13,6 +13,7 @@ class MenuItem:
     portion_tone_rgb: str = ""
     popularity: int = 0
     featured: bool = False
+    active: bool = True
 
     def to_dict(self):
         return asdict(self)

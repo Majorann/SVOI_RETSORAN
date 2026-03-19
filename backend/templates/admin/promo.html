@@ -1,0 +1,87 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-grid admin-grid--two">
+  <article class="admin-card">
+    <div class="admin-section-head"><h2>Сохранить промо</h2></div>
+    <form class="admin-form" id="adminPromoForm" method="post" action="{{ url_for('admin.promo_save') }}" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div class="admin-form__grid">
+        <label class="admin-field"><span>ID для редактирования</span><input class="admin-input" type="number" name="id" /></label>
+        <label class="admin-field"><span>Тип</span>
+          <select class="admin-select" name="class_name" id="adminPromoClassName">
+            <option value="akciya">akciya</option>
+            <option value="reklama">reklama</option>
+          </select>
+        </label>
+        <label class="admin-field"><span>Slug папки</span><input class="admin-input" type="text" name="slug" /></label>
+        <label class="admin-field" data-promo-field="akciya"><span>Название акции</span><input class="admin-input" type="text" name="name" /></label>
+        <label class="admin-field" data-promo-field="reklama"><span>Текст рекламы</span><input class="admin-input" type="text" name="text" /></label>
+        <label class="admin-field" data-promo-field="reklama"><span>Ссылка</span><input class="admin-input" type="url" name="link" /></label>
+        <label class="admin-field"><span>Приоритет</span><input class="admin-input" type="number" name="priority" value="100" /></label>
+        <label class="admin-field"><span>Фото</span><input class="admin-input" type="file" name="photo" accept=".png,.jpg,.jpeg,.webp" /></label>
+        <label class="admin-field"><span>Начало показа</span><input class="admin-input" type="text" name="start_at" placeholder="20.03.2026 12:00" /></label>
+        <label class="admin-field"><span>Конец показа</span><input class="admin-input" type="text" name="end_at" placeholder="27.03.2026 23:59" /></label>
+      </div>
+      <label class="admin-field" data-promo-field="akciya"><span>Описание акции / lore</span><textarea class="admin-textarea" name="lore" rows="3"></textarea></label>
+      <div class="admin-checkbox-row admin-checkbox-row--menu">
+        <label class="admin-check">
+          <input type="checkbox" name="active" value="1" checked />
+          <span>Активно</span>
+        </label>
+      </div>
+      <label class="admin-field"><span>Причина</span><textarea class="admin-textarea" name="reason" rows="2" required></textarea></label>
+      <button class="admin-button" type="submit">Сохранить промо</button>
+    </form>
+  </article>
+
+  <article class="admin-card admin-promo-preview-panel">
+    <div class="admin-section-head"><h2>Конструктор промо</h2></div>
+    <div class="admin-promo-preview">
+      <article class="admin-promo-preview-card" id="adminPromoPreviewCard">
+        <div class="admin-promo-preview-card__media" id="adminPromoPreviewMedia"></div>
+        <div class="admin-promo-preview-card__content">
+          <div class="admin-chip-row admin-chip-row--spread">
+            <span class="admin-badge" id="adminPromoPreviewType">akciya</span>
+            <span class="admin-badge admin-badge--danger" id="adminPromoPreviewHidden" hidden>Скрыто</span>
+          </div>
+          <h3 id="adminPromoPreviewTitle">Новый промо-элемент</h3>
+          <p id="adminPromoPreviewBody">Здесь появится текст акции или рекламы.</p>
+          <div class="admin-promo-preview-card__meta">
+            <span>Приоритет: <strong id="adminPromoPreviewPriority">100</strong></span>
+            <span id="adminPromoPreviewTiming">Без ограничения по датам</span>
+          </div>
+          <a class="admin-button admin-button--ghost admin-button--block" id="adminPromoPreviewLink" href="#" target="_blank" rel="noopener noreferrer" hidden>Открыть ссылку</a>
+        </div>
+      </article>
+      <div class="admin-note">Доступные поля меняются по типу: для акции скрываются реклама и ссылка, для рекламы скрывается lore акции.</div>
+    </div>
+  </article>
+</section>
+
+<section class="admin-card">
+    <div class="admin-section-head"><h2>Список промо</h2></div>
+    {% if promo_items %}
+      <div class="admin-list">
+        {% for item in promo_items %}
+          <div class="admin-promo-row">
+            <div class="admin-promo-row__body">
+              <div class="admin-chip-row">
+                <span class="admin-badge">{{ item.class }}</span>
+                {% if not item.active %}<span class="admin-badge admin-badge--danger">Inactive</span>{% endif %}
+              </div>
+              <strong>{{ item.name or item.text }}</strong>
+              <p>{{ item.lore or item.link or "—" }}</p>
+            </div>
+            <form class="admin-promo-row__form" method="post" action="{{ url_for('admin.promo_delete', class_name=item.class, item_id=item.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <input class="admin-input admin-input--compact" type="text" name="reason" placeholder="Причина удаления" required />
+              <button class="admin-button admin-button--danger" type="submit">Удалить</button>
+            </form>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="admin-empty">Промо-элементы не найдены.</div>
+    {% endif %}
+</section>
+{% endblock %}

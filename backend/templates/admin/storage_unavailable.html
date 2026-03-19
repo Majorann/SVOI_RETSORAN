@@ -1,0 +1,9 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-state admin-state--warning">
+  <span class="admin-state__mark"></span>
+  <h2>Админка доступна только при работе через Postgres</h2>
+  <p>Источник прав доступа и аудит-лога хранится в <code>admin_users</code> и <code>admin_actions</code> на Neon/Postgres.</p>
+  <a class="admin-button" href="{{ url_for('index') }}">Вернуться на сайт</a>
+</section>
+{% endblock %}

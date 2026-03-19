@@ -1,0 +1,45 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-card admin-toolbar">
+  <form class="admin-filters" method="get">
+    <select class="admin-select" name="admin_user_id">
+      <option value="">Все админы</option>
+      {% for admin in options.admins %}
+        <option value="{{ admin.id }}" {% if filters.admin_user_id == admin.id|string %}selected{% endif %}>{{ admin.name or ("#" ~ admin.id) }}</option>
+      {% endfor %}
+    </select>
+    <select class="admin-select" name="action_type">
+      <option value="">Все действия</option>
+      {% for action in options.actions %}
+        <option value="{{ action.action_type }}" {% if filters.action_type == action.action_type %}selected{% endif %}>{{ action.action_type }}</option>
+      {% endfor %}
+    </select>
+    <select class="admin-select" name="entity_type">
+      <option value="">Все сущности</option>
+      {% for entity in options.entities %}
+        <option value="{{ entity.entity_type }}" {% if filters.entity_type == entity.entity_type %}selected{% endif %}>{{ entity.entity_type }}</option>
+      {% endfor %}
+    </select>
+    <input class="admin-input" type="date" name="date_from" value="{{ filters.date_from }}" />
+    <input class="admin-input" type="date" name="date_to" value="{{ filters.date_to }}" />
+    <button class="admin-button" type="submit">Фильтр</button>
+  </form>
+  <div class="admin-note">Журнал хранит только последние 30 дней: более старые записи удаляются DB trigger.</div>
+</section>
+
+<section class="admin-card">
+  {% if actions %}
+    <div class="admin-list">
+      {% for action in actions %}
+        <details class="admin-log-item">
+          <summary>{{ action.created_at|ru_datetime }} · {{ action.admin_name or "Админ" }} · {{ action.action_type }} · {{ action.entity_type }} #{{ action.entity_id }}</summary>
+          <p><strong>Причина:</strong> {{ action.reason or "—" }}</p>
+          <pre>{{ action.payload | tojson(indent=2) }}</pre>
+        </details>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="admin-empty">Записей журнала не найдено.</div>
+  {% endif %}
+</section>
+{% endblock %}

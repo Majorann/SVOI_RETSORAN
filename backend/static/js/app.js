@@ -146,6 +146,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   const sortMenu = document.getElementById("sortMenu");
   const sortOptions = Array.from(document.querySelectorAll(".sort-option"));
   const sortValue = document.getElementById("sortValue");
+  const menuSearchInput = document.getElementById("menuSearchInput");
+  const menuEmptyState = document.getElementById("menuEmptyState");
   const cartDrawer = document.getElementById("cartDrawer");
   const cartOverlay = document.getElementById("cartOverlay");
   const cartOverlayHint = document.getElementById("cartOverlayHint");
@@ -215,6 +217,8 @@ window.addEventListener("DOMContentLoaded", async () => {
       sortMenu,
       sortOptions,
       sortValue,
+      searchInput: menuSearchInput,
+      emptyState: menuEmptyState,
     });
   }
 

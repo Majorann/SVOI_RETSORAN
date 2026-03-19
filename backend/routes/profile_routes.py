@@ -53,7 +53,7 @@ def normalize_and_validate_expiry(value: str):
     return f"{month:02d}/{year:02d}", None
 
 
-def profile_route(load_users, load_bookings, booking_duration_minutes):
+def profile_route(load_users, load_bookings, booking_duration_minutes, is_admin_user_fn=None):
     user_id = session.get("user_id")
     if not user_id:
         return redirect(url_for("login", error="Войдите в аккаунт, чтобы открыть профиль."))
@@ -88,6 +88,12 @@ def profile_route(load_users, load_bookings, booking_duration_minutes):
         "balance": (user_record or {}).get("balance", 0),
         "cards": (user_record or {}).get("cards", []),
     }
+    is_admin = False
+    if callable(is_admin_user_fn):
+        try:
+            is_admin = bool(is_admin_user_fn(user_id))
+        except Exception:
+            is_admin = False
     bookings = load_bookings()
     bookings = [b for b in bookings if b.get("user_id") == user_id]
     return render_template(
@@ -96,6 +102,7 @@ def profile_route(load_users, load_bookings, booking_duration_minutes):
         cards=user["cards"],
         bookings=bookings,
         is_authenticated=bool(user_id),
+        is_admin=is_admin,
         payment_error=error,
         payment_success="Карта успешно добавлена" if card_added else "",
         booking_duration_minutes=booking_duration_minutes,

@@ -11,6 +11,8 @@ const setupMenuCatalog = ({
   sortMenu,
   sortOptions,
   sortValue,
+  searchInput,
+  emptyState,
 }) => {
   if (!menuList || !Array.isArray(menuCards) || !menuCards.length) {
     return;
@@ -23,6 +25,7 @@ const setupMenuCatalog = ({
   };
   let activeCategory = "all";
   let activeSort = "popular";
+  let searchQuery = "";
   let isMenuTransitionRunning = false;
   let pendingCategory = null;
   const normalizeType = (value) =>
@@ -86,8 +89,16 @@ const setupMenuCatalog = ({
     const selectedType = normalizeType(category);
     return menuCards
       .filter((card) => {
-        if (selectedType === "all") return true;
-        return normalizeType(card.dataset.type) === selectedType;
+        const cardType = normalizeType(card.dataset.type);
+        const cardName = String(card.dataset.name || card.querySelector("h3")?.textContent || "").toLowerCase();
+        const cardLore = String(card.querySelector(".menu-card__lore")?.textContent || "").toLowerCase();
+        const matchesCategory = selectedType === "all" ? true : cardType === selectedType;
+        const matchesSearch =
+          !searchQuery ||
+          cardName.includes(searchQuery) ||
+          cardLore.includes(searchQuery) ||
+          cardType.includes(searchQuery);
+        return matchesCategory && matchesSearch;
       })
       .sort(compareCards);
   };
@@ -127,6 +138,9 @@ const setupMenuCatalog = ({
         card.classList.add("menu-card--reveal");
       }
     });
+    if (emptyState) {
+      emptyState.hidden = cards.length > 0;
+    }
   };
 
   const finishMenuTransition = (outgoingLayer) => {
@@ -245,6 +259,11 @@ const setupMenuCatalog = ({
       closeSortMenu();
       applyMenuControls(true);
     });
+  });
+
+  searchInput?.addEventListener("input", () => {
+    searchQuery = String(searchInput.value || "").trim().toLowerCase();
+    applyMenuControls(false);
   });
 
   document.addEventListener("click", (event) => {

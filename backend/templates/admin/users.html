@@ -1,0 +1,35 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-card admin-toolbar">
+  <form class="admin-filters" method="get">
+    <input class="admin-input" type="search" name="search" value="{{ search }}" placeholder="Имя или телефон" />
+    <button class="admin-button" type="submit">Искать</button>
+  </form>
+</section>
+
+<section class="admin-card">
+  {% if users %}
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead><tr><th>ID</th><th>Имя</th><th>Телефон</th><th>Баланс</th><th>Заказы</th><th>Брони</th><th>Регистрация</th><th></th></tr></thead>
+        <tbody>
+          {% for user in users %}
+            <tr>
+              <td><a href="{{ url_for('admin.user_detail', user_id=user.id) }}">#{{ user.id }}</a></td>
+              <td>{{ user.name }} {% if user.is_admin %}<span class="admin-badge admin-badge--accent">admin</span>{% endif %}</td>
+              <td>{{ user.phone }}</td>
+              <td>{{ user.balance }}</td>
+              <td>{{ user.orders_count }}</td>
+              <td>{{ user.bookings_count }}</td>
+              <td>{{ user.created_at|ru_datetime }}</td>
+              <td><a class="admin-table-link" href="{{ url_for('admin.user_detail', user_id=user.id) }}">Открыть</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="admin-empty">Пользователи не найдены.</div>
+  {% endif %}
+</section>
+{% endblock %}

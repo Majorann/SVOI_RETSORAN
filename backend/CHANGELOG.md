@@ -1,34 +1,5 @@
 # История изменений
 
-
-## 19.03.2026
-
-### Рефакторинг backend-структуры
-
-- `backend/app.py` раздроблен на более узкие сервисные модули без изменения пользовательского поведения.
-- Из `backend/app.py` вынесены:
-  - `backend/services/auth_session.py` - signed cookie, восстановление session, CSRF и request-scoped auth helpers;
-  - `backend/services/menu_content.py` - загрузка меню и promo, чтение `item.txt`, Redis-кэш меню;
-  - `backend/services/storage_facade.py` - фасад JSON/Postgres storage, prune заказов и file-locking;
-  - `backend/services/passwords.py` - password hashing, проверка и мягкий апгрейд legacy hash.
-- `backend/app.py` сокращён до роли точки сборки Flask-приложения, конфигурации и регистрации маршрутов.
-
-### Совместимость и проверка
-
-- Сохранены совместимые экспортируемые helper-функции из `app.py`, на которые опираются тесты и внутренние сценарии:
-  - `hash_password`
-  - `verify_password`
-  - `verify_and_upgrade_password`
-  - `issue_auth_session_cookie`
-  - `verify_auth_session_cookie`
-  - `issue_checkout_preview_token`
-  - `verify_checkout_preview_token`
-- После рефакторинга выполнена перепроверка:
-  - импорт приложения;
-  - smoke-check через Flask `test_client`;
-  - `pytest` - результат `6 passed`.
-
-
 ## 11.02.2026
 
 ### Редизайн UI (тёплая тёмная тема)
@@ -1121,3 +1092,172 @@
 - Локально прогнаны проверки:
   - `python -m compileall backend`
   - `backend\\.venv\\Scripts\\python.exe -m pytest backend\\tests`
+
+
+## 19.03.2026(2)
+
+### Рефакторинг backend-структуры
+
+- `backend/app.py` раздроблен на более узкие сервисные модули без изменения пользовательского поведения.
+- Из `backend/app.py` вынесены:
+  - `backend/services/auth_session.py` - signed cookie, восстановление session, CSRF и request-scoped auth helpers;
+  - `backend/services/menu_content.py` - загрузка меню и promo, чтение `item.txt`, Redis-кэш меню;
+  - `backend/services/storage_facade.py` - фасад JSON/Postgres storage, prune заказов и file-locking;
+  - `backend/services/passwords.py` - password hashing, проверка и мягкий апгрейд legacy hash.
+- `backend/app.py` сокращён до роли точки сборки Flask-приложения, конфигурации и регистрации маршрутов.
+
+### Совместимость и проверка
+
+- Сохранены совместимые экспортируемые helper-функции из `app.py`, на которые опираются тесты и внутренние сценарии:
+  - `hash_password`
+  - `verify_password`
+  - `verify_and_upgrade_password`
+  - `issue_auth_session_cookie`
+  - `verify_auth_session_cookie`
+  - `issue_checkout_preview_token`
+  - `verify_checkout_preview_token`
+- После рефакторинга выполнена перепроверка:
+  - импорт приложения;
+  - smoke-check через Flask `test_client`;
+  - `pytest` - результат `6 passed`.
+
+## 20.03.2026
+
+### Desktop-first admin panel
+
+- Добавлена отдельная admin-зона под `/admin` без ломки клиентского интерфейса:
+  - `backend/routes/admin_routes.py`
+  - `backend/services/admin_service.py`
+  - `backend/templates/admin/*`
+  - `backend/static/css/admin.css`
+  - `backend/static/js/admin.js`
+- Реализованы разделы:
+  - dashboard;
+  - заказы;
+  - брони;
+  - доставка;
+  - меню;
+  - акции и реклама;
+  - аналитика;
+  - пользователи;
+  - контент;
+  - журнал действий.
+- Admin UI собран как desktop-first зона:
+  - отдельный layout;
+  - sidebar;
+  - sticky top bar;
+  - mobile lock screen вместо кривой мобильной адаптации.
+
+### Admin access и audit log
+
+- Проверка доступа в админку переведена на существующую Postgres-схему:
+  - `admin_users` - источник прав;
+  - `admin_actions` - журнал действий.
+- В `backend/storage/pg_store.py` добавлен bootstrap для `admin_users` и `admin_actions` без редизайна storage layer.
+- Для опасных действий добавлено логирование в `admin_actions`:
+  - отмена и смена статуса заказов;
+  - отмена броней;
+  - статусы и отмена доставки;
+  - правки бонусов пользователя;
+  - изменения menu/promo.
+- `backend/app.py` получил безопасный fallback:
+  - если admin-модуль недоступен при старте, публичное приложение всё равно поднимается.
+
+### Orders, bookings и delivery
+
+- В админке реализованы списки и карточки заказов, броней и доставки поверх текущих таблиц:
+  - `users`
+  - `bookings`
+  - `orders`
+  - `order_items`
+  - `user_cards`
+- Все даты и время в admin UI переведены в российский формат `ДД.ММ.ГГГГ` / `ДД.ММ.ГГГГ ЧЧ:ММ`.
+- Доработаны desktop-компоновки фильтров:
+  - раздельные поля в заказах;
+  - компактная строка фильтров в бронях;
+  - отдельные поля имени/телефона/адреса в доставке.
+- В заказах и доставке русифицированы статусы:
+  - `Готовится`
+  - `Готов`
+  - `В пути`
+  - `Выдан`
+  - `Отменён`
+- Для доставки:
+  - получатель и телефон разведены в две строки;
+  - расширен блок действий;
+  - статусы доставки в UI маппятся на существующий `orders.status` без новой persistence-модели.
+
+### Dashboard и analytics
+
+- Реализован admin dashboard с KPI-карточками:
+  - заказы в работе;
+  - активные брони;
+  - delivery в работе;
+  - выручка за сегодня;
+  - отмены за сегодня;
+  - просроченные доставки.
+- Добавлены блоки:
+  - требует внимания;
+  - ближайшие брони;
+  - сегодняшние заказы;
+  - последняя активность.
+- В аналитике:
+  - графики выручки и заказов по дням;
+  - donut `Зал / Доставка`;
+  - топ блюд и отмены;
+  - подписи дат приведены к формату `день.месяц`;
+  - в легенде donut добавлены цветовые маркеры рядом с `Зал` и `Доставка`.
+
+### Admin menu
+
+- Раздел `Меню` переведён из CRUD-списка в form-first сценарий:
+  - убран верхний toolbar со списком/поиском;
+  - форма получила автозаполнение следующего `id`;
+  - поле категории переведено в select по существующим категориям;
+  - `Featured` и `Активно` стилизованы под тот же checkbox-стиль, что и `Использовать баллы` в checkout.
+- Добавлен live-конструктор карточки блюда:
+  - превью обновляется при вводе полей;
+  - фото подтягивается сразу после загрузки файла;
+  - расширен правый preview-panel под desktop.
+- Добавлена отдельная кнопка `Открыть меню`, ведущая в клиентское `/menu`.
+- Поиск по блюдам перенесён в клиентское меню сайта:
+  - `backend/templates/menu.html`
+  - `backend/static/js/modules/menuCatalog.js`
+  - `backend/static/js/app.js`
+  - `backend/static/css/style.css`
+
+### Promo / ads
+
+- Раздел `Акции и реклама` переведён на типозависимую форму:
+  - для `akciya` скрываются рекламные поля и ссылка;
+  - для `reklama` скрываются lore-поля акции.
+- `start_at` и `end_at` русифицированы:
+  - `Начало показа`
+  - `Конец показа`
+- `Активно` переведено на тот же checkbox-стиль, что и в admin menu.
+- Добавлен конструктор promo-карточки с live-preview и фото.
+- Список промо переработан:
+  - увеличен отступ между типом и текстом;
+  - улучшен перенос длинных строк;
+  - расширен правый блок удаления, чтобы `Причина` и `Удалить` не ломались.
+
+### Profile и admin entry
+
+- В профиль добавлена кнопка перехода в `/admin` только для пользователей из `admin_users`.
+- Кнопка стилизована как служебное secondary-действие рядом с `Выйти`.
+
+### Проверка
+
+- После серии изменений локально перепроверялись:
+  - `python -m py_compile ...`
+  - `backend\\.venv\\Scripts\\python -m pytest tests -q`
+- На текущем этапе regression-check даёт `9 passed`.
+
+
+### Что нужно доделать в админке
+"
+-Пересмотреть логику "Требует внимания" в 'Dashboard'
+-Задать состояние для доставки и заказов зала "Выдан"
+-Раздел "пользователи" доделать обозначние админиистрации
+-ВОЗМОЖНО дописать "контент"
+-доделать "всплывающую выборку"

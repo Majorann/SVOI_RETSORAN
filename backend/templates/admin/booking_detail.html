@@ -1,0 +1,62 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-grid admin-grid--detail">
+  <article class="admin-card">
+    <div class="admin-section-head">
+      <div>
+        <p class="admin-topbar__eyebrow">Booking</p>
+        <h2>Бронь #{{ booking.id }}</h2>
+      </div>
+      <span class="admin-badge">{{ booking.state_label }}</span>
+    </div>
+    <div class="admin-detail-grid">
+      <div><span>Клиент</span><strong>{{ booking.user_name or booking.name }}</strong></div>
+      <div><span>Телефон</span><strong>{{ booking.user_phone or "—" }}</strong></div>
+      <div><span>Стол</span><strong>{{ booking.table_id }}</strong></div>
+      <div><span>Дата и время</span><strong>{{ booking.booking_date|ru_date }} {{ booking.booking_time|ru_time }}</strong></div>
+      <div><span>Создано</span><strong>{{ booking.created_at|ru_datetime }}</strong></div>
+      <div><span>User ID</span><strong><a href="{{ url_for('admin.user_detail', user_id=booking.user_id) }}">{{ booking.user_id }}</a></strong></div>
+    </div>
+    <div class="admin-inline-form">
+      <button class="admin-button admin-button--danger" type="button" data-admin-api="{{ url_for('admin.api_booking_cancel', booking_id=booking.id) }}" data-admin-title="Отменить бронь" data-admin-message="Бронь будет удалена из bookings. Причина обязательна.">Отменить бронь</button>
+    </div>
+  </article>
+
+  <article class="admin-card">
+    <div class="admin-section-head"><h2>Связанные заказы</h2></div>
+    {% if booking.related_orders %}
+      <div class="admin-list">
+        {% for order in booking.related_orders %}
+          <a class="admin-list__item" href="{{ url_for('admin.order_detail', order_id=order.id) }}">
+            <strong>Заказ #{{ order.id }}</strong>
+            <span>{{ order.order_type }} · {{ order.created_at|ru_datetime }} · {{ order.payable_total }} ₽</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="admin-empty">Связанные заказы не найдены.</div>
+    {% endif %}
+  </article>
+</section>
+
+<section class="admin-card">
+  <div class="admin-section-head"><h2>Загруженность столов на дату {{ booking.booking_date|ru_date }}</h2></div>
+  <div class="admin-occupancy-grid">
+    {% for table in range(1, 14) %}
+      <article class="admin-occupancy-card">
+        <strong>Стол {{ table }}</strong>
+        {% set entries = booking.occupancy.get(table, []) %}
+        {% if entries %}
+          <ul>
+            {% for entry in entries %}
+              <li>{{ entry.booking_time|ru_time }} · {{ entry.name }}</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p>Свободно</p>
+        {% endif %}
+      </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

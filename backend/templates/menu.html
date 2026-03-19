@@ -42,6 +42,9 @@
       <button class="menu-chip" type="button" data-type="Алкоголь">Алкоголь</button>
     </div>
     <div class="menu-tools">
+      <label class="menu-search" aria-label="Поиск по меню">
+        <input class="menu-search__input" id="menuSearchInput" type="search" placeholder="Поиск по меню" autocomplete="off" />
+      </label>
       <div class="sort-control sort-control--filter">
         <button class="sort-toggle" id="typeToggle" type="button" aria-haspopup="listbox" aria-expanded="false">
           Тип
@@ -137,6 +140,7 @@
     {% endfor %}
   </div>
   </div>
+  <div class="menu-empty" id="menuEmptyState" hidden>По вашему запросу блюда не найдены.</div>
 </section>
 </div>
 

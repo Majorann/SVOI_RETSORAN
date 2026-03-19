@@ -1,0 +1,109 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-card admin-toolbar">
+  <form class="admin-filters admin-filters--stacked admin-filters--tight" method="get">
+    <div class="admin-filters__grid admin-filters__grid--orders-matrix">
+      <label class="admin-field admin-field--compact">
+        <span>ID</span>
+        <input class="admin-input" type="search" name="order_id" value="{{ filters.order_id }}" placeholder="#25" />
+      </label>
+      <label class="admin-field admin-field--compact">
+        <span>Имя</span>
+        <input class="admin-input" type="search" name="name" value="{{ filters.name }}" placeholder="Клиент" />
+      </label>
+      <label class="admin-field admin-field--compact">
+        <span>Телефон</span>
+        <input class="admin-input" type="search" name="phone" value="{{ filters.phone }}" placeholder="+7..." />
+      </label>
+      <div class="admin-field-stack admin-field-stack--status-type">
+        <label class="admin-field admin-field--compact">
+          <span>Статус</span>
+          <select class="admin-select" name="status">
+            <option value="">Все статусы</option>
+            {% for status in statuses %}
+              <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="admin-field admin-field--compact">
+          <span>Тип</span>
+          <select class="admin-select" name="order_type">
+            <option value="">Все типы</option>
+            <option value="dine_in" {% if filters.order_type == 'dine_in' %}selected{% endif %}>Зал</option>
+            <option value="delivery" {% if filters.order_type == 'delivery' %}selected{% endif %}>Доставка</option>
+          </select>
+        </label>
+      </div>
+      <label class="admin-field admin-field--compact">
+        <span>Стол</span>
+        <input class="admin-input" type="search" name="table_id" value="{{ filters.table_id }}" placeholder="Номер стола" />
+      </label>
+      <label class="admin-field admin-field--compact">
+        <span>Время</span>
+        <input class="admin-input" type="search" name="created_at" value="{{ filters.created_at }}" placeholder="20.03 18:30 или 2026-03-20" />
+      </label>
+    </div>
+    <div class="admin-toolbar__actions admin-toolbar__actions--filters">
+      <button class="admin-button admin-button--apply admin-button--compact" type="submit">Применить</button>
+      <div class="admin-chip-row">
+        <a class="admin-chip {% if filters.preset == 'today' %}is-active{% endif %}" href="{{ url_for('admin.orders', preset='today') }}">Сегодня</a>
+        <a class="admin-chip {% if filters.preset == 'last_hour' %}is-active{% endif %}" href="{{ url_for('admin.orders', preset='last_hour') }}">Последний час</a>
+        <a class="admin-chip {% if filters.preset == 'active' %}is-active{% endif %}" href="{{ url_for('admin.orders', preset='active') }}">Активные</a>
+        <a class="admin-chip {% if filters.preset == 'cancelled' %}is-active{% endif %}" href="{{ url_for('admin.orders', preset='cancelled') }}">Отменённые</a>
+      </div>
+    </div>
+  </form>
+</section>
+
+<section class="admin-card">
+  {% if orders %}
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Создан</th>
+            <th>Клиент</th>
+            <th>Тип</th>
+            <th>Статус</th>
+            <th>Стол / адрес</th>
+            <th>Сумма</th>
+            <th>Баллы</th>
+            <th>Действия</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in orders %}
+            <tr>
+              <td><a href="{{ url_for('admin.order_detail', order_id=order.id) }}">#{{ order.id }}</a></td>
+              <td>{{ order.created_at|ru_datetime }}</td>
+              <td>
+                <strong>{{ order.user_name or order.delivery_name or "—" }}</strong>
+                <small>{{ order.user_phone or order.delivery_phone or "—" }}</small>
+              </td>
+              <td>{{ "Доставка" if order.is_delivery else "Зал" }}</td>
+              <td><span class="admin-badge {% if order.status == 'cancelled' %}admin-badge--danger{% elif order.delivery_overdue %}admin-badge--warning{% endif %}">{{ order.status_label }}</span></td>
+              <td>{{ order.delivery_address or order.table_label }}</td>
+              <td>{{ order.totals.payable_total }} ₽</td>
+              <td>{{ order.points_applied }} / {{ order.bonus_earned }}</td>
+              <td>
+                <div class="admin-actions">
+                  <a class="admin-table-link" href="{{ url_for('admin.order_detail', order_id=order.id) }}">Открыть</a>
+                  <button
+                    class="admin-table-link"
+                    type="button"
+                    data-drawer-title="Заказ #{{ order.id }}"
+                    data-drawer-body="Клиент: {{ order.user_name or order.delivery_name or '—' }}&#10;Телефон: {{ order.user_phone or order.delivery_phone or '—' }}&#10;Тип: {{ order.order_type }}&#10;Статус: {{ order.status_label }}&#10;Сумма: {{ order.totals.payable_total }} ₽&#10;Комментарий: {{ order.comment or '—' }}"
+                  >Quick view</button>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="admin-empty">По текущим фильтрам заказы не найдены.</div>
+  {% endif %}
+</section>
+{% endblock %}

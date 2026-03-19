@@ -1,0 +1,126 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-grid admin-grid--kpi">
+  <article class="admin-card admin-kpi">
+    <span class="admin-kpi__label">Заказы в работе</span>
+    <strong>{{ dashboard.kpis.active_orders }}</strong>
+  </article>
+  <article class="admin-card admin-kpi">
+    <span class="admin-kpi__label">Активные брони</span>
+    <strong>{{ dashboard.kpis.active_bookings }}</strong>
+  </article>
+  <article class="admin-card admin-kpi">
+    <span class="admin-kpi__label">Delivery в работе</span>
+    <strong>{{ dashboard.kpis.delivery_in_work }}</strong>
+  </article>
+  <article class="admin-card admin-kpi">
+    <span class="admin-kpi__label">Выручка за сегодня</span>
+    <strong>{{ "{:,}".format(dashboard.kpis.today_revenue).replace(",", " ") }} ₽</strong>
+  </article>
+  <article class="admin-card admin-kpi">
+    <span class="admin-kpi__label">Отмены за сегодня</span>
+    <strong>{{ dashboard.kpis.today_cancellations }}</strong>
+  </article>
+  <article class="admin-card admin-kpi">
+    <span class="admin-kpi__label">Просроченные доставки</span>
+    <strong>{{ dashboard.kpis.overdue_deliveries }}</strong>
+  </article>
+</section>
+
+<section class="admin-grid admin-grid--two">
+  <article class="admin-card">
+    <div class="admin-section-head">
+      <div>
+        <p class="admin-topbar__eyebrow">Attention</p>
+        <h2>Требует внимания</h2>
+      </div>
+    </div>
+    {% if dashboard.attention %}
+      <div class="admin-list">
+        {% for item in dashboard.attention %}
+          <a class="admin-list__item" href="{{ item.href }}">{{ item.title }}</a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="admin-empty">Критических элементов сейчас нет.</div>
+    {% endif %}
+  </article>
+
+  <article class="admin-card">
+    <div class="admin-section-head">
+      <div>
+        <p class="admin-topbar__eyebrow">Soon</p>
+        <h2>Ближайшие брони</h2>
+      </div>
+      <a class="admin-link" href="{{ url_for('admin.bookings') }}">Все брони</a>
+    </div>
+    {% if dashboard.nearest_bookings %}
+      <div class="admin-list">
+        {% for booking in dashboard.nearest_bookings %}
+          <a class="admin-list__item" href="{{ url_for('admin.booking_detail', booking_id=booking.id) }}">
+            <strong>Стол №{{ booking.table_id }}</strong>
+            <span>{{ booking.name }} · {{ booking.booking_date|ru_date }} {{ booking.booking_time|ru_time }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="admin-empty">На ближайшие 2 часа броней нет.</div>
+    {% endif %}
+  </article>
+</section>
+
+<section class="admin-grid admin-grid--two">
+  <article class="admin-card">
+    <div class="admin-section-head">
+      <div>
+        <p class="admin-topbar__eyebrow">Today</p>
+        <h2>Сегодняшние заказы</h2>
+      </div>
+      <a class="admin-link" href="{{ url_for('admin.orders', preset='today') }}">Открыть список</a>
+    </div>
+    {% if dashboard.today_orders %}
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr><th>ID</th><th>Тип</th><th>Статус</th><th>Время</th></tr>
+          </thead>
+          <tbody>
+            {% for order in dashboard.today_orders %}
+              <tr>
+                <td><a href="{{ url_for('admin.order_detail', order_id=order.id) }}">#{{ order.id }}</a></td>
+                <td>{{ order.order_type }}</td>
+                <td><span class="admin-badge">{{ order.status_label }}</span></td>
+                <td>{{ order.created_at|ru_datetime }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="admin-empty">Сегодня заказов пока нет.</div>
+    {% endif %}
+  </article>
+
+  <article class="admin-card">
+    <div class="admin-section-head">
+      <div>
+        <p class="admin-topbar__eyebrow">Audit</p>
+        <h2>Последняя активность</h2>
+      </div>
+      <a class="admin-link" href="{{ url_for('admin.audit_log') }}">Журнал</a>
+    </div>
+    {% if dashboard.latest_actions %}
+      <div class="admin-list">
+        {% for action in dashboard.latest_actions %}
+          <div class="admin-list__item">
+            <strong>{{ action.action_type }}</strong>
+            <span>{{ action.admin_name or "Админ" }} · {{ action.entity_type }} #{{ action.entity_id }} · {{ action.created_at|ru_datetime }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="admin-empty">Журнал действий пока пуст.</div>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

@@ -106,6 +106,15 @@ from config import (
     WALLS,
 )
 
+try:
+    from routes.admin_routes import create_admin_blueprint
+    from services.admin_service import AdminService
+    _ADMIN_IMPORT_ERROR = None
+except Exception as exc:
+    create_admin_blueprint = None
+    AdminService = None
+    _ADMIN_IMPORT_ERROR = exc
+
 
 def _env_int_early(name: str, default: int) -> int:
     value = (os.getenv(name) or "").strip()
@@ -237,6 +246,48 @@ app.config["SESSION_COOKIE_PARTITIONED"] = env_bool("SESSION_COOKIE_PARTITIONED"
 app.config["PREFERRED_URL_SCHEME"] = "https" if app.config["SESSION_COOKIE_SECURE"] else "http"
 if env_bool("TRUST_PROXY_HEADERS", True):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+
+def _ru_date(value):
+    if not value:
+        return "—"
+    text = str(value).strip()
+    if "T" in text:
+        text = text.split("T", 1)[0]
+    try:
+        parsed = datetime.fromisoformat(text)
+        return parsed.strftime("%d.%m.%Y")
+    except ValueError:
+        parts = text.split("-")
+        if len(parts) == 3:
+            return f"{parts[2].zfill(2)}.{parts[1].zfill(2)}.{parts[0]}"
+    return text
+
+
+def _ru_time(value):
+    if not value:
+        return "—"
+    text = str(value).strip()
+    if "T" in text:
+        text = text.split("T", 1)[1]
+    if len(text) >= 5 and text[2] == ":":
+        return text[:5]
+    return text
+
+
+def _ru_datetime(value):
+    if not value:
+        return "—"
+    text = str(value).strip()
+    if "T" in text:
+        date_part, time_part = text.split("T", 1)
+        return f"{_ru_date(date_part)} {_ru_time(time_part)}"
+    return f"{_ru_date(text)} {_ru_time(text)}".strip()
+
+
+app.add_template_filter(_ru_date, "ru_date")
+app.add_template_filter(_ru_time, "ru_time")
+app.add_template_filter(_ru_datetime, "ru_datetime")
 AUTH_SESSION_COOKIE_NAME = env_str("AUTH_SESSION_COOKIE_NAME", "auth_session")
 AUTH_SESSION_COOKIE_MAX_AGE_SECONDS = max(
     300,
@@ -320,6 +371,15 @@ menu_content = MenuContentService(
     redis_module=_redis_module,
     redis_url=_REDIS_URL,
 )
+admin_service = None
+if AdminService is not None and create_admin_blueprint is not None:
+    admin_service = AdminService(
+        active_storage=ACTIVE_STORAGE,
+        menu_content=menu_content,
+    )
+    app.register_blueprint(create_admin_blueprint(admin_service))
+elif _ADMIN_IMPORT_ERROR is not None:
+    print(f"[admin] admin panel disabled during startup ({_ADMIN_IMPORT_ERROR})")
 
 load_bookings = storage.load_bookings
 load_bookings_raw = storage.load_bookings_raw
@@ -511,7 +571,12 @@ def points():
 
 @app.route("/profile")
 def profile():
-    return profile_route(load_users, load_bookings, BOOKING_DURATION_MINUTES)
+    return profile_route(
+        load_users,
+        load_bookings,
+        BOOKING_DURATION_MINUTES,
+        is_admin_user_fn=(admin_service.is_admin_user if admin_service is not None else None),
+    )
 
 
 @app.route("/delivery")

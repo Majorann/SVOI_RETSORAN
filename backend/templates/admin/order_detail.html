@@ -1,0 +1,113 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-grid admin-grid--detail">
+  <article class="admin-card">
+    <div class="admin-section-head">
+      <div>
+        <p class="admin-topbar__eyebrow">Summary</p>
+        <h2>Заказ #{{ order.id }}</h2>
+      </div>
+      <div class="admin-chip-row">
+        <span class="admin-badge">{{ order.status_label }}</span>
+        <span class="admin-badge">{{ order.order_type }}</span>
+      </div>
+    </div>
+    <div class="admin-detail-grid">
+      <div><span>ID</span><strong>{{ order.id }}</strong></div>
+      <div><span>Создан</span><strong>{{ order.created_at|ru_datetime }}</strong></div>
+      <div><span>Клиент</span><strong>{{ order.user_name or order.delivery_name or "—" }}</strong></div>
+      <div><span>Телефон</span><strong>{{ order.user_phone or order.delivery_phone or "—" }}</strong></div>
+      <div><span>Сумма</span><strong>{{ order.totals.payable_total }} ₽</strong></div>
+      <div><span>Баллы</span><strong>{{ order.points_applied }} / {{ order.bonus_earned }}</strong></div>
+      <div><span>Подача</span><strong>{{ order.serving_label or order.serving_mode or "—" }}</strong></div>
+      <div><span>Serving time</span><strong>{{ order.serving_time or "—" }}</strong></div>
+      <div><span>Комментарий</span><strong>{{ order.comment or "—" }}</strong></div>
+      <div><span>Карта</span><strong>{{ order.payment_card_brand or "Карта" }} •••• {{ order.payment_card_last4 or "0000" }}</strong></div>
+      {% if order.related_booking %}
+        <div><span>Связанная бронь</span><strong><a href="{{ url_for('admin.booking_detail', booking_id=order.related_booking.id) }}">#{{ order.related_booking.id }}</a></strong></div>
+      {% endif %}
+      {% if order.order_type == 'delivery' %}
+        <div><span>Адрес</span><strong>{{ order.delivery_address or "—" }}</strong></div>
+        <div><span>ETA</span><strong>{{ order.delivery_eta_minutes or 20 }} мин</strong></div>
+      {% else %}
+        <div><span>Стол</span><strong>{{ order.booking_table_id or "—" }}</strong></div>
+        <div><span>Слот брони</span><strong>{{ order.booking_date|ru_date if order.booking_date else "—" }} {% if order.booking_time %}{{ order.booking_time|ru_time }}{% endif %}</strong></div>
+      {% endif %}
+      {% if order.cancelled_at %}
+        <div><span>Отменён</span><strong>{{ order.cancelled_at|ru_datetime }}</strong></div>
+      {% endif %}
+    </div>
+  </article>
+
+  <article class="admin-card">
+    <div class="admin-section-head">
+      <div>
+        <p class="admin-topbar__eyebrow">Actions</p>
+        <h2>Опасные действия</h2>
+      </div>
+    </div>
+    <div class="admin-actions-panel">
+      <div class="admin-inline-form admin-inline-form--status">
+        <label class="admin-field admin-field--status">
+          <span>Изменить статус</span>
+          <select class="admin-select" id="orderStatusSelect">
+            {% for status in statuses %}
+              <option value="{{ status }}" {% if order.status == status %}selected{% endif %}>{{ status }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button class="admin-button" type="button" data-admin-api="{{ url_for('admin.api_order_status', order_id=order.id) }}" data-admin-payload-source="orderStatusSelect" data-admin-payload-key="status" data-admin-title="Сменить статус заказа" data-admin-message="Статус заказа будет обновлён и записан в admin_actions.">Обновить статус</button>
+      </div>
+      <div class="admin-inline-form admin-inline-form--actions">
+        <a class="admin-button admin-button--ghost" href="{{ url_for('admin.user_detail', user_id=order.user_id) }}">Открыть пользователя</a>
+      {% if order.related_booking %}
+        <a class="admin-button admin-button--ghost" href="{{ url_for('admin.booking_detail', booking_id=order.related_booking.id) }}">Открыть бронь</a>
+      {% endif %}
+        <button class="admin-button admin-button--danger" type="button" data-admin-api="{{ url_for('admin.api_order_cancel', order_id=order.id) }}" data-admin-title="Отменить заказ" data-admin-message="Заказ будет переведён в cancelled. Причина обязательна.">Отменить заказ</button>
+      </div>
+    </div>
+  </article>
+</section>
+
+<section class="admin-grid admin-grid--two">
+  <article class="admin-card">
+    <div class="admin-section-head"><h2>Состав заказа</h2></div>
+    {% if order["items"] %}
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead><tr><th>Позиция</th><th>Цена</th><th>Кол-во</th><th>Итого</th></tr></thead>
+          <tbody>
+            {% for item in order["items"] %}
+              <tr>
+                <td>{{ item.name }}</td>
+                <td>{{ item.price }} ₽</td>
+                <td>{{ item.qty }}</td>
+                <td>{{ item.price * item.qty }} ₽</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="admin-empty">У заказа нет позиций.</div>
+    {% endif %}
+  </article>
+
+  <article class="admin-card">
+    <div class="admin-section-head"><h2>Audit trail</h2></div>
+    {% if order.audit_actions %}
+      <div class="admin-list">
+        {% for action in order.audit_actions %}
+          <details class="admin-log-item">
+            <summary>{{ action.action_type }} · {{ action.created_at|ru_datetime }}</summary>
+            <p>{{ action.reason or "Без причины" }}</p>
+            <pre>{{ action.payload | tojson(indent=2) }}</pre>
+          </details>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="admin-empty">По заказу ещё нет админских действий.</div>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

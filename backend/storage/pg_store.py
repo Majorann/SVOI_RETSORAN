@@ -154,6 +154,30 @@ def _execute_schema(cur):
         );
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_users (
+            user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL DEFAULT '',
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            note TEXT NOT NULL DEFAULT ''
+        );
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_actions (
+            id BIGSERIAL PRIMARY KEY,
+            admin_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            action_type TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            payload_json TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """
+    )
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS serving_mode TEXT NOT NULL DEFAULT ''")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS serving_label TEXT NOT NULL DEFAULT ''")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS serving_time TEXT NOT NULL DEFAULT ''")
@@ -175,6 +199,41 @@ def _execute_schema(cur):
     )
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_admin_users_created_by ON admin_users(created_by);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_admin_actions_admin_user_id ON admin_actions(admin_user_id);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_admin_actions_created_at ON admin_actions(created_at);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_admin_actions_entity ON admin_actions(entity_type, entity_id);"
+    )
+    cur.execute(
+        """
+        CREATE OR REPLACE FUNCTION prune_admin_actions_30d()
+        RETURNS TRIGGER
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            DELETE FROM admin_actions
+            WHERE created_at < NOW() - INTERVAL '30 days';
+            RETURN NEW;
+        END;
+        $$;
+        """
+    )
+    cur.execute("DROP TRIGGER IF EXISTS trg_prune_admin_actions_30d ON admin_actions;")
+    cur.execute(
+        """
+        CREATE TRIGGER trg_prune_admin_actions_30d
+        AFTER INSERT ON admin_actions
+        FOR EACH STATEMENT
+        EXECUTE FUNCTION prune_admin_actions_30d();
+        """
     )
 
 

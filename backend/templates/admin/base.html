@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block body_class %}page-admin {% if admin_section %}page-admin--{{ admin_section }}{% endif %}{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}" />
+{% endblock %}
+{% block content %}
+<div
+  class="admin-app"
+  data-toast="{{ request.args.get('toast', '') }}"
+>
+  <aside class="admin-sidebar">
+    <a class="admin-brand" href="{{ url_for('admin.dashboard') }}">
+      <span class="admin-brand__mark"></span>
+      <span class="admin-brand__text">
+        <strong>Свои Admin</strong>
+        <small>Restaurant control room</small>
+      </span>
+    </a>
+    <nav class="admin-nav">
+      <a class="admin-nav__link {% if admin_section == 'dashboard' %}is-active{% endif %}" href="{{ url_for('admin.dashboard') }}">Dashboard</a>
+      <a class="admin-nav__link {% if admin_section == 'orders' %}is-active{% endif %}" href="{{ url_for('admin.orders') }}">Заказы</a>
+      <a class="admin-nav__link {% if admin_section == 'bookings' %}is-active{% endif %}" href="{{ url_for('admin.bookings') }}">Брони</a>
+      <a class="admin-nav__link {% if admin_section == 'delivery' %}is-active{% endif %}" href="{{ url_for('admin.delivery') }}">Доставка</a>
+      <a class="admin-nav__link {% if admin_section == 'menu' %}is-active{% endif %}" href="{{ url_for('admin.menu') }}">Меню</a>
+      <a class="admin-nav__link {% if admin_section == 'promo' %}is-active{% endif %}" href="{{ url_for('admin.promo') }}">Акции и реклама</a>
+      <a class="admin-nav__link {% if admin_section == 'analytics' %}is-active{% endif %}" href="{{ url_for('admin.analytics') }}">Аналитика</a>
+      <a class="admin-nav__link {% if admin_section == 'users' %}is-active{% endif %}" href="{{ url_for('admin.users') }}">Пользователи</a>
+      <a class="admin-nav__link {% if admin_section == 'content' %}is-active{% endif %}" href="{{ url_for('admin.content') }}">Контент</a>
+      <a class="admin-nav__link {% if admin_section == 'audit-log' %}is-active{% endif %}" href="{{ url_for('admin.audit_log') }}">Журнал действий</a>
+    </nav>
+    <div class="admin-sidebar__footer">
+      <a class="admin-nav__link" href="{{ url_for('index') }}">Вернуться на сайт</a>
+    </div>
+  </aside>
+
+  <main class="admin-main">
+    <header class="admin-topbar">
+      <div>
+        <p class="admin-topbar__eyebrow">Admin zone</p>
+        <h1 class="admin-topbar__title">{{ title }}</h1>
+      </div>
+      <div class="admin-topbar__meta">
+        <span class="admin-badge admin-badge--accent">Postgres</span>
+        <span class="admin-badge">{{ current_user_name or "Администратор" }}</span>
+      </div>
+    </header>
+
+    {% block admin_content %}{% endblock %}
+  </main>
+</div>
+
+<section class="admin-mobile-lock" aria-live="polite">
+  <div class="admin-mobile-lock__card">
+    <span class="admin-brand__mark"></span>
+    <p class="admin-topbar__eyebrow">Admin zone</p>
+    <h1>Админ-панель доступна на большом экране</h1>
+    <p>Откройте её с ПК или устройства с более широкой областью просмотра. Мобильную версию для админки в этой сборке не поддерживаем.</p>
+    <a class="admin-button admin-button--ghost" href="{{ url_for('index') }}">Вернуться на сайт</a>
+  </div>
+</section>
+
+<div class="admin-toast-stack" id="adminToastStack"></div>
+
+<div class="admin-modal" id="adminActionModal" hidden>
+  <div class="admin-modal__backdrop" data-modal-close></div>
+  <div class="admin-modal__dialog">
+    <div class="admin-modal__head">
+      <div>
+        <p class="admin-modal__eyebrow">Подтверждение</p>
+        <h2 id="adminModalTitle">Подтвердите действие</h2>
+      </div>
+      <button class="admin-icon-btn" type="button" data-modal-close>×</button>
+    </div>
+    <p class="admin-modal__text" id="adminModalText">Это действие будет записано в журнал admin_actions.</p>
+    <label class="admin-field">
+      <span>Причина</span>
+      <textarea id="adminModalReason" rows="4" placeholder="Укажите причину действия"></textarea>
+    </label>
+    <div class="admin-modal__actions">
+      <button class="admin-button admin-button--ghost" type="button" data-modal-close>Отмена</button>
+      <button class="admin-button admin-button--danger" type="button" id="adminModalConfirm">Подтвердить</button>
+    </div>
+  </div>
+</div>
+
+<aside class="admin-drawer" id="adminDetailDrawer" hidden>
+  <div class="admin-drawer__backdrop" data-drawer-close></div>
+  <div class="admin-drawer__panel">
+    <div class="admin-drawer__head">
+      <div>
+        <p class="admin-modal__eyebrow">Быстрый просмотр</p>
+        <h2 id="adminDrawerTitle">Карточка</h2>
+      </div>
+      <button class="admin-icon-btn" type="button" data-drawer-close>×</button>
+    </div>
+    <div class="admin-drawer__body" id="adminDrawerBody"></div>
+  </div>
+</aside>
+{% endblock %}
+{% block extra_scripts %}
+<script type="module" src="{{ url_for('static', filename='js/admin.js') }}"></script>
+{% endblock %}

@@ -8,7 +8,12 @@
       <p class="brand__tag">Учетные данные</p>
     </div>
   </div>
-  <a class="icon-button icon-button--danger" href="{{ url_for('logout') }}" aria-label="Выйти">Выйти</a>
+  <div class="profile-top-actions">
+    {% if is_admin %}
+      <a class="icon-button icon-button--admin" href="{{ url_for('admin.root') }}" aria-label="Перейти в админ-панель">Админ-панель</a>
+    {% endif %}
+    <a class="icon-button icon-button--danger" href="{{ url_for('logout') }}" aria-label="Выйти">Выйти</a>
+  </div>
 </header>
 
 <section class="section">
