@@ -29,10 +29,15 @@
 
 ## Структура проекта
 
-- `backend/app.py` - точка входа Flask, загрузка меню и промо, конфигурация приложения
+- `backend/app.py` - точка входа Flask, сборка приложения, конфигурация и регистрация маршрутов
 - `backend/config.py` - настройки, пути к данным, схема столов и константы
 - `backend/routes/` - HTTP-маршруты по доменам
-- `backend/services/` - бизнес-логика
+- `backend/services/business_logic.py` - timezone-aware логика бронирований, заказов и статусов
+- `backend/services/order_totals.py` - единый расчёт сумм, бонусов, баллов и сервисного сбора
+- `backend/services/auth_session.py` - signed cookie, восстановление session, CSRF и request-scoped auth helpers
+- `backend/services/menu_content.py` - загрузка меню и promo, чтение `item.txt` и Redis-кэш меню
+- `backend/services/storage_facade.py` - storage facade, prune заказов и file-locking
+- `backend/services/passwords.py` - password hashing и мягкая миграция legacy hash
 - `backend/storage/json_store.py` - файловое JSON-хранилище
 - `backend/storage/pg_store.py` - хранилище Postgres
 - `backend/models/` - dataclass-модели
@@ -154,6 +159,8 @@ backend\.venv\Scripts\python -m pytest backend\tests -q
 - бронирование, обычная оплата и доставка через реальные HTTP-сценарии Flask `test_client`;
 - расчёт бонусов, баллов и сервисного сбора;
 - timezone-aware логика активности брони.
+
+После рефакторинга backend-структуры актуальный прогон даёт `6 passed`.
 
 ## Docker
 
@@ -325,6 +332,8 @@ python backend/ops/migrate_json_to_neon.py
 - на следующем запросе может восстановить `session["user_id"]` из `auth_session`, даже если Flask session по какой-то причине не доехала стабильно;
 - очищает `auth_session` cookie, если она стала невалидной.
 
+Эта логика теперь собрана в `backend/services/auth_session.py`, а `backend/app.py` только подключает сервис к приложению.
+
 Что делает frontend:
 
 - для главной страницы один раз вызывает `/api/index-summary`, чтобы баллы и status bar не зависели только от первого HTML-рендера;
@@ -411,6 +420,7 @@ python backend/ops/migrate_json_to_neon.py
 
 - На backend добавлен request-scoped cache для текущего пользователя и уведомлений, чтобы не читать одни и те же данные несколько раз в рамках одного запроса.
 - Расчёт сумм заказа, бонусов, баллов и сервисного сбора вынесен в единый helper `backend/services/order_totals.py`.
+- Монолитный `backend/app.py` раздроблен на сервисные модули `auth_session.py`, `menu_content.py`, `storage_facade.py` и `passwords.py`, чтобы упростить сопровождение и точечные изменения.
 - Логика времени выровнена между JSON-хранилищем, Postgres-веткой и сервисами статусов, чтобы избежать расхождений между локальным временем и UTC.
 - `backend/static/js/app.js` разрезан на page-specific модули:
   - `menuCatalog.js`
