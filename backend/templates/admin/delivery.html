@@ -27,6 +27,12 @@
         </select>
       </label>
       <button class="admin-button admin-button--apply" type="submit">Применить</button>
+      <div class="admin-chip-row">
+        <a class="admin-chip {% if filters.preset == 'today' %}is-active{% endif %}" href="{{ url_for('admin.delivery', preset='today') }}">Сегодня</a>
+        <a class="admin-chip {% if filters.preset == 'last_hour' %}is-active{% endif %}" href="{{ url_for('admin.delivery', preset='last_hour') }}">Последний час</a>
+        <a class="admin-chip {% if filters.preset == 'active' %}is-active{% endif %}" href="{{ url_for('admin.delivery', preset='active') }}">В работе</a>
+        <a class="admin-chip {% if filters.preset == 'served' %}is-active{% endif %}" href="{{ url_for('admin.delivery', preset='served') }}">Завершённые</a>
+      </div>
     </div>
   </form>
 </section>
@@ -38,14 +44,14 @@
         <thead><tr><th>ID</th><th>Получатель</th><th>Адрес</th><th>Статус</th><th>ETA</th><th>Сумма</th><th>Создан</th><th class="admin-col-actions">Действия</th></tr></thead>
         <tbody>
           {% for order in delivery_orders %}
-            <tr>
+            <tr class="{% if order.status == 'cancelled' %}admin-row admin-row--danger{% elif order.delivery_overdue %}admin-row admin-row--warning{% elif order.status == 'served' %}admin-row admin-row--success{% endif %}">
               <td><a href="{{ url_for('admin.order_detail', order_id=order.id) }}">#{{ order.id }}</a></td>
               <td>
                 <strong>{{ order.delivery_name or "—" }}</strong>
                 <small class="admin-table-subtext">{{ order.delivery_phone or "—" }}</small>
               </td>
               <td>{{ order.delivery_address or "—" }}</td>
-              <td><span class="admin-badge {% if order.delivery_overdue %}admin-badge--warning{% endif %}">{{ order.status_label }}</span></td>
+              <td><span class="admin-badge {% if order.status == 'served' %}admin-badge--success{% elif order.delivery_overdue %}admin-badge--warning{% elif order.status == 'cancelled' %}admin-badge--danger{% endif %}">{{ order.status_label }}</span></td>
               <td>{{ order.delivery_eta_minutes or 20 }} мин</td>
               <td>{{ order.totals.payable_total }} ₽</td>
               <td>{{ order.created_at|ru_datetime }}</td>
@@ -66,7 +72,7 @@
       </table>
     </div>
   {% else %}
-    <div class="admin-empty">Delivery-заказы не найдены.</div>
+    <div class="admin-empty">Заказы на доставку не найдены.</div>
   {% endif %}
 </section>
 {% endblock %}

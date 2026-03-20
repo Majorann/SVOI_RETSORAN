@@ -1,15 +1,15 @@
 {% extends "admin/base.html" %}
 {% block admin_content %}
 <section class="admin-grid admin-grid--detail">
-  <article class="admin-card">
+  <article class="admin-card {% if order.status == 'cancelled' %}admin-card--danger{% elif order.delivery_overdue %}admin-card--warning{% elif order.status == 'served' %}admin-card--success{% endif %}">
     <div class="admin-section-head">
       <div>
-        <p class="admin-topbar__eyebrow">Summary</p>
+        <p class="admin-topbar__eyebrow">Сводка</p>
         <h2>Заказ #{{ order.id }}</h2>
       </div>
       <div class="admin-chip-row">
-        <span class="admin-badge">{{ order.status_label }}</span>
-        <span class="admin-badge">{{ order.order_type }}</span>
+        <span class="admin-badge {% if order.status == 'served' %}admin-badge--success{% elif order.status == 'cancelled' %}admin-badge--danger{% elif order.delivery_overdue %}admin-badge--warning{% endif %}">{{ order.status_label }}</span>
+        <span class="admin-badge">{{ order.order_type_label }}</span>
       </div>
     </div>
     <div class="admin-detail-grid">
@@ -20,7 +20,7 @@
       <div><span>Сумма</span><strong>{{ order.totals.payable_total }} ₽</strong></div>
       <div><span>Баллы</span><strong>{{ order.points_applied }} / {{ order.bonus_earned }}</strong></div>
       <div><span>Подача</span><strong>{{ order.serving_label or order.serving_mode or "—" }}</strong></div>
-      <div><span>Serving time</span><strong>{{ order.serving_time or "—" }}</strong></div>
+      <div><span>Время подачи</span><strong>{{ order.serving_time or "—" }}</strong></div>
       <div><span>Комментарий</span><strong>{{ order.comment or "—" }}</strong></div>
       <div><span>Карта</span><strong>{{ order.payment_card_brand or "Карта" }} •••• {{ order.payment_card_last4 or "0000" }}</strong></div>
       {% if order.related_booking %}
@@ -42,7 +42,7 @@
   <article class="admin-card">
     <div class="admin-section-head">
       <div>
-        <p class="admin-topbar__eyebrow">Actions</p>
+        <p class="admin-topbar__eyebrow">Действия</p>
         <h2>Опасные действия</h2>
       </div>
     </div>
@@ -51,8 +51,8 @@
         <label class="admin-field admin-field--status">
           <span>Изменить статус</span>
           <select class="admin-select" id="orderStatusSelect">
-            {% for status in statuses %}
-              <option value="{{ status }}" {% if order.status == status %}selected{% endif %}>{{ status }}</option>
+            {% for status in status_options %}
+              <option value="{{ status.value }}" {% if order.status == status.value %}selected{% endif %}>{{ status.label }}</option>
             {% endfor %}
           </select>
         </label>
@@ -94,7 +94,7 @@
   </article>
 
   <article class="admin-card">
-    <div class="admin-section-head"><h2>Audit trail</h2></div>
+    <div class="admin-section-head"><h2>История действий</h2></div>
     {% if order.audit_actions %}
       <div class="admin-list">
         {% for action in order.audit_actions %}

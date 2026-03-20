@@ -42,6 +42,22 @@ class AuthSessionService:
         self.load_bookings = load_bookings
         self.get_user_preparing_orders = get_user_preparing_orders
 
+    def _load_users_cached(self):
+        if getattr(g, "_auth_users_loaded", False):
+            return getattr(g, "_auth_users", [])
+        users = self.load_users()
+        g._auth_users_loaded = True
+        g._auth_users = users
+        return users
+
+    def _load_bookings_cached(self):
+        if getattr(g, "_auth_bookings_loaded", False):
+            return getattr(g, "_auth_bookings", [])
+        bookings = self.load_bookings()
+        g._auth_bookings_loaded = True
+        g._auth_bookings = bookings
+        return bookings
+
     def debug_login_failure(self, reason: str, phone_raw: str = "", normalized_phone: str | None = None):
         if not self.login_debug_enabled:
             return
@@ -242,7 +258,7 @@ class AuthSessionService:
         if getattr(g, "current_user_loaded", False) and getattr(g, "current_user_id", None) == normalized_user_id:
             return getattr(g, "current_user", None)
 
-        user = next((u for u in self.load_users() if u.get("id") == normalized_user_id), None)
+        user = next((u for u in self._load_users_cached() if u.get("id") == normalized_user_id), None)
         self._set_request_user(user)
         return user
 
@@ -257,7 +273,7 @@ class AuthSessionService:
             g.notification_preparing_orders = []
             return g.notification_bookings, g.notification_preparing_orders
 
-        bookings = [b for b in self.load_bookings() if b.get("user_id") == user_id]
+        bookings = [b for b in self._load_bookings_cached() if b.get("user_id") == user_id]
         preparing_orders = self.get_user_preparing_orders(user_id)
         g.notifications_loaded = True
         g.notification_bookings = bookings

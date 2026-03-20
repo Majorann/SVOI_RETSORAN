@@ -62,7 +62,7 @@ def index_route(
     popular_menu_limit,
 ):
     user_id = session.get("user_id")
-    bookings = load_bookings()
+    bookings = []
     preparing_orders = []
     order_status = None
     order_statuses = []
@@ -77,7 +77,7 @@ def index_route(
     if not popular_menu:
         popular_menu = _pick_popular_items(all_menu_items, limit)
     if user_id:
-        bookings = [b for b in bookings if b.get("user_id") == user_id]
+        bookings = [b for b in load_bookings() if b.get("user_id") == user_id]
         preparing_orders = get_user_preparing_orders(user_id)
         order_statuses = list_active_order_statuses(user_id)
         order_status = order_statuses[0] if order_statuses else None
@@ -116,13 +116,11 @@ def delivery_route():
 
 def notifications_route(load_bookings, get_user_preparing_orders, load_promo_items, booking_duration_minutes):
     user_id = session.get("user_id")
-    bookings = load_bookings()
+    bookings = []
     preparing_orders = []
     if user_id:
-        bookings = [b for b in bookings if b.get("user_id") == user_id]
+        bookings = [b for b in load_bookings() if b.get("user_id") == user_id]
         preparing_orders = get_user_preparing_orders(user_id)
-    else:
-        bookings = []
     bookings_sorted = sorted(
         bookings,
         key=lambda b: (b.get("date", ""), b.get("time", ""), b.get("created_at", "")),

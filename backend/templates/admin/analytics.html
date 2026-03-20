@@ -1,7 +1,7 @@
 {% extends "admin/base.html" %}
 {% block admin_content %}
 <section class="admin-card admin-toolbar">
-  <form class="admin-filters" method="get">
+  <form class="admin-filters admin-filters--analytics" method="get">
     <select class="admin-select" name="period">
       <option value="today" {% if filters.period == 'today' %}selected{% endif %}>Сегодня</option>
       <option value="7d" {% if filters.period == '7d' %}selected{% endif %}>7 дней</option>
@@ -27,8 +27,9 @@
 </section>
 
 <section class="admin-grid admin-grid--charts">
-  <article class="admin-card admin-chart-card"><h2>Выручка по дням</h2><div class="admin-chart" data-chart-kind="line" data-chart='{{ analytics.charts.revenue_by_day|tojson }}'></div></article>
-  <article class="admin-card admin-chart-card"><h2>Заказы по дням</h2><div class="admin-chart" data-chart-kind="line" data-chart='{{ analytics.charts.orders_by_day|tojson }}'></div></article>
+  <article class="admin-card admin-chart-card"><h2>Выручка по дням</h2><div class="admin-chart" data-chart-kind="line" data-axis-label="Выручка, ₽" data-chart='{{ analytics.charts.revenue_by_day|tojson }}'></div></article>
+  <article class="admin-card admin-chart-card"><h2>Заказы по дням</h2><div class="admin-chart" data-chart-kind="line" data-axis-label="Заказы, шт." data-chart='{{ analytics.charts.orders_by_day|tojson }}'></div></article>
+  <article class="admin-card admin-chart-card"><h2>Использование доставки и зала</h2><div class="admin-chart" data-chart-kind="grouped-bar" data-axis-label="Заказы, шт." data-chart='{{ analytics.charts.channels_by_day|tojson }}'></div></article>
   <article class="admin-card admin-chart-card"><h2>Зал / доставка</h2><div class="admin-chart" data-chart-kind="donut" data-chart='{{ analytics.charts.split|tojson }}'></div></article>
   <article class="admin-card admin-chart-card"><h2>Отмены</h2><div class="admin-chart" data-chart-kind="bar" data-chart='{{ analytics.charts.cancels_by_day|tojson }}'></div></article>
 </section>
@@ -46,7 +47,7 @@
 
 <section class="admin-grid admin-grid--two">
   <article class="admin-card">
-    <div class="admin-section-head"><h2>Таблица топ-блюд</h2></div>
+    <div class="admin-section-head"><h2>Все блюда за период</h2></div>
     {% if analytics.top_items %}
       <div class="admin-table-wrap">
         <table class="admin-table">

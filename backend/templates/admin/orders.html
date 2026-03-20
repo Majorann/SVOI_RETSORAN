@@ -20,9 +20,14 @@
           <span>Статус</span>
           <select class="admin-select" name="status">
             <option value="">Все статусы</option>
-            {% for status in statuses %}
-              <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>
+            {% for status in status_options or [] %}
+              <option value="{{ status.value }}" {% if filters.status == status.value %}selected{% endif %}>{{ status.label }}</option>
             {% endfor %}
+            {% if not status_options %}
+              {% for status in statuses %}
+                <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status }}</option>
+              {% endfor %}
+            {% endif %}
           </select>
         </label>
         <label class="admin-field admin-field--compact">
@@ -44,6 +49,14 @@
       </label>
     </div>
     <div class="admin-toolbar__actions admin-toolbar__actions--filters">
+      <label class="admin-field admin-field--compact">
+        <span>На странице</span>
+        <select class="admin-select" name="per_page">
+          {% for size in [10, 25, 50] %}
+            <option value="{{ size }}" {% if filters.per_page == size|string %}selected{% endif %}>{{ size }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <button class="admin-button admin-button--apply admin-button--compact" type="submit">Применить</button>
       <div class="admin-chip-row">
         <a class="admin-chip {% if filters.preset == 'today' %}is-active{% endif %}" href="{{ url_for('admin.orders', preset='today') }}">Сегодня</a>
@@ -74,7 +87,7 @@
         </thead>
         <tbody>
           {% for order in orders %}
-            <tr>
+            <tr class="{% if order.status == 'cancelled' %}admin-row admin-row--danger{% elif order.delivery_overdue %}admin-row admin-row--warning{% elif order.status == 'served' %}admin-row admin-row--success{% endif %}">
               <td><a href="{{ url_for('admin.order_detail', order_id=order.id) }}">#{{ order.id }}</a></td>
               <td>{{ order.created_at|ru_datetime }}</td>
               <td>
@@ -82,7 +95,7 @@
                 <small>{{ order.user_phone or order.delivery_phone or "—" }}</small>
               </td>
               <td>{{ "Доставка" if order.is_delivery else "Зал" }}</td>
-              <td><span class="admin-badge {% if order.status == 'cancelled' %}admin-badge--danger{% elif order.delivery_overdue %}admin-badge--warning{% endif %}">{{ order.status_label }}</span></td>
+              <td><span class="admin-badge {% if order.status == 'served' %}admin-badge--success{% elif order.status == 'cancelled' %}admin-badge--danger{% elif order.delivery_overdue %}admin-badge--warning{% endif %}">{{ order.status_label }}</span></td>
               <td>{{ order.delivery_address or order.table_label }}</td>
               <td>{{ order.totals.payable_total }} ₽</td>
               <td>{{ order.points_applied }} / {{ order.bonus_earned }}</td>
@@ -93,8 +106,8 @@
                     class="admin-table-link"
                     type="button"
                     data-drawer-title="Заказ #{{ order.id }}"
-                    data-drawer-body="Клиент: {{ order.user_name or order.delivery_name or '—' }}&#10;Телефон: {{ order.user_phone or order.delivery_phone or '—' }}&#10;Тип: {{ order.order_type }}&#10;Статус: {{ order.status_label }}&#10;Сумма: {{ order.totals.payable_total }} ₽&#10;Комментарий: {{ order.comment or '—' }}"
-                  >Quick view</button>
+                    data-drawer-body="Клиент: {{ order.user_name or order.delivery_name or '—' }}&#10;Телефон: {{ order.user_phone or order.delivery_phone or '—' }}&#10;Тип: {{ order.order_type_label }}&#10;Статус: {{ order.status_label }}&#10;Сумма: {{ order.totals.payable_total }} ₽&#10;Комментарий: {{ order.comment or '—' }}"
+                  >Посмотреть</button>
                 </div>
               </td>
             </tr>
@@ -106,4 +119,28 @@
     <div class="admin-empty">По текущим фильтрам заказы не найдены.</div>
   {% endif %}
 </section>
+
+{% if pagination and pagination.total_pages > 1 %}
+<section class="admin-card">
+  <div class="admin-toolbar__actions admin-toolbar__actions--filters">
+    <span class="admin-note">Страница {{ pagination.page }} из {{ pagination.total_pages }} · Всего заказов: {{ pagination.total }}</span>
+    <div class="admin-chip-row">
+      {% if pagination.has_prev %}
+        <a class="admin-chip" href="{{ url_for('admin.orders', page=pagination.prev_page, **query_params) }}">Назад</a>
+      {% endif %}
+      <span class="admin-chip">{{ pagination.page }}</span>
+      {% if pagination.has_next %}
+        <a class="admin-chip is-active" href="{{ url_for('admin.orders', page=pagination.next_page, **query_params) }}">Дальше</a>
+      {% endif %}
+    </div>
+    <form class="admin-inline-form admin-inline-form--jump" method="get">
+      {% for key, value in query_params.items() %}
+        <input type="hidden" name="{{ key }}" value="{{ value }}" />
+      {% endfor %}
+      <input class="admin-input admin-input--jump" type="number" name="page" min="1" max="{{ pagination.total_pages }}" value="{{ pagination.page }}" />
+      <button class="admin-button admin-button--compact" type="submit">Перейти</button>
+    </form>
+  </div>
+</section>
+{% endif %}
 {% endblock %}

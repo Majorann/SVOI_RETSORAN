@@ -13,11 +13,11 @@
       <span class="admin-brand__mark"></span>
       <span class="admin-brand__text">
         <strong>Свои Admin</strong>
-        <small>Restaurant control room</small>
+        <small>Панель управления рестораном</small>
       </span>
     </a>
     <nav class="admin-nav">
-      <a class="admin-nav__link {% if admin_section == 'dashboard' %}is-active{% endif %}" href="{{ url_for('admin.dashboard') }}">Dashboard</a>
+      <a class="admin-nav__link {% if admin_section == 'dashboard' %}is-active{% endif %}" href="{{ url_for('admin.dashboard') }}">Панель</a>
       <a class="admin-nav__link {% if admin_section == 'orders' %}is-active{% endif %}" href="{{ url_for('admin.orders') }}">Заказы</a>
       <a class="admin-nav__link {% if admin_section == 'bookings' %}is-active{% endif %}" href="{{ url_for('admin.bookings') }}">Брони</a>
       <a class="admin-nav__link {% if admin_section == 'delivery' %}is-active{% endif %}" href="{{ url_for('admin.delivery') }}">Доставка</a>
@@ -36,7 +36,7 @@
   <main class="admin-main">
     <header class="admin-topbar">
       <div>
-        <p class="admin-topbar__eyebrow">Admin zone</p>
+        <p class="admin-topbar__eyebrow">Панель администратора</p>
         <h1 class="admin-topbar__title">{{ title }}</h1>
       </div>
       <div class="admin-topbar__meta">
@@ -52,7 +52,7 @@
 <section class="admin-mobile-lock" aria-live="polite">
   <div class="admin-mobile-lock__card">
     <span class="admin-brand__mark"></span>
-    <p class="admin-topbar__eyebrow">Admin zone</p>
+    <p class="admin-topbar__eyebrow">Панель администратора</p>
     <h1>Админ-панель доступна на большом экране</h1>
     <p>Откройте её с ПК или устройства с более широкой областью просмотра. Мобильную версию для админки в этой сборке не поддерживаем.</p>
     <a class="admin-button admin-button--ghost" href="{{ url_for('index') }}">Вернуться на сайт</a>
