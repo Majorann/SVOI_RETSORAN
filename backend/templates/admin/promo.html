@@ -67,7 +67,7 @@
             <div class="admin-promo-row__body">
               <div class="admin-chip-row">
                 <span class="admin-badge">{{ item.class }}</span>
-                {% if not item.active %}<span class="admin-badge admin-badge--danger">Inactive</span>{% endif %}
+                {% if not item.active %}<span class="admin-badge admin-badge--danger">Скрыто</span>{% endif %}
               </div>
               <strong>{{ item.name or item.text }}</strong>
               <p>{{ item.lore or item.link or "—" }}</p>

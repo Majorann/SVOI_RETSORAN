@@ -6,6 +6,23 @@ from services.admin_service import ADMIN_DELIVERY_STATUSES, ADMIN_ORDER_STATUSES
 def create_admin_blueprint(admin_service):
     admin = Blueprint("admin", __name__, url_prefix="/admin")
 
+    def query_page(default: int = 1) -> int:
+        try:
+            return max(1, int(request.args.get("page", default)))
+        except (TypeError, ValueError):
+            return default
+
+    def query_per_page(default: int = 25) -> int:
+        try:
+            return max(1, int(request.args.get("per_page", default)))
+        except (TypeError, ValueError):
+            return default
+
+    def current_query_params():
+        params = request.args.to_dict(flat=True)
+        params.pop("page", None)
+        return params
+
     def guard(is_api: bool = False):
         response = admin_service.require_admin(is_api=is_api)
         if response is not None:
@@ -38,7 +55,7 @@ def create_admin_blueprint(admin_service):
             return blocked
         return render_template(
             "admin/dashboard.html",
-            title="Admin Dashboard",
+            title="Панель",
             admin_section="dashboard",
             dashboard=admin_service.get_dashboard_data(),
         )
@@ -57,14 +74,19 @@ def create_admin_blueprint(admin_service):
             "status": request.args.get("status", ""),
             "order_type": request.args.get("order_type", ""),
             "preset": request.args.get("preset", ""),
+            "per_page": request.args.get("per_page", "25"),
         }
+        orders, pagination = admin_service.paginate_orders(filters, page=query_page(), per_page=query_per_page())
         return render_template(
             "admin/orders.html",
-            title="Admin Orders",
+            title="Заказы",
             admin_section="orders",
-            orders=admin_service.list_orders(filters),
+            orders=orders,
             filters=filters,
+            pagination=pagination,
+            query_params=current_query_params(),
             statuses=ADMIN_ORDER_STATUSES,
+            status_options=[{"value": status, "label": admin_service.order_status_filter_label(status)} for status in ADMIN_ORDER_STATUSES],
         )
 
     @admin.get("/orders/<int:order_id>")
@@ -81,6 +103,7 @@ def create_admin_blueprint(admin_service):
             admin_section="orders",
             order=order,
             statuses=ADMIN_ORDER_STATUSES,
+            status_options=[{"value": status, "label": admin_service.order_status_filter_label(status, order.get("order_type"))} for status in ADMIN_ORDER_STATUSES],
         )
 
     @admin.get("/bookings")
@@ -97,7 +120,7 @@ def create_admin_blueprint(admin_service):
         }
         return render_template(
             "admin/bookings.html",
-            title="Admin Bookings",
+            title="Брони",
             admin_section="bookings",
             bookings=admin_service.list_bookings(filters),
             filters=filters,
@@ -132,12 +155,12 @@ def create_admin_blueprint(admin_service):
         }
         return render_template(
             "admin/delivery.html",
-            title="Admin Delivery",
+            title="Доставка",
             admin_section="delivery",
             delivery_orders=admin_service.list_delivery_orders(filters),
             filters=filters,
             statuses=ADMIN_DELIVERY_STATUSES,
-            status_options=[{"value": status, "label": admin_service.status_label(status)} for status in ADMIN_DELIVERY_STATUSES],
+            status_options=[{"value": status, "label": admin_service.order_status_filter_label(status, "delivery")} for status in ADMIN_DELIVERY_STATUSES],
         )
 
     @admin.get("/menu")
@@ -149,12 +172,13 @@ def create_admin_blueprint(admin_service):
             "category": request.args.get("category", ""),
             "featured": request.args.get("featured", ""),
         }
-        items = admin_service.list_menu_items(filters)
-        categories = sorted({item.get("type") for item in admin_service.menu_content.load_menu_items_admin() if item.get("type")})
-        next_menu_item_id = max([item.get("id", 0) for item in admin_service.menu_content.load_menu_items_admin()] or [0]) + 1
+        all_menu_items = admin_service.menu_content.load_menu_items_admin()
+        items = admin_service.list_menu_items(filters, items=all_menu_items)
+        categories = sorted({item.get("type") for item in all_menu_items if item.get("type")})
+        next_menu_item_id = max([item.get("id", 0) for item in all_menu_items] or [0]) + 1
         return render_template(
             "admin/menu.html",
-            title="Admin Menu",
+            title="Меню",
             admin_section="menu",
             menu_items=items,
             categories=categories,
@@ -168,11 +192,12 @@ def create_admin_blueprint(admin_service):
         if blocked is not None:
             return blocked
         filters = {"class_name": request.args.get("class_name", "")}
+        all_promo_items = admin_service.menu_content.load_promo_items(include_inactive=True)
         return render_template(
             "admin/promo.html",
-            title="Admin Promo",
+            title="Акции и реклама",
             admin_section="promo",
-            promo_items=admin_service.list_promo_items(filters),
+            promo_items=admin_service.list_promo_items(filters, items=all_promo_items),
             filters=filters,
         )
 
@@ -184,7 +209,7 @@ def create_admin_blueprint(admin_service):
         filters = {"period": request.args.get("period", "7d"), "mode": request.args.get("mode", "all")}
         return render_template(
             "admin/analytics.html",
-            title="Admin Analytics",
+            title="Аналитика",
             admin_section="analytics",
             analytics=admin_service.get_analytics(filters),
             filters=filters,
@@ -196,12 +221,17 @@ def create_admin_blueprint(admin_service):
         if blocked is not None:
             return blocked
         search = request.args.get("search", "")
+        per_page = request.args.get("per_page", "25")
+        users, pagination = admin_service.list_users(search, page=query_page(), per_page=query_per_page())
         return render_template(
             "admin/users.html",
-            title="Admin Users",
+            title="Пользователи",
             admin_section="users",
-            users=admin_service.list_users(search),
+            users=users,
+            pagination=pagination,
+            query_params=current_query_params(),
             search=search,
+            per_page=per_page,
         )
 
     @admin.get("/users/<int:user_id>")
@@ -226,7 +256,7 @@ def create_admin_blueprint(admin_service):
             return blocked
         return render_template(
             "admin/content.html",
-            title="Admin Content",
+            title="Контент",
             admin_section="content",
             content=admin_service.get_content_scaffold(),
         )
@@ -242,14 +272,18 @@ def create_admin_blueprint(admin_service):
             "entity_type": request.args.get("entity_type", ""),
             "date_from": request.args.get("date_from", ""),
             "date_to": request.args.get("date_to", ""),
+            "per_page": request.args.get("per_page", "25"),
         }
+        actions, pagination = admin_service.list_audit_actions(filters=filters, limit=query_per_page(), page=query_page())
         return render_template(
             "admin/audit_log.html",
-            title="Admin Audit Log",
+            title="Журнал действий",
             admin_section="audit-log",
-            actions=admin_service.list_audit_actions(filters=filters, limit=100),
+            actions=actions,
             options=admin_service.audit_filter_options(),
             filters=filters,
+            pagination=pagination,
+            query_params=current_query_params(),
         )
 
     @admin.post("/api/orders/<int:order_id>/status")

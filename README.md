@@ -17,7 +17,7 @@
 - Cookie-only авторизация на Flask session
 - Signed `auth_session` cookie для восстановления server-side session на первом запросе
 - Работа через JSON-хранилища или Neon Postgres
-- Опциональный Redis-кэш для меню
+- Опциональный Redis-кэш для меню и локальный TTL-кэш для admin/menu/promo контента
 
 ## Стек
 
@@ -35,8 +35,8 @@
 - `backend/routes/` - HTTP-маршруты по доменам
 - `backend/services/business_logic.py` - timezone-aware логика бронирований, заказов и статусов
 - `backend/services/order_totals.py` - единый расчёт сумм, бонусов, баллов и сервисного сбора
-- `backend/services/auth_session.py` - signed cookie, восстановление session, CSRF и request-scoped auth helpers
-- `backend/services/menu_content.py` - загрузка меню и promo, чтение `item.txt` и Redis-кэш меню
+- `backend/services/auth_session.py` - signed cookie, восстановление session, CSRF и request-scoped auth helpers с request-cache пользователей и бронирований
+- `backend/services/menu_content.py` - загрузка меню и promo, чтение `item.txt`, Redis-кэш меню и локальный TTL-кэш контента
 - `backend/services/storage_facade.py` - storage facade, prune заказов и file-locking
 - `backend/services/passwords.py` - password hashing и мягкая миграция legacy hash
 - `backend/storage/json_store.py` - файловое JSON-хранилище
@@ -69,6 +69,8 @@ python run_local.py
 ```bash
 python3 run_local.py
 ```
+
+Файлы проекта хранятся в UTF-8. Если в терминале русские строки отображаются некорректно, это проблема кодовой страницы консоли, а не повод пересохранять файлы в другой кодировке.
 
 Что делает `run_local.py`:
 
@@ -151,7 +153,14 @@ cd backend
 Запуск:
 
 ```powershell
-cd ..
+cd backend
+.\.venv\Scripts\python -m pytest tests -q
+```
+
+Если нужен запуск именно из корня репозитория, сначала выставьте `PYTHONPATH` на `backend`, иначе импорты вида `from services...` не найдутся:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\backend)
 backend\.venv\Scripts\python -m pytest backend\tests -q
 ```
 
@@ -164,7 +173,7 @@ backend\.venv\Scripts\python -m pytest backend\tests -q
 - расчёт бонусов, баллов и сервисного сбора;
 - timezone-aware логика активности брони.
 
-После рефакторинга backend-структуры актуальный прогон даёт `6 passed`.
+Актуальный прогон даёт `19 passed`.
 
 ## Docker
 
@@ -456,7 +465,7 @@ Admin panel реализована как отдельная зона внутр
 - dashboard и KPI;
 - управление заказами, бронями и доставкой;
 - пользователи и корректировка бонусов;
-- analytics по реальным данным;
+- analytics по агрегированным SQL-данным;
 - аудит действий администраторов;
 - admin menu с live-preview карточки блюда;
 - promo editor с type-aware полями и live-preview.
@@ -490,9 +499,24 @@ Admin panel реализована как отдельная зона внутр
 ## Что оптимизировано
 
 - На backend добавлен request-scoped cache для текущего пользователя и уведомлений, чтобы не читать одни и те же данные несколько раз в рамках одного запроса.
+- В `backend/services/auth_session.py` добавлен request-scoped cache списков пользователей и бронирований, чтобы сессионные hooks и уведомления не делали повторные чтения в одном запросе.
 - Расчёт сумм заказа, бонусов, баллов и сервисного сбора вынесен в единый helper `backend/services/order_totals.py`.
 - Монолитный `backend/app.py` раздроблен на сервисные модули `auth_session.py`, `menu_content.py`, `storage_facade.py` и `passwords.py`, чтобы упростить сопровождение и точечные изменения.
 - Логика времени выровнена между JSON-хранилищем, Postgres-веткой и сервисами статусов, чтобы избежать расхождений между локальным временем и UTC.
+- В admin panel убран `N+1` в списке броней: количество связанных заказов теперь считается одним SQL-запросом.
+- В аналитике метрики и графики по дням переведены на SQL-агрегации вместо загрузки полного массива заказов в Python.
+- Для Postgres-схемы добавлены индексы под частые admin-фильтры и связи заказов/броней.
+- В `backend/services/menu_content.py` добавлен локальный TTL-кэш для `load_menu_items_admin()` и `load_promo_items()`, чтобы admin-экраны не перечитывали контент с диска на каждый вызов.
+- В `backend/routes/admin_routes.py` сокращены повторные чтения menu/promo-данных в рамках одного admin-запроса.
+- Для `audit log` добавлен кэш справочников фильтрации (`admins/actions/entities`) внутри `AdminService`, с автоматическим сбросом после нового admin action.
+- Для длинных admin-списков добавлена серверная пагинация:
+  - `orders`;
+  - `users`;
+  - `audit log`.
+- В admin panel добавлены UX-элементы поверх пагинации:
+  - выбор количества строк на странице;
+  - быстрый переход на нужную страницу;
+  - сохранение текущих фильтров и поиска при смене страницы.
 - `backend/static/js/app.js` разрезан на page-specific модули:
   - `menuCatalog.js`
   - `cartDrawer.js`

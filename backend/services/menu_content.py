@@ -2,6 +2,7 @@ import json
 import os
 import re
 import threading
+import time
 from pathlib import Path
 
 from config import MENU_ITEMS_PATH, MENU_META_NAME, MENU_PHOTO_NAMES, PROMO_ITEMS_PATH, PROMO_META_NAME, PROMO_PHOTO_NAMES
@@ -25,6 +26,34 @@ class MenuContentService:
         self.redis_url = redis_url
         self._redis_client = None
         self._redis_client_lock = threading.Lock()
+        self._memory_cache = {}
+        self._memory_cache_lock = threading.Lock()
+
+    def _memory_cache_get(self, key: str):
+        now = time.monotonic()
+        with self._memory_cache_lock:
+            entry = self._memory_cache.get(key)
+            if not entry:
+                return None
+            expires_at, value = entry
+            if expires_at <= now:
+                self._memory_cache.pop(key, None)
+                return None
+            return value
+
+    def _memory_cache_set(self, key: str, value):
+        ttl = max(1, int(self.menu_cache_ttl_seconds or 0))
+        with self._memory_cache_lock:
+            self._memory_cache[key] = (time.monotonic() + ttl, value)
+        return value
+
+    def invalidate_local_cache(self, *keys: str):
+        with self._memory_cache_lock:
+            if not keys:
+                self._memory_cache.clear()
+                return
+            for key in keys:
+                self._memory_cache.pop(key, None)
 
     def get_redis_client(self):
         if not self.menu_cache_enabled or not self.redis_url or self.redis_module is None:
@@ -159,6 +188,11 @@ class MenuContentService:
         return items
 
     def load_menu_items(self):
+        memory_key = "menu:public"
+        memory_items = self._memory_cache_get(memory_key)
+        if memory_items is not None:
+            return memory_items
+
         client = self.get_redis_client()
         if client is not None:
             try:
@@ -166,7 +200,7 @@ class MenuContentService:
                 if cached_payload:
                     items = json.loads(cached_payload)
                     if isinstance(items, list):
-                        return items
+                        return self._memory_cache_set(memory_key, items)
             except Exception as exc:
                 print(f"[cache] redis menu read failed ({exc}), fallback=disk")
 
@@ -181,12 +215,22 @@ class MenuContentService:
                 )
             except Exception as exc:
                 print(f"[cache] redis menu write failed ({exc})")
-        return items
+        return self._memory_cache_set(memory_key, items)
 
     def load_menu_items_admin(self):
-        return self.load_menu_items_from_disk(include_inactive=True)
+        memory_key = "menu:admin"
+        memory_items = self._memory_cache_get(memory_key)
+        if memory_items is not None:
+            return memory_items
+        items = self.load_menu_items_from_disk(include_inactive=True)
+        return self._memory_cache_set(memory_key, items)
 
     def load_promo_items(self, include_inactive: bool = False):
+        memory_key = "promo:admin" if include_inactive else "promo:public"
+        memory_items = self._memory_cache_get(memory_key)
+        if memory_items is not None:
+            return memory_items
+
         items = []
         if not PROMO_ITEMS_PATH.exists():
             return items
@@ -206,7 +250,7 @@ class MenuContentService:
             items.append(promo_item)
 
         items.sort(key=lambda item: (item.get("priority", 100), item["id"]))
-        return items
+        return self._memory_cache_set(memory_key, items)
 
     def is_placeholder_promo(self, meta: dict) -> bool:
         item_class = (meta.get("class", "") or "").strip().lower()

@@ -3,6 +3,11 @@
 <section class="admin-card admin-toolbar">
   <form class="admin-filters" method="get">
     <input class="admin-input" type="search" name="search" value="{{ search }}" placeholder="Имя или телефон" />
+    <select class="admin-select" name="per_page">
+      {% for size in [10, 25, 50] %}
+        <option value="{{ size }}" {% if per_page == size|string %}selected{% endif %}>{{ size }} на странице</option>
+      {% endfor %}
+    </select>
     <button class="admin-button" type="submit">Искать</button>
   </form>
 </section>
@@ -16,7 +21,9 @@
           {% for user in users %}
             <tr>
               <td><a href="{{ url_for('admin.user_detail', user_id=user.id) }}">#{{ user.id }}</a></td>
-              <td>{{ user.name }} {% if user.is_admin %}<span class="admin-badge admin-badge--accent">admin</span>{% endif %}</td>
+              <td>
+                <span class="{% if user.is_admin %}admin-user-name admin-user-name--admin{% endif %}">{{ user.name }}</span>
+              </td>
               <td>{{ user.phone }}</td>
               <td>{{ user.balance }}</td>
               <td>{{ user.orders_count }}</td>
@@ -32,4 +39,28 @@
     <div class="admin-empty">Пользователи не найдены.</div>
   {% endif %}
 </section>
+
+{% if pagination and pagination.total_pages > 1 %}
+<section class="admin-card">
+  <div class="admin-toolbar__actions admin-toolbar__actions--filters">
+    <span class="admin-note">Страница {{ pagination.page }} из {{ pagination.total_pages }} · Всего пользователей: {{ pagination.total }}</span>
+    <div class="admin-chip-row">
+      {% if pagination.has_prev %}
+        <a class="admin-chip" href="{{ url_for('admin.users', page=pagination.prev_page, **query_params) }}">Назад</a>
+      {% endif %}
+      <span class="admin-chip">{{ pagination.page }}</span>
+      {% if pagination.has_next %}
+        <a class="admin-chip is-active" href="{{ url_for('admin.users', page=pagination.next_page, **query_params) }}">Дальше</a>
+      {% endif %}
+    </div>
+    <form class="admin-inline-form admin-inline-form--jump" method="get">
+      {% for key, value in query_params.items() %}
+        <input type="hidden" name="{{ key }}" value="{{ value }}" />
+      {% endfor %}
+      <input class="admin-input admin-input--jump" type="number" name="page" min="1" max="{{ pagination.total_pages }}" value="{{ pagination.page }}" />
+      <button class="admin-button admin-button--compact" type="submit">Перейти</button>
+    </form>
+  </div>
+</section>
+{% endif %}
 {% endblock %}

@@ -181,6 +181,7 @@ def _execute_schema(cur):
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS serving_mode TEXT NOT NULL DEFAULT ''")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS serving_label TEXT NOT NULL DEFAULT ''")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS serving_time TEXT NOT NULL DEFAULT ''")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS service_fee INTEGER NOT NULL DEFAULT 0")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS booking_table_id INTEGER")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS booking_date DATE")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS booking_time TIME")
@@ -196,6 +197,21 @@ def _execute_schema(cur):
     )
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_orders_user_created ON orders(user_id, created_at);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_at DESC);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_orders_type_created ON orders(order_type, created_at DESC);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_orders_booking_slot ON orders(booking_table_id, booking_date, booking_time);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bookings_date_time ON bookings(booking_date, booking_time);"
     )
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);"

@@ -10,13 +10,28 @@ from typing import Any
 from flask import jsonify, redirect, render_template, session, url_for
 from werkzeug.datastructures import FileStorage
 
-from config import MENU_ITEMS_PATH, PROMO_ITEMS_PATH, TABLES
+from config import MENU_ITEMS_PATH, ORDER_STATUS_STEPS, PROMO_ITEMS_PATH, TABLES
+from services.business_logic import build_order_status_timeline_value, current_time_value, parse_iso_datetime_value
 from services.order_totals import summarize_saved_order_totals
 
 
 ADMIN_ORDER_STATUSES = ("preparing", "cooking", "ready", "delivering", "served", "cancelled")
 ADMIN_DELIVERY_STATUSES = ("cooking", "delivering", "served", "cancelled")
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+ORDER_STATUS_FILTER_LABELS = {
+    "preparing": "Принят",
+    "cooking": "Готовится",
+    "ready": "Готов",
+    "delivering": "Выдача",
+    "served": "Завершён",
+    "cancelled": "Отменён",
+}
+DELIVERY_STATUS_FILTER_LABELS = {
+    "cooking": "Готовится",
+    "delivering": "В пути",
+    "served": "Доставлен",
+    "cancelled": "Отменён",
+}
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -73,10 +88,41 @@ def _meta_text(payload: OrderedDict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _normalize_pagination(page: int | str | None, per_page: int | str | None, *, default_per_page: int = 25, max_per_page: int = 100):
+    try:
+        normalized_page = max(1, int(page or 1))
+    except (TypeError, ValueError):
+        normalized_page = 1
+    try:
+        normalized_per_page = int(per_page or default_per_page)
+    except (TypeError, ValueError):
+        normalized_per_page = default_per_page
+    normalized_per_page = max(1, min(max_per_page, normalized_per_page))
+    return normalized_page, normalized_per_page
+
+
+def _build_pagination(total: int, page: int, per_page: int):
+    total = max(0, int(total or 0))
+    total_pages = max(1, (total + per_page - 1) // per_page) if total else 1
+    page = min(max(1, page), total_pages)
+    return {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages,
+        "has_prev": page > 1,
+        "has_next": page < total_pages,
+        "prev_page": page - 1,
+        "next_page": page + 1,
+        "offset": (page - 1) * per_page,
+    }
+
+
 class AdminService:
     def __init__(self, *, active_storage: str, menu_content):
         self.active_storage = active_storage
         self.menu_content = menu_content
+        self._audit_filter_options_cache = None
 
     @property
     def postgres_ready(self) -> bool:
@@ -164,6 +210,7 @@ class AdminService:
                 payload_json,
             ),
         )
+        self._audit_filter_options_cache = None
 
     def _build_order_filters(self, filters: dict):
         conditions = []
@@ -215,6 +262,8 @@ class AdminService:
 
     def list_orders(self, filters: dict):
         where_sql, params = self._build_order_filters(filters)
+        status_filter = str(filters.get("status") or "").strip().lower()
+        preset = str(filters.get("preset") or "").strip().lower()
         rows = self._fetch_all(
             f"""
             SELECT
@@ -232,15 +281,33 @@ class AdminService:
             params,
         )
         orders = []
+        now = current_time_value()
         for row in rows:
             totals = summarize_saved_order_totals(row, recompute_zero_bonus=True)
+            effective_status = self.resolve_effective_order_status(row, now)
+            row["status"] = effective_status
             row["totals"] = totals
             row["is_delivery"] = (row.get("order_type") or "").lower() == "delivery"
+            row["order_type_label"] = self.order_type_label(row.get("order_type"))
             row["table_label"] = f"Стол №{row.get('booking_table_id')}" if row.get("booking_table_id") else "—"
-            row["status_label"] = self.status_label(row.get("status"))
-            row["delivery_overdue"] = self.is_delivery_overdue(row)
+            row["status_label"] = self.status_label(effective_status, row.get("order_type"))
+            row["delivery_overdue"] = self.is_delivery_overdue(row, now)
             orders.append(row)
+        if status_filter:
+            orders = [order for order in orders if str(order.get("status") or "").lower() == status_filter]
+        if preset == "active":
+            orders = [order for order in orders if str(order.get("status") or "").lower() not in {"served", "cancelled"}]
+        elif preset == "cancelled":
+            orders = [order for order in orders if str(order.get("status") or "").lower() == "cancelled"]
         return orders
+
+    def paginate_orders(self, filters: dict, *, page: int = 1, per_page: int = 25):
+        normalized_page, normalized_per_page = _normalize_pagination(page, per_page)
+        orders = self.list_orders(filters)
+        pagination = _build_pagination(len(orders), normalized_page, normalized_per_page)
+        start = pagination["offset"]
+        end = start + normalized_per_page
+        return orders[start:end], pagination
 
     def get_order_detail(self, order_id: int):
         row = self._fetch_one(
@@ -254,6 +321,10 @@ class AdminService:
         )
         if row is None:
             return None
+        now = current_time_value()
+        effective_status = self.resolve_effective_order_status(row, now)
+        row["status"] = effective_status
+        row["order_type_label"] = self.order_type_label(row.get("order_type"))
         row["items"] = self._fetch_all(
             """
             SELECT position, item_id, name, price, qty, photo
@@ -264,7 +335,7 @@ class AdminService:
             (int(order_id),),
         )
         row["totals"] = summarize_saved_order_totals(row, recompute_zero_bonus=True)
-        row["status_label"] = self.status_label(row.get("status"))
+        row["status_label"] = self.status_label(effective_status, row.get("order_type"))
         row["related_booking"] = None
         if row.get("booking_date") and row.get("booking_time"):
             row["related_booking"] = self._fetch_one(
@@ -350,10 +421,17 @@ class AdminService:
                 b.name,
                 b.created_at,
                 u.name AS user_name,
-                u.phone AS user_phone
+                u.phone AS user_phone,
+                COUNT(o.id) AS related_orders_count
             FROM bookings b
             LEFT JOIN users u ON u.id = b.user_id
+            LEFT JOIN orders o
+              ON o.user_id = b.user_id
+             AND o.booking_table_id = b.table_id
+             AND o.booking_date = b.booking_date
+             AND o.booking_time = b.booking_time
             {where_sql}
+            GROUP BY b.id, u.id
             ORDER BY b.booking_date DESC, b.booking_time DESC, b.id DESC
             """,
             tuple(params),
@@ -362,18 +440,7 @@ class AdminService:
         for row in rows:
             row["state"] = self.booking_state(row, now)
             row["state_label"] = {"active": "Активна", "past": "Прошла"}.get(row["state"], "Активна")
-            count_row = self._fetch_one(
-                """
-                SELECT COUNT(*) AS count
-                FROM orders
-                WHERE user_id = %s
-                  AND booking_table_id = %s
-                  AND booking_date = %s
-                  AND booking_time = %s
-                """,
-                (row["user_id"], row["table_id"], row["booking_date"], row["booking_time"]),
-            )
-            row["related_orders_count"] = _safe_int((count_row or {}).get("count"))
+            row["related_orders_count"] = _safe_int(row.get("related_orders_count"))
         state_filter = str(filters.get("state") or "").strip()
         if state_filter:
             rows = [row for row in rows if row["state"] == state_filter]
@@ -413,6 +480,12 @@ class AdminService:
             """,
             (row["user_id"], row["table_id"], row["booking_date"], row["booking_time"]),
         )
+        now = current_time_value()
+        for order in row["related_orders"]:
+            effective_status = self.resolve_effective_order_status(order, now)
+            order["status"] = effective_status
+            order["status_label"] = self.status_label(effective_status, order.get("order_type"))
+            order["order_type_label"] = self.order_type_label(order.get("order_type"))
         row["occupancy"] = self.table_occupancy_for_date(str(row["booking_date"]))
         row["audit_actions"] = self.list_audit_actions(entity_type="booking", entity_id=row["id"], limit=20)
         return row
@@ -439,6 +512,7 @@ class AdminService:
     def list_delivery_orders(self, filters: dict):
         conditions = ["o.order_type = 'delivery'"]
         params = []
+        status_filter = str(filters.get("status") or "").strip().lower()
         delivery_name = str(filters.get("delivery_name") or "").strip()
         if delivery_name:
             conditions.append("COALESCE(o.delivery_name, '') ILIKE %s")
@@ -459,10 +533,10 @@ class AdminService:
         elif preset == "last_hour":
             conditions.append("o.created_at >= %s")
             params.append((datetime.now() - timedelta(hours=1)).isoformat(timespec="seconds"))
-        status = str(filters.get("status") or "").strip()
-        if status:
-            conditions.append("o.status = %s")
-            params.append(status)
+        elif preset == "active":
+            conditions.append("LOWER(o.status) NOT IN ('served', 'cancelled')")
+        elif preset == "served":
+            conditions.append("LOWER(o.status) = 'served'")
         rows = self._fetch_all(
             f"""
             SELECT
@@ -480,14 +554,25 @@ class AdminService:
             tuple(params),
         )
         normalized_rows = []
+        now = current_time_value()
         for row in rows:
             totals = summarize_saved_order_totals(row, recompute_zero_bonus=True)
+            effective_status = self.resolve_effective_order_status(row, now)
+            row["status"] = effective_status
             row["totals"] = totals
             row["is_delivery"] = True
+            row["order_type_label"] = self.order_type_label(row.get("order_type"))
             row["table_label"] = "—"
-            row["status_label"] = self.status_label(row.get("status"))
-            row["delivery_overdue"] = self.is_delivery_overdue(row)
+            row["status_label"] = self.status_label(effective_status, row.get("order_type"))
+            row["delivery_overdue"] = self.is_delivery_overdue(row, now)
             normalized_rows.append(row)
+        preset = str(filters.get("preset") or "").strip().lower()
+        if status_filter:
+            normalized_rows = [row for row in normalized_rows if str(row.get("status") or "").lower() == status_filter]
+        if preset == "active":
+            normalized_rows = [row for row in normalized_rows if str(row.get("status") or "").lower() not in {"served", "cancelled"}]
+        elif preset == "served":
+            normalized_rows = [row for row in normalized_rows if str(row.get("status") or "").lower() == "served"]
         return normalized_rows
 
     def update_delivery_status(self, *, admin_user_id: int, order_id: int, status: str, reason: str):
@@ -510,14 +595,24 @@ class AdminService:
             action_type="delivery_cancelled",
         )
 
-    def list_users(self, search: str = ""):
+    def list_users(self, search: str = "", *, page: int = 1, per_page: int = 25):
+        normalized_page, normalized_per_page = _normalize_pagination(page, per_page)
         params = ()
         where_sql = ""
         if search:
             like = f"%{search}%"
             where_sql = "WHERE u.name ILIKE %s OR u.phone ILIKE %s"
             params = (like, like)
-        return self._fetch_all(
+        count_row = self._fetch_one(
+            f"""
+            SELECT COUNT(*) AS count
+            FROM users u
+            {where_sql}
+            """,
+            params,
+        ) or {"count": 0}
+        pagination = _build_pagination(_safe_int(count_row.get("count")), normalized_page, normalized_per_page)
+        rows = self._fetch_all(
             f"""
             SELECT
                 u.id,
@@ -534,9 +629,11 @@ class AdminService:
             {where_sql}
             GROUP BY u.id
             ORDER BY u.created_at DESC, u.id DESC
+            LIMIT {pagination["per_page"]} OFFSET {pagination["offset"]}
             """,
             params,
         )
+        return rows, pagination
 
     def get_user_detail(self, user_id: int):
         user = self._fetch_one(
@@ -577,6 +674,12 @@ class AdminService:
             """,
             (int(user_id),),
         )
+        now = current_time_value()
+        for order in user["orders"]:
+            effective_status = self.resolve_effective_order_status(order, now)
+            order["status"] = effective_status
+            order["status_label"] = self.status_label(effective_status, order.get("order_type"))
+            order["order_type_label"] = self.order_type_label(order.get("order_type"))
         user["bookings"] = self._fetch_all(
             """
             SELECT id, table_id, booking_date, booking_time, created_at
@@ -588,6 +691,7 @@ class AdminService:
             (int(user_id),),
         )
         user["audit_actions"] = self.list_audit_actions(entity_type="user", entity_id=user["id"], limit=20)
+        user["balance_actions"] = [action for action in user["audit_actions"] if action.get("action_type") == "user_bonus_adjusted"]
         return user
 
     def adjust_user_balance(self, *, admin_user_id: int, user_id: int, delta: int, reason: str):
@@ -625,7 +729,7 @@ class AdminService:
             """
         )
         latest_actions = self.list_audit_actions(limit=8)
-        now = datetime.now()
+        now = current_time_value()
         active_order_count = 0
         delivery_in_work = 0
         today_revenue = 0
@@ -634,14 +738,17 @@ class AdminService:
         attention = []
         for order in all_orders:
             totals = summarize_saved_order_totals(order, recompute_zero_bonus=True)
-            is_cancelled = (order.get("status") or "").lower() == "cancelled"
-            is_active = (order.get("status") or "").lower() not in {"served", "cancelled"}
-            order["status_label"] = self.status_label(order.get("status"))
+            effective_status = self.resolve_effective_order_status(order, now)
+            order["status"] = effective_status
+            order["order_type_label"] = self.order_type_label(order.get("order_type"))
+            is_cancelled = effective_status == "cancelled"
+            is_active = effective_status not in {"served", "cancelled"}
+            order["status_label"] = self.status_label(effective_status, order.get("order_type"))
             if is_active:
                 active_order_count += 1
             if (order.get("order_type") or "").lower() == "delivery" and is_active:
                 delivery_in_work += 1
-                if self.is_delivery_overdue(order):
+                if self.is_delivery_overdue(order, now):
                     overdue_deliveries += 1
                     attention.append({"title": f"Просрочена доставка #{order['id']}", "href": url_for("admin.delivery")})
             if is_cancelled and start.isoformat(timespec="seconds") <= str(order.get("cancelled_at") or "") < end.isoformat(timespec="seconds"):
@@ -673,8 +780,9 @@ class AdminService:
             "today_orders": today_orders[:8],
         }
 
-    def list_audit_actions(self, *, entity_type: str | None = None, entity_id: str | int | None = None, filters: dict | None = None, limit: int = 50):
+    def list_audit_actions(self, *, entity_type: str | None = None, entity_id: str | int | None = None, filters: dict | None = None, limit: int = 50, page: int = 1):
         filters = filters or {}
+        normalized_page, normalized_per_page = _normalize_pagination(page, limit, default_per_page=limit, max_per_page=100)
         conditions = []
         params = []
         if entity_type:
@@ -704,6 +812,15 @@ class AdminService:
             conditions.append("a.created_at::date <= %s::date")
             params.append(date_to)
         where_sql = "WHERE " + " AND ".join(conditions) if conditions else ""
+        count_row = self._fetch_one(
+            f"""
+            SELECT COUNT(*) AS count
+            FROM admin_actions a
+            {where_sql}
+            """,
+            tuple(params),
+        ) or {"count": 0}
+        pagination = _build_pagination(_safe_int(count_row.get("count")), normalized_page, normalized_per_page)
         rows = self._fetch_all(
             f"""
             SELECT a.*, u.name AS admin_name
@@ -711,7 +828,7 @@ class AdminService:
             LEFT JOIN users u ON u.id = a.admin_user_id
             {where_sql}
             ORDER BY a.created_at DESC, a.id DESC
-            LIMIT {int(limit)}
+            LIMIT {pagination["per_page"]} OFFSET {pagination["offset"]}
             """,
             tuple(params),
         )
@@ -721,9 +838,13 @@ class AdminService:
                 row["payload"] = json.loads(payload_text)
             except json.JSONDecodeError:
                 row["payload"] = {"raw": payload_text}
-        return rows
+        if entity_type is not None or entity_id is not None:
+            return rows
+        return rows, pagination
 
     def audit_filter_options(self):
+        if self._audit_filter_options_cache is not None:
+            return self._audit_filter_options_cache
         admins = self._fetch_all(
             """
             SELECT DISTINCT u.id, u.name
@@ -735,7 +856,8 @@ class AdminService:
         )
         actions = self._fetch_all("SELECT DISTINCT action_type FROM admin_actions ORDER BY action_type")
         entities = self._fetch_all("SELECT DISTINCT entity_type FROM admin_actions ORDER BY entity_type")
-        return {"admins": admins, "actions": actions, "entities": entities}
+        self._audit_filter_options_cache = {"admins": admins, "actions": actions, "entities": entities}
+        return self._audit_filter_options_cache
 
     def table_occupancy_for_date(self, booking_date: str):
         rows = self._fetch_all(
@@ -762,57 +884,92 @@ class AdminService:
         if mode in {"dine_in", "delivery"}:
             mode_sql = "AND order_type = %s"
             params.append(mode)
-        orders = self._fetch_all(
+        payable_total_sql = """
+            GREATEST(
+                COALESCE(payable_total, COALESCE(items_total, 0) - COALESCE(points_applied, 0)),
+                0
+            )
+        """
+        bonus_earned_sql = f"""
+            CASE
+                WHEN bonus_earned IS NULL
+                    OR (
+                        COALESCE(bonus_earned, 0) <= 0
+                        AND COALESCE(points_applied, 0) <= 0
+                        AND {payable_total_sql} > 0
+                    )
+                THEN FLOOR({payable_total_sql} * 0.05)
+                ELSE GREATEST(COALESCE(bonus_earned, 0), 0)
+            END
+        """
+        aggregate_row = self._fetch_one(
             f"""
-            SELECT *
+            SELECT
+                COUNT(*) AS orders_count,
+                COALESCE(SUM(CASE WHEN LOWER(status) = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancellations,
+                COALESCE(SUM(GREATEST(COALESCE(points_applied, 0), 0)), 0) AS points_applied,
+                COALESCE(SUM({bonus_earned_sql}), 0) AS bonus_earned,
+                COALESCE(SUM(CASE WHEN LOWER(status) <> 'cancelled' THEN {payable_total_sql} ELSE 0 END), 0) AS revenue,
+                COALESCE(SUM(CASE WHEN LOWER(status) <> 'cancelled' AND LOWER(COALESCE(order_type, 'dine_in')) = 'dine_in' THEN {payable_total_sql} ELSE 0 END), 0) AS dine_in_revenue,
+                COALESCE(SUM(CASE WHEN LOWER(status) <> 'cancelled' AND LOWER(COALESCE(order_type, 'dine_in')) = 'delivery' THEN {payable_total_sql} ELSE 0 END), 0) AS delivery_revenue
             FROM orders
             WHERE created_at >= %s
             {mode_sql}
-            ORDER BY created_at ASC
+            """,
+            tuple(params),
+        ) or {}
+        daily_rows = self._fetch_all(
+            f"""
+            SELECT
+                created_at::date::text AS label,
+                COUNT(*) AS orders_count,
+                COALESCE(SUM(CASE WHEN LOWER(status) = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancellations,
+                COALESCE(SUM(CASE WHEN LOWER(status) <> 'cancelled' THEN {payable_total_sql} ELSE 0 END), 0) AS revenue,
+                COALESCE(SUM(CASE WHEN LOWER(COALESCE(order_type, 'dine_in')) = 'dine_in' THEN 1 ELSE 0 END), 0) AS dine_in_orders,
+                COALESCE(SUM(CASE WHEN LOWER(COALESCE(order_type, 'dine_in')) = 'delivery' THEN 1 ELSE 0 END), 0) AS delivery_orders
+            FROM orders
+            WHERE created_at >= %s
+            {mode_sql}
+            GROUP BY created_at::date
+            ORDER BY created_at::date ASC
             """,
             tuple(params),
         )
         metrics = {
-            "revenue": 0,
-            "orders_count": len(orders),
-            "dine_in_revenue": 0,
-            "delivery_revenue": 0,
+            "revenue": _safe_int(aggregate_row.get("revenue")),
+            "orders_count": _safe_int(aggregate_row.get("orders_count")),
+            "dine_in_revenue": _safe_int(aggregate_row.get("dine_in_revenue")),
+            "delivery_revenue": _safe_int(aggregate_row.get("delivery_revenue")),
             "bookings_count": _safe_int(
                 self._fetch_one("SELECT COUNT(*) AS count FROM bookings WHERE booking_date >= %s::date", (start.date().isoformat(),))["count"]
             ),
-            "cancellations": 0,
-            "points_applied": 0,
-            "bonus_earned": 0,
+            "cancellations": _safe_int(aggregate_row.get("cancellations")),
+            "points_applied": _safe_int(aggregate_row.get("points_applied")),
+            "bonus_earned": _safe_int(aggregate_row.get("bonus_earned")),
         }
         revenue_by_day = OrderedDict()
         orders_by_day = OrderedDict()
         cancels_by_day = OrderedDict()
+        channels_by_day = OrderedDict()
         split = {"dine_in": 0, "delivery": 0}
         for offset in range(days):
             label = (start + timedelta(days=offset)).date().isoformat()
             revenue_by_day[label] = 0
             orders_by_day[label] = 0
             cancels_by_day[label] = 0
-        for order in orders:
-            totals = summarize_saved_order_totals(order, recompute_zero_bonus=True)
-            created_at = _parse_iso_datetime(order.get("created_at"))
-            label = created_at.date().isoformat() if created_at else start.date().isoformat()
+            channels_by_day[label] = {"dine_in": 0, "delivery": 0}
+        for row in daily_rows:
+            label = str(row.get("label") or "").strip()
             if label not in revenue_by_day:
                 continue
-            orders_by_day[label] += 1
-            split[(order.get("order_type") or "dine_in").lower()] = split.get((order.get("order_type") or "dine_in").lower(), 0) + 1
-            metrics["points_applied"] += totals["points_applied"]
-            metrics["bonus_earned"] += totals["bonus_earned"]
-            if (order.get("status") or "").lower() == "cancelled":
-                metrics["cancellations"] += 1
-                cancels_by_day[label] += 1
-                continue
-            revenue_by_day[label] += totals["payable_total"]
-            metrics["revenue"] += totals["payable_total"]
-            if (order.get("order_type") or "").lower() == "delivery":
-                metrics["delivery_revenue"] += totals["payable_total"]
-            else:
-                metrics["dine_in_revenue"] += totals["payable_total"]
+            orders_by_day[label] = _safe_int(row.get("orders_count"))
+            cancels_by_day[label] = _safe_int(row.get("cancellations"))
+            revenue_by_day[label] = _safe_int(row.get("revenue"))
+            dine_in_orders = _safe_int(row.get("dine_in_orders"))
+            delivery_orders = _safe_int(row.get("delivery_orders"))
+            channels_by_day[label] = {"dine_in": dine_in_orders, "delivery": delivery_orders}
+            split["dine_in"] += dine_in_orders
+            split["delivery"] += delivery_orders
         metrics["average_check"] = int(metrics["revenue"] / metrics["orders_count"]) if metrics["orders_count"] else 0
         top_items = self._fetch_all(
             f"""
@@ -828,7 +985,6 @@ class AdminService:
               AND LOWER(o.status) <> 'cancelled'
             GROUP BY oi.item_id, oi.name
             ORDER BY qty_total DESC, revenue_total DESC
-            LIMIT 8
             """,
             tuple(params),
         )
@@ -843,19 +999,23 @@ class AdminService:
                 "revenue_by_day": [{"label": key, "value": value} for key, value in revenue_by_day.items()],
                 "orders_by_day": [{"label": key, "value": value} for key, value in orders_by_day.items()],
                 "cancels_by_day": [{"label": key, "value": value} for key, value in cancels_by_day.items()],
+                "channels_by_day": [
+                    {"label": key, "dine_in": value.get("dine_in", 0), "delivery": value.get("delivery", 0)}
+                    for key, value in channels_by_day.items()
+                ],
                 "split": [
                     {"label": "Зал", "value": split.get("dine_in", 0)},
                     {"label": "Доставка", "value": split.get("delivery", 0)},
                 ],
-                "top_qty": [{"label": item["name"], "value": _safe_int(item["qty_total"])} for item in top_items],
-                "top_revenue": [{"label": item["name"], "value": _safe_int(item["revenue_total"])} for item in top_items],
+                "top_qty": [{"label": item["name"], "value": _safe_int(item["qty_total"])} for item in top_items[:12]],
+                "top_revenue": [{"label": item["name"], "value": _safe_int(item["revenue_total"])} for item in top_items[:12]],
             },
             "top_items": top_items,
             "no_sales_items": no_sales_items,
         }
 
-    def list_menu_items(self, filters: dict):
-        items = self.menu_content.load_menu_items_admin()
+    def list_menu_items(self, filters: dict, items: list[dict] | None = None):
+        items = list(items) if items is not None else self.menu_content.load_menu_items_admin()
         search = str(filters.get("search") or "").strip().lower()
         category = str(filters.get("category") or "").strip()
         featured = str(filters.get("featured") or "").strip()
@@ -867,8 +1027,8 @@ class AdminService:
             items = [item for item in items if item.get("featured")]
         return items
 
-    def list_promo_items(self, filters: dict):
-        items = self.menu_content.load_promo_items(include_inactive=True)
+    def list_promo_items(self, filters: dict, items: list[dict] | None = None):
+        items = list(items) if items is not None else self.menu_content.load_promo_items(include_inactive=True)
         item_class = str(filters.get("class_name") or "").strip()
         if item_class:
             items = [item for item in items if item.get("class") == item_class]
@@ -987,6 +1147,7 @@ class AdminService:
             reason=reason,
             payload={"class": class_name, "folder": target_dir.name, "photo_saved": saved_photo},
         )
+        self.invalidate_menu_cache()
 
     def delete_promo_item(self, *, admin_user_id: int, class_name: str, item_id: int, reason: str):
         if not reason:
@@ -1007,6 +1168,7 @@ class AdminService:
             reason=reason,
             payload={"class": class_name, "folder": target_dir.name},
         )
+        self.invalidate_menu_cache()
 
     def _save_image(self, target_dir: Path, upload: FileStorage | None):
         if upload is None or not upload.filename:
@@ -1021,6 +1183,8 @@ class AdminService:
         return True
 
     def invalidate_menu_cache(self):
+        if hasattr(self.menu_content, "invalidate_local_cache"):
+            self.menu_content.invalidate_local_cache()
         client = self.menu_content.get_redis_client()
         if client is None:
             return
@@ -1047,18 +1211,73 @@ class AdminService:
             return "past"
         return "active"
 
-    def is_delivery_overdue(self, order: dict):
+    def _build_runtime_timeline(self, order: dict, now: datetime | None = None):
+        return build_order_status_timeline_value(
+            order,
+            now or current_time_value(),
+            ORDER_STATUS_STEPS,
+            parse_iso_datetime_value,
+        )
+
+    def resolve_effective_order_status(self, order: dict, now: datetime | None = None):
+        stored_status = str((order or {}).get("status") or "").strip().lower()
+        if stored_status == "cancelled":
+            return "cancelled"
+
+        order_type = str((order or {}).get("order_type") or "").strip().lower()
+        timeline = self._build_runtime_timeline(order, now)
+
+        if order_type == "delivery":
+            rank_to_status = {1: "cooking", 2: "delivering", 3: "served"}
+            status_to_rank = {
+                "preparing": 1,
+                "cooking": 1,
+                "ready": 2,
+                "delivering": 2,
+                "served": 3,
+            }
+            timeline_to_rank = {
+                "cooking": 1,
+                "courier_sent": 2,
+                "delivering": 2,
+                "delivered": 3,
+            }
+            completed_rank = 3
+        else:
+            rank_to_status = {1: "preparing", 2: "cooking", 3: "ready", 4: "delivering", 5: "served"}
+            status_to_rank = {
+                "preparing": 1,
+                "cooking": 2,
+                "ready": 3,
+                "delivering": 4,
+                "served": 5,
+            }
+            timeline_to_rank = {
+                "waiting": 1,
+                "preparing": 2,
+                "delivering": 4,
+                "served": 5,
+            }
+            completed_rank = 5
+
+        stored_rank = status_to_rank.get(stored_status, 0)
+        derived_rank = completed_rank if timeline is None else timeline_to_rank.get(str(timeline.get("phase") or "").strip().lower(), 0)
+        effective_rank = max(stored_rank, derived_rank)
+        return rank_to_status.get(effective_rank, stored_status or rank_to_status[completed_rank])
+
+    def is_delivery_overdue(self, order: dict, now: datetime | None = None):
         if (order.get("order_type") or "").lower() != "delivery":
             return False
-        if (order.get("status") or "").lower() in {"served", "cancelled"}:
+        effective_status = self.resolve_effective_order_status(order, now)
+        if effective_status in {"served", "cancelled"}:
             return False
         created_at = _parse_iso_datetime(order.get("created_at"))
         if created_at is None:
             return False
         eta_minutes = _safe_int(order.get("delivery_eta_minutes"), 20)
-        return created_at + timedelta(minutes=eta_minutes) < datetime.now()
+        return created_at + timedelta(minutes=eta_minutes) < (now or current_time_value())
 
-    def status_label(self, status: str | None):
+    def status_label(self, status: str | None, order_type: str | None = None):
         mapping = {
             "preparing": "Готовится",
             "cooking": "Готовится",
@@ -1068,4 +1287,22 @@ class AdminService:
             "cancelled": "Отменён",
         }
         normalized = str(status or "").strip().lower()
+        normalized_order_type = str(order_type or "").strip().lower()
+        if normalized == "served" and normalized_order_type == "delivery":
+            return "Доставлен"
+        return mapping.get(normalized, normalized or "—")
+
+    def order_status_filter_label(self, status: str | None, order_type: str | None = None):
+        normalized = str(status or "").strip().lower()
+        normalized_order_type = str(order_type or "").strip().lower()
+        if normalized_order_type == "delivery":
+            return DELIVERY_STATUS_FILTER_LABELS.get(normalized, self.status_label(normalized, normalized_order_type))
+        return ORDER_STATUS_FILTER_LABELS.get(normalized, self.status_label(normalized, normalized_order_type))
+
+    def order_type_label(self, order_type: str | None):
+        mapping = {
+            "dine_in": "Зал",
+            "delivery": "Доставка",
+        }
+        normalized = str(order_type or "").strip().lower()
         return mapping.get(normalized, normalized or "—")

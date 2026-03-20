@@ -4,7 +4,7 @@
   <article class="admin-card">
     <div class="admin-section-head">
       <div>
-        <p class="admin-topbar__eyebrow">Booking</p>
+        <p class="admin-topbar__eyebrow">Бронь</p>
         <h2>Бронь #{{ booking.id }}</h2>
       </div>
       <span class="admin-badge">{{ booking.state_label }}</span>
@@ -15,7 +15,7 @@
       <div><span>Стол</span><strong>{{ booking.table_id }}</strong></div>
       <div><span>Дата и время</span><strong>{{ booking.booking_date|ru_date }} {{ booking.booking_time|ru_time }}</strong></div>
       <div><span>Создано</span><strong>{{ booking.created_at|ru_datetime }}</strong></div>
-      <div><span>User ID</span><strong><a href="{{ url_for('admin.user_detail', user_id=booking.user_id) }}">{{ booking.user_id }}</a></strong></div>
+      <div><span>ID пользователя</span><strong><a href="{{ url_for('admin.user_detail', user_id=booking.user_id) }}">{{ booking.user_id }}</a></strong></div>
     </div>
     <div class="admin-inline-form">
       <button class="admin-button admin-button--danger" type="button" data-admin-api="{{ url_for('admin.api_booking_cancel', booking_id=booking.id) }}" data-admin-title="Отменить бронь" data-admin-message="Бронь будет удалена из bookings. Причина обязательна.">Отменить бронь</button>
@@ -29,7 +29,7 @@
         {% for order in booking.related_orders %}
           <a class="admin-list__item" href="{{ url_for('admin.order_detail', order_id=order.id) }}">
             <strong>Заказ #{{ order.id }}</strong>
-            <span>{{ order.order_type }} · {{ order.created_at|ru_datetime }} · {{ order.payable_total }} ₽</span>
+            <span>{{ order.order_type_label }} · {{ order.status_label }} · {{ order.created_at|ru_datetime }} · {{ order.payable_total }} ₽</span>
           </a>
         {% endfor %}
       </div>

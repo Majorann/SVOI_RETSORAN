@@ -10,7 +10,7 @@
     <strong>{{ dashboard.kpis.active_bookings }}</strong>
   </article>
   <article class="admin-card admin-kpi">
-    <span class="admin-kpi__label">Delivery в работе</span>
+    <span class="admin-kpi__label">Доставки в работе</span>
     <strong>{{ dashboard.kpis.delivery_in_work }}</strong>
   </article>
   <article class="admin-card admin-kpi">
@@ -31,7 +31,7 @@
   <article class="admin-card">
     <div class="admin-section-head">
       <div>
-        <p class="admin-topbar__eyebrow">Attention</p>
+        <p class="admin-topbar__eyebrow">Фокус</p>
         <h2>Требует внимания</h2>
       </div>
     </div>
@@ -49,7 +49,7 @@
   <article class="admin-card">
     <div class="admin-section-head">
       <div>
-        <p class="admin-topbar__eyebrow">Soon</p>
+        <p class="admin-topbar__eyebrow">Скоро</p>
         <h2>Ближайшие брони</h2>
       </div>
       <a class="admin-link" href="{{ url_for('admin.bookings') }}">Все брони</a>
@@ -73,7 +73,7 @@
   <article class="admin-card">
     <div class="admin-section-head">
       <div>
-        <p class="admin-topbar__eyebrow">Today</p>
+        <p class="admin-topbar__eyebrow">Сегодня</p>
         <h2>Сегодняшние заказы</h2>
       </div>
       <a class="admin-link" href="{{ url_for('admin.orders', preset='today') }}">Открыть список</a>
@@ -86,10 +86,10 @@
           </thead>
           <tbody>
             {% for order in dashboard.today_orders %}
-              <tr>
+              <tr class="{% if order.status == 'cancelled' %}admin-row admin-row--danger{% elif order.delivery_overdue %}admin-row admin-row--warning{% elif order.status == 'served' %}admin-row admin-row--success{% endif %}">
                 <td><a href="{{ url_for('admin.order_detail', order_id=order.id) }}">#{{ order.id }}</a></td>
-                <td>{{ order.order_type }}</td>
-                <td><span class="admin-badge">{{ order.status_label }}</span></td>
+                <td>{{ order.order_type_label }}</td>
+                <td><span class="admin-badge {% if order.status == 'served' %}admin-badge--success{% elif order.status == 'cancelled' %}admin-badge--danger{% endif %}">{{ order.status_label }}</span></td>
                 <td>{{ order.created_at|ru_datetime }}</td>
               </tr>
             {% endfor %}
@@ -104,7 +104,7 @@
   <article class="admin-card">
     <div class="admin-section-head">
       <div>
-        <p class="admin-topbar__eyebrow">Audit</p>
+        <p class="admin-topbar__eyebrow">Журнал</p>
         <h2>Последняя активность</h2>
       </div>
       <a class="admin-link" href="{{ url_for('admin.audit_log') }}">Журнал</a>
