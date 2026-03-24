@@ -159,10 +159,18 @@ class AuthSessionService:
             return None
         return {"user_id": user_id}
 
-    def issue_checkout_preview_token(self, preview: dict) -> str:
-        return self.checkout_preview_serializer.dumps({"preview": preview, "v": 1})
+    def issue_checkout_preview_token(self, preview: dict, *, user_id: int | None = None) -> str:
+        payload = {"preview": preview, "v": 2}
+        if user_id is not None:
+            try:
+                normalized_user_id = int(user_id)
+            except (TypeError, ValueError):
+                normalized_user_id = 0
+            if normalized_user_id > 0:
+                payload["user_id"] = normalized_user_id
+        return self.checkout_preview_serializer.dumps(payload)
 
-    def verify_checkout_preview_token(self, token: str | None):
+    def verify_checkout_preview_token(self, token: str | None, *, expected_user_id: int | None = None):
         if not token:
             return None
         try:
@@ -172,6 +180,18 @@ class AuthSessionService:
             )
         except (BadSignature, SignatureExpired):
             return None
+        if expected_user_id is not None:
+            try:
+                normalized_expected_user_id = int(expected_user_id)
+            except (TypeError, ValueError):
+                return None
+            token_user_id = payload.get("user_id")
+            try:
+                normalized_token_user_id = int(token_user_id)
+            except (TypeError, ValueError):
+                return None
+            if normalized_expected_user_id <= 0 or normalized_token_user_id != normalized_expected_user_id:
+                return None
         preview = payload.get("preview")
         return preview if isinstance(preview, dict) else None
 

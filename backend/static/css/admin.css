@@ -970,6 +970,42 @@ body.page-admin {
   gap: 14px;
 }
 
+.admin-helper-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--admin-border);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.admin-helper-panel.is-disabled {
+  opacity: 0.55;
+}
+
+.admin-helper-panel__head,
+.admin-helper-panel__block {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-helper-panel__block h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.admin-note--success {
+  color: var(--admin-success);
+}
+
+.admin-note--danger {
+  color: var(--admin-danger);
+}
+
+.admin-form__grid--helper {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .admin-promo-preview-card {
   display: grid;
   gap: 0;

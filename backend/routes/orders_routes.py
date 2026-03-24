@@ -1,14 +1,56 @@
+import json
 from datetime import datetime, timedelta
 
 from flask import g, jsonify, redirect, render_template, request, session, url_for
 from services.business_logic import current_timestamp_value
-from services.order_totals import calculate_order_totals
+from services.promotions import build_priced_order_preview
 
 
 def _payment_error_response(message: str, redirect_endpoint: str = "checkout", status_code: int = 400):
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
         return jsonify({"ok": False, "error": message}), status_code
     return redirect(url_for(redirect_endpoint, error=message))
+
+
+def _resolve_checkout_items_from_preview(preview_items, menu_items: list[dict]) -> list[dict]:
+    if not isinstance(preview_items, list):
+        return []
+    menu_index = {}
+    for menu_item in menu_items or []:
+        if not isinstance(menu_item, dict):
+            continue
+        try:
+            menu_item_id = int(menu_item.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if menu_item_id > 0:
+            menu_index[menu_item_id] = menu_item
+
+    resolved_items = []
+    for item in preview_items:
+        if not isinstance(item, dict) or bool(item.get("is_gift")):
+            continue
+        try:
+            item_id = int(item.get("id"))
+            qty = int(item.get("qty"))
+        except (TypeError, ValueError):
+            continue
+        if item_id <= 0 or qty <= 0:
+            continue
+        menu_item = menu_index.get(item_id)
+        if menu_item is None:
+            continue
+        resolved_items.append(
+            {
+                "id": item_id,
+                "name": menu_item.get("name", ""),
+                "price": int(menu_item.get("price", 0) or 0),
+                "qty": qty,
+                "type": menu_item.get("type", ""),
+                "photo": menu_item.get("photo"),
+            }
+        )
+    return resolved_items
 
 
 def orders_route(load_orders):
@@ -85,6 +127,10 @@ def payment_route(
     latest_user_booking_status,
     resolve_order_items,
     parse_serving_option,
+    load_orders,
+    load_promo_application_counts,
+    load_promo_items,
+    load_menu_items,
     issue_checkout_preview_token,
 ):
     user_id = session.get("user_id")
@@ -113,11 +159,25 @@ def payment_route(
         serving = {"mode": "booking_start", "label": "К началу брони"}
 
     use_points = (request.form.get("use_points") or "") == "1"
-    totals = calculate_order_totals(
-        items,
+    pricing = build_priced_order_preview(
+        items=items,
         points_balance=user_balance,
         use_points=use_points,
+        user_id=user_id,
+        load_orders_fn=load_orders,
+        load_promo_application_counts_fn=load_promo_application_counts,
+        promo_items=load_promo_items(),
+        menu_items=load_menu_items(),
     )
+    print(
+        "[promo] payment preview user_id={0} items={1} promo_points={2} applied={3}".format(
+            user_id,
+            [{"id": item.get("id"), "qty": item.get("qty")} for item in pricing["items"]],
+            pricing["promo_points"],
+            pricing["promotions_applied"],
+        )
+    )
+    totals = pricing["totals"]
     payment_error_code = None
     payment_error_text = None
     if booking_state == "no_booking":
@@ -135,12 +195,17 @@ def payment_route(
 
     can_pay = payment_error_code is None
     preview = {
-        "items": items,
+        "items": pricing["items"],
         "items_total": totals["items_total"],
-        "items_count": sum(item["qty"] for item in items),
+        "items_count": sum(item["qty"] for item in pricing["items"]),
+        "discount_total": pricing["discount_total"],
         "points_applied": totals["points_applied"],
         "payable_total": totals["payable_total"],
         "bonus_earned": totals["bonus_earned"],
+        "promo_points": pricing["promo_points"],
+        "promo_notifications": pricing["promo_notifications"],
+        "promotions_applied": pricing["promotions_applied"],
+        "discount": pricing["discount"],
         "comment": comment,
         "serving": serving,
         "booking": {
@@ -155,7 +220,7 @@ def payment_route(
             "expiry": (active_card or {}).get("expiry"),
         },
     }
-    preview_token = issue_checkout_preview_token(preview) if can_pay else ""
+    preview_token = issue_checkout_preview_token(preview, user_id=user_id) if can_pay else ""
     session["checkout_preview"] = preview if can_pay else None
     return render_template(
         "payment.html",
@@ -164,6 +229,68 @@ def payment_route(
         can_pay=can_pay,
         payment_error_code=payment_error_code,
         payment_error_text=payment_error_text,
+    )
+
+
+def checkout_promo_preview_route(
+    load_users,
+    resolve_order_items,
+    load_orders,
+    load_promo_application_counts,
+    load_promo_items,
+    load_menu_items,
+):
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"ok": False, "error": "Войдите, чтобы продолжить оформление."}), 401
+
+    payload = request.get_json(silent=True) or {}
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        raw_items = []
+
+    normalized_source_items = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            item_id = int(item.get("id"))
+            qty = int(item.get("qty"))
+        except (TypeError, ValueError):
+            continue
+        if item_id <= 0 or qty <= 0:
+            continue
+        normalized_source_items.append({"id": item_id, "qty": qty})
+
+    resolved_items = resolve_order_items(json.dumps(normalized_source_items, ensure_ascii=False))
+
+    user = getattr(g, "current_user", None)
+    if not user or user.get("id") != user_id:
+        user = next((u for u in load_users() if u.get("id") == user_id), None)
+    if user is None:
+        return jsonify({"ok": False, "error": "Пользователь не найден."}), 404
+
+    use_points = bool(payload.get("use_points"))
+    pricing = build_priced_order_preview(
+        items=resolved_items,
+        points_balance=int((user or {}).get("balance", 0) or 0),
+        use_points=use_points,
+        user_id=user_id,
+        load_orders_fn=load_orders,
+        load_promo_application_counts_fn=load_promo_application_counts,
+        promo_items=load_promo_items(),
+        menu_items=load_menu_items(),
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "promo_points": pricing["promo_points"],
+            "promo_notifications": pricing["promo_notifications"],
+            "promotions_applied": pricing["promotions_applied"],
+            "discount_total": pricing["discount_total"],
+            "discount": pricing["discount"],
+            "totals": pricing["totals"],
+        }
     )
 
 
@@ -178,6 +305,10 @@ def payment_confirm_route(
     users_path,
     save_users,
     verify_checkout_preview_token,
+    load_promo_application_counts,
+    save_promotion_applications,
+    load_promo_items,
+    load_menu_items,
 ):
     user_id = session.get("user_id")
     if not user_id:
@@ -188,7 +319,7 @@ def payment_confirm_route(
     preview = session.get("checkout_preview")
     if not preview:
         preview_token = (request.form.get("preview_token") or "").strip()
-        preview = verify_checkout_preview_token(preview_token)
+        preview = verify_checkout_preview_token(preview_token, expected_user_id=user_id)
         if preview is None:
             return _payment_error_response("Сессия оплаты истекла. Повторите оформление.", status_code=409)
 
@@ -218,39 +349,34 @@ def payment_confirm_route(
         session.pop("checkout_preview", None)
         return redirect(url_for("checkout", error="Некорректные данные заказа."))
 
-    items = []
-    for item in preview_items:
-        if not isinstance(item, dict):
-            continue
-        try:
-            item_id = int(item.get("id"))
-            qty = int(item.get("qty"))
-            price = int(item.get("price"))
-        except (TypeError, ValueError):
-            continue
-        if qty <= 0 or price < 0:
-            continue
-        items.append(
-            {
-                "id": item_id,
-                "name": item.get("name", ""),
-                "price": price,
-                "qty": qty,
-                "photo": item.get("photo"),
-            }
-        )
+    items = _resolve_checkout_items_from_preview(preview_items, load_menu_items())
 
     if not items:
         session.pop("checkout_preview", None)
-        return _payment_error_response("Корзина пуста.", status_code=409)
+        return _payment_error_response("Часть блюд больше недоступна. Проверьте корзину и повторите оплату.", status_code=409)
 
     current_balance = int(user.get("balance", 0) or 0)
     requested_points = int(preview.get("points_applied", 0) or 0)
-    totals = calculate_order_totals(
-        items,
+    pricing = build_priced_order_preview(
+        items=items,
         points_balance=current_balance,
         requested_points=requested_points,
+        user_id=user_id,
+        load_orders_fn=load_orders,
+        load_promo_application_counts_fn=load_promo_application_counts,
+        promo_items=load_promo_items(),
+        menu_items=load_menu_items(),
     )
+    print(
+        "[promo] payment confirm user_id={0} items={1} promo_points={2} applied={3}".format(
+            user_id,
+            [{"id": item.get("id"), "qty": item.get("qty")} for item in pricing["items"]],
+            pricing["promo_points"],
+            pricing["promotions_applied"],
+        )
+    )
+    totals = pricing["totals"]
+    priced_items = pricing["items"]
 
     with json_file_lock(orders_path):
         orders = load_orders()
@@ -260,11 +386,15 @@ def payment_confirm_route(
             "user_id": user_id,
             "status": "preparing",
             "created_at": current_timestamp_value(),
-            "items": items,
+            "items": priced_items,
             "items_total": totals["items_total"],
+            "discount_total": pricing["discount_total"],
             "points_applied": totals["points_applied"],
             "payable_total": totals["payable_total"],
             "bonus_earned": totals["bonus_earned"],
+            "promo_points": pricing["promo_points"],
+            "promo_notifications": list(pricing["promo_notifications"]),
+            "promotions_applied": list(pricing["promotions_applied"]),
             "comment": preview.get("comment", ""),
             "serving": preview.get("serving", {}),
             "booking": {
@@ -281,13 +411,23 @@ def payment_confirm_route(
         }
         orders.append(new_order)
         save_orders(orders)
+        save_promotion_applications(
+            order_id=order_id,
+            user_id=user_id,
+            applied_promotions=pricing["promotions_applied"],
+            applied_at=datetime.fromisoformat(new_order["created_at"]),
+        )
 
     with json_file_lock(users_path):
         users = load_users()
         user = next((u for u in users if u.get("id") == user_id), None)
         if user is not None:
             current_balance = int(user.get("balance", 0) or 0)
-            user["balance"] = max(0, current_balance - totals["points_applied"]) + totals["bonus_earned"]
+            user["balance"] = (
+                max(0, current_balance - totals["points_applied"])
+                + totals["bonus_earned"]
+                + pricing["promo_points"]
+            )
             save_users(users)
             g.current_user = user
             g.current_user_id = user_id

@@ -31,6 +31,23 @@
   <article class="admin-card">
     <div class="admin-section-head">
       <div>
+        <p class="admin-topbar__eyebrow">Синхронизация</p>
+        <h2>Автосогласование</h2>
+      </div>
+    </div>
+    <p class="admin-empty">Подтянуть меню и акции с хоста в БД, а рекламу перечитать из файлов без перезапуска сайта.</p>
+    <button
+      class="admin-button"
+      type="button"
+      data-admin-api="{{ url_for('admin.api_content_autosync') }}"
+      data-admin-title="Автосогласование"
+      data-admin-message="Система перечитает файлы на хосте, обновит меню и акции в БД, затем сбросит кэш."
+    >Автосогласование</button>
+  </article>
+
+  <article class="admin-card">
+    <div class="admin-section-head">
+      <div>
         <p class="admin-topbar__eyebrow">Фокус</p>
         <h2>Требует внимания</h2>
       </div>

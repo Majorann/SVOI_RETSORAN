@@ -129,6 +129,14 @@
       </div>
       <div class="checkout-card checkout-total checkout-total--fixed" id="checkoutTotalPanel">
         <div class="checkout-brief-list" id="checkoutSummaryList"></div>
+        <section class="promo-highlight" id="checkoutPromoHighlight" hidden>
+          <div class="promo-highlight__head">
+            <span class="promo-highlight__eyebrow">Акция применена</span>
+            <span class="promo-highlight__chip" id="checkoutPromoChip">0</span>
+          </div>
+          <div class="promo-highlight__list" id="checkoutPromoList"></div>
+          <div class="promo-highlight__meta" id="checkoutPromoMeta"></div>
+        </section>
         <p class="checkout-total__hint">Сумма: <span id="checkoutTotal">0</span> ₽</p>
         <label class="checkout-points">
           <input type="checkbox" name="use_points" id="usePoints" value="1" {% if user_balance <= 0 %}disabled{% endif %} />

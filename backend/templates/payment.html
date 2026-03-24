@@ -61,6 +61,38 @@
     </section>
 
     <section class="payment-block payment-block--total" id="paymentTotalBlock">
+      {% set applied_promotions = preview.get("promotions_applied", []) %}
+      {% set promo_points = preview.get("promo_points", 0) %}
+      {% set discount_total = preview.get("discount_total", 0) %}
+      {% if applied_promotions %}
+      <section class="promo-highlight promo-highlight--payment">
+        <div class="promo-highlight__head">
+          <span class="promo-highlight__eyebrow">Акция применена</span>
+          <span class="promo-highlight__chip">{{ applied_promotions | length }}</span>
+        </div>
+        <div class="promo-highlight__list">
+          {% for promo in applied_promotions %}
+            <div class="promo-highlight__item">
+              <span class="promo-highlight__name">{{ promo.get("name") or "Акция" }}</span>
+              <span class="promo-highlight__value">
+                {% if promo.get("reward_kind") == "POINTS" %}
+                  +{{ promo_points }} баллов
+                {% elif promo.get("reward_kind") in ["DISCOUNT_PERCENT", "DISCOUNT_RUB"] and discount_total %}
+                  -{{ discount_total }} ₽
+                {% else %}
+                  ×{{ promo.get("applied_count", 1) }}
+                {% endif %}
+              </span>
+            </div>
+          {% endfor %}
+        </div>
+        {% if promo_points %}
+          <div class="promo-highlight__meta">Начислится дополнительно {{ promo_points }} бонусов после оплаты.</div>
+        {% elif discount_total %}
+          <div class="promo-highlight__meta">Скидка уже учтена в итоговой сумме заказа.</div>
+        {% endif %}
+      </section>
+      {% endif %}
       <p class="payment-total">Сумма заказа: <strong>{{ preview.get("items_total", 0) }} ₽</strong></p>
       {% if preview.get("points_applied", 0) %}
       <p class="payment-total">Списано баллов: <strong>{{ preview.get("points_applied", 0) }} ₽</strong></p>

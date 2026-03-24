@@ -474,6 +474,7 @@ def resolve_order_items_value(raw_items_json, load_menu_items_fn):
                 "name": menu_item["name"],
                 "price": menu_item["price"],
                 "qty": qty,
+                "type": menu_item.get("type", ""),
                 "photo": menu_item.get("photo"),
             }
         )

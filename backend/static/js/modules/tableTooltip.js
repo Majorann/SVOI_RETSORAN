@@ -273,7 +273,13 @@ const setupTableTooltip = () => {
       return;
     }
     const params = new URLSearchParams({ date: bookingDate.value, time: bookingTime.value });
-    const response = await fetch(`/availability?${params.toString()}`);
+    const response = await fetch(`/availability?${params.toString()}`, {
+      method: "GET",
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+      },
+    });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) return;
 

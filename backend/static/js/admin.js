@@ -449,11 +449,21 @@ if (promoForm) {
   const promoText = field("text");
   const promoLink = field("link");
   const promoLore = field("lore");
+  const promoCondition = field("condition");
+  const promoReward = field("reward");
+  const promoNotify = field("notify");
+  const promoRewardMode = field("reward_mode");
+  const promoLimitPerOrder = field("limit_per_order");
+  const promoLimitPerUserDay = field("limit_per_user_per_day");
   const promoPriority = field("priority");
   const promoStart = field("start_at");
   const promoEnd = field("end_at");
   const promoActive = field("active");
   const promoPhoto = field("photo");
+  const promoValidateButton = document.getElementById("adminPromoValidateButton");
+  const promoValidateResult = document.getElementById("adminPromoValidateResult");
+  const promoHelper = document.getElementById("adminPromoDslHelper");
+  const promoHelperStatus = document.getElementById("adminPromoHelperStatus");
   const promoPreviewType = document.getElementById("adminPromoPreviewType");
   const promoPreviewTitle = document.getElementById("adminPromoPreviewTitle");
   const promoPreviewBody = document.getElementById("adminPromoPreviewBody");
@@ -463,12 +473,116 @@ if (promoForm) {
   const promoPreviewMedia = document.getElementById("adminPromoPreviewMedia");
   const promoPreviewLink = document.getElementById("adminPromoPreviewLink");
   const promoScopedFields = Array.from(document.querySelectorAll("[data-promo-field]"));
+  const promoConditionSource = document.getElementById("promoConditionSource");
+  const promoConditionItemField = document.getElementById("promoConditionItemField");
+  const promoConditionTypeField = document.getElementById("promoConditionTypeField");
+  const promoConditionGroupField = document.getElementById("promoConditionGroupField");
+  const promoConditionItemId = document.getElementById("promoConditionItemId");
+  const promoConditionType = document.getElementById("promoConditionType");
+  const promoConditionGroupIds = document.getElementById("promoConditionGroupIds");
+  const promoConditionMetric = document.getElementById("promoConditionMetric");
+  const promoConditionOperator = document.getElementById("promoConditionOperator");
+  const promoConditionValue = document.getElementById("promoConditionValue");
+  const promoConditionSet = document.getElementById("promoConditionSet");
+  const promoConditionAnd = document.getElementById("promoConditionAnd");
+  const promoConditionOr = document.getElementById("promoConditionOr");
+  const promoConditionPreview = document.getElementById("promoConditionPreview");
+  const promoRewardKind = document.getElementById("promoRewardKind");
+  const promoRewardValueField = document.getElementById("promoRewardValueField");
+  const promoRewardValue = document.getElementById("promoRewardValue");
+  const promoRewardGiftIdField = document.getElementById("promoRewardGiftIdField");
+  const promoRewardGiftId = document.getElementById("promoRewardGiftId");
+  const promoRewardGiftQtyField = document.getElementById("promoRewardGiftQtyField");
+  const promoRewardGiftQty = document.getElementById("promoRewardGiftQty");
+  const promoRewardSet = document.getElementById("promoRewardSet");
+  const promoRewardPreview = document.getElementById("promoRewardPreview");
+
+  const setPromoValidationState = (message, kind = "") => {
+    if (!promoValidateResult) return;
+    promoValidateResult.textContent = message;
+    promoValidateResult.classList.remove("admin-note--success", "admin-note--danger");
+    if (kind === "success") {
+      promoValidateResult.classList.add("admin-note--success");
+    } else if (kind === "danger") {
+      promoValidateResult.classList.add("admin-note--danger");
+    }
+  };
+
+  const buildConditionFragment = () => {
+    const source = promoConditionSource?.value || "item";
+    const metric = promoConditionMetric?.value || "QTY";
+    const operator = promoConditionOperator?.value || ">=";
+    const rawValue = promoConditionValue?.value?.trim() || "1";
+    let left = "ID.QTY";
+    if (source === "item") {
+      const itemId = promoConditionItemId?.value?.trim() || "0";
+      left = `ID(${itemId}).${metric}`;
+    } else if (source === "type") {
+      const itemType = promoConditionType?.value?.trim() || "тип";
+      left = `ID.${itemType}.${metric}`;
+    } else if (source === "group") {
+      const groupIds = promoConditionGroupIds?.value?.trim() || "101,205";
+      left = `GROUP(${groupIds}).${metric}`;
+    } else if (source === "order") {
+      left = "ORDER.SUM";
+    }
+    return `${left} ${operator} ${rawValue}`;
+  };
+
+  const buildRewardFragment = () => {
+    const rewardKind = promoRewardKind?.value || "POINTS";
+    if (rewardKind === "GIFT") {
+      const giftId = promoRewardGiftId?.value?.trim() || "0";
+      const giftQty = promoRewardGiftQty?.value?.trim() || "1";
+      return `GIFT(${giftId}, ${giftQty})`;
+    }
+    return `${rewardKind}(${promoRewardValue?.value?.trim() || "100"})`;
+  };
+
+  const syncHelperVisibility = () => {
+    const isPromo = (promoType?.value || "akciya") === "akciya";
+    if (promoHelper) promoHelper.classList.toggle("is-disabled", !isPromo);
+    if (promoHelperStatus) {
+      promoHelperStatus.textContent = isPromo
+        ? "Соберите фрагмент и вставьте его в DSL-поле."
+        : "Для reklama helper отключён.";
+    }
+  };
+
+  const syncConditionBuilder = () => {
+    const source = promoConditionSource?.value || "item";
+    if (promoConditionItemField) promoConditionItemField.hidden = source !== "item";
+    if (promoConditionTypeField) promoConditionTypeField.hidden = source !== "type";
+    if (promoConditionGroupField) promoConditionGroupField.hidden = source !== "group";
+    if (promoConditionMetric) promoConditionMetric.value = source === "order" ? "SUM" : promoConditionMetric.value || "QTY";
+    if (promoConditionMetric) promoConditionMetric.disabled = source === "order";
+    const fragment = buildConditionFragment();
+    if (promoConditionPreview) promoConditionPreview.textContent = fragment;
+  };
+
+  const syncRewardBuilder = () => {
+    const rewardKind = promoRewardKind?.value || "POINTS";
+    const isGift = rewardKind === "GIFT";
+    if (promoRewardValueField) promoRewardValueField.hidden = isGift;
+    if (promoRewardGiftIdField) promoRewardGiftIdField.hidden = !isGift;
+    if (promoRewardGiftQtyField) promoRewardGiftQtyField.hidden = !isGift;
+    if (promoRewardPreview) promoRewardPreview.textContent = buildRewardFragment();
+  };
+
+  const insertConditionFragment = (joiner = "") => {
+    if (!promoCondition) return;
+    const fragment = buildConditionFragment();
+    const current = promoCondition.value.trim();
+    promoCondition.value = joiner && current ? `${current} ${joiner} ${fragment}` : fragment;
+    promoCondition.dispatchEvent(new Event("input", { bubbles: true }));
+  };
 
   const syncPromoFields = () => {
     const type = promoType?.value || "akciya";
     promoScopedFields.forEach((node) => {
       node.hidden = node.dataset.promoField !== type;
     });
+    syncHelperVisibility();
   };
 
   const syncPromoPreview = () => {
@@ -481,7 +595,7 @@ if (promoForm) {
     if (promoPreviewBody) {
       promoPreviewBody.textContent =
         type === "akciya"
-          ? promoLore?.value?.trim() || "Здесь появится описание акции."
+          ? promoLore?.value?.trim() || promoCondition?.value?.trim() || "Здесь появится описание акции."
           : promoLink?.value?.trim() || "Здесь появится ссылка рекламы.";
     }
     if (promoPreviewPriority) promoPreviewPriority.textContent = promoPriority?.value?.trim() || "100";
@@ -498,12 +612,94 @@ if (promoForm) {
     }
   };
 
-  [promoType, promoName, promoText, promoLink, promoLore, promoPriority, promoStart, promoEnd, promoActive].forEach((input) => {
+  [
+    promoType,
+    promoName,
+    promoText,
+    promoLink,
+    promoLore,
+    promoCondition,
+    promoReward,
+    promoNotify,
+    promoRewardMode,
+    promoLimitPerOrder,
+    promoLimitPerUserDay,
+    promoPriority,
+    promoStart,
+    promoEnd,
+    promoActive,
+  ].forEach((input) => {
     input?.addEventListener("input", syncPromoPreview);
     input?.addEventListener("change", () => {
       syncPromoFields();
       syncPromoPreview();
     });
+  });
+
+  promoValidateButton?.addEventListener("click", async () => {
+    if ((promoType?.value || "akciya") !== "akciya") {
+      setPromoValidationState("Проверка DSL нужна только для акций.");
+      return;
+    }
+    const payload = {
+      class_name: promoType?.value || "akciya",
+      name: promoName?.value || "",
+      lore: promoLore?.value || "",
+      condition: promoCondition?.value || "",
+      reward: promoReward?.value || "",
+      notify: promoNotify?.value || "",
+      reward_mode: promoRewardMode?.value || "",
+      limit_per_order: promoLimitPerOrder?.value || "",
+      limit_per_user_per_day: promoLimitPerUserDay?.value || "",
+      priority: promoPriority?.value || "100",
+      start_at: promoStart?.value || "",
+      end_at: promoEnd?.value || "",
+      active: promoActive?.checked ? "1" : "0",
+    };
+    setPromoValidationState("Проверяю DSL...");
+    try {
+      const response = await fetch("/admin/api/promo/validate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]')?.content || "",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "DSL не прошёл проверку.");
+      }
+      const rewardKindLabel = data.summary?.reward_kind || "неизвестно";
+      const rewardModeRaw = data.summary?.reward_mode || "";
+      const rewardModeLabel =
+        rewardModeRaw === "per_match" ? "за каждое совпадение" : rewardModeRaw === "once" ? "один раз" : "нет";
+      setPromoValidationState(
+        `DSL валиден. Награда: ${rewardKindLabel}. Режим: ${rewardModeLabel}.`,
+        "success"
+      );
+    } catch (error) {
+      setPromoValidationState(error.message || "Ошибка проверки DSL.", "danger");
+    }
+  });
+
+  [promoConditionSource, promoConditionItemId, promoConditionType, promoConditionGroupIds, promoConditionMetric, promoConditionOperator, promoConditionValue].forEach((input) => {
+    input?.addEventListener("input", syncConditionBuilder);
+    input?.addEventListener("change", syncConditionBuilder);
+  });
+
+  [promoRewardKind, promoRewardValue, promoRewardGiftId, promoRewardGiftQty].forEach((input) => {
+    input?.addEventListener("input", syncRewardBuilder);
+    input?.addEventListener("change", syncRewardBuilder);
+  });
+
+  promoConditionSet?.addEventListener("click", () => insertConditionFragment(""));
+  promoConditionAnd?.addEventListener("click", () => insertConditionFragment("AND"));
+  promoConditionOr?.addEventListener("click", () => insertConditionFragment("OR"));
+  promoRewardSet?.addEventListener("click", () => {
+    if (!promoReward) return;
+    promoReward.value = buildRewardFragment();
+    promoReward.dispatchEvent(new Event("input", { bubbles: true }));
   });
 
   promoPhoto?.addEventListener("change", () => {
@@ -521,4 +717,6 @@ if (promoForm) {
 
   syncPromoFields();
   syncPromoPreview();
-}
+  syncConditionBuilder();
+  syncRewardBuilder();
+  }

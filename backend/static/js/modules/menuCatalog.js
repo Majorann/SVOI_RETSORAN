@@ -3,15 +3,19 @@ const setupMenuCatalog = ({
   menuList,
   menuCards,
   categoryChips,
-  typeToggle,
-  typeMenu,
-  typeOptions,
-  typeValue,
+  overflowCategoryControl,
+  overflowCategoryToggle,
+  overflowCategoryMenu,
+  overflowCategoryValue,
+  mobileMoreControl,
+  mobileMoreToggle,
+  mobileMoreMenu,
+  mobileMoreValue,
   sortToggle,
   sortMenu,
   sortOptions,
   sortValue,
-  searchInput,
+  searchInputs = [],
   emptyState,
 }) => {
   if (!menuList || !Array.isArray(menuCards) || !menuCards.length) {
@@ -23,20 +27,169 @@ const setupMenuCatalog = ({
     "price-asc": "Цена ↑",
     "price-desc": "Цена ↓",
   };
+  const PRIMARY_MENU_CATEGORIES = ["Горячие блюда", "Закуски", "Салаты"];
   let activeCategory = "all";
   let activeSort = "popular";
   let searchQuery = "";
   let isMenuTransitionRunning = false;
   let pendingCategory = null;
+  let overflowMenuMountedToBody = false;
+  let mobileMoreMenuMountedToBody = false;
+  const normalizedSearchInputs = Array.isArray(searchInputs)
+    ? searchInputs.filter(Boolean)
+    : searchInputs
+      ? [searchInputs]
+      : [];
   const normalizeType = (value) =>
     String(value || "")
       .toLowerCase()
       .replace(/\s+/g, " ")
       .trim();
-  const categoryOrder = categoryChips.map((chip) => chip.dataset.type || "all");
-  const categoryLabels = new Map(
-    categoryChips.map((chip) => [chip.dataset.type || "all", chip.textContent.trim() || "Все"])
+  const primaryCategorySet = new Set(PRIMARY_MENU_CATEGORIES.map((category) => normalizeType(category)));
+  const discoveredCategories = Array.from(
+    new Map(
+      menuCards
+        .map((card) => String(card.dataset.type || "").trim())
+        .filter(Boolean)
+        .map((category) => [normalizeType(category), category])
+    ).values()
   );
+  const overflowCategories = discoveredCategories.filter(
+    (category) => !primaryCategorySet.has(normalizeType(category))
+  );
+  const categoryOrder = Array.from(new Set(["all", ...PRIMARY_MENU_CATEGORIES, ...discoveredCategories]));
+  const categoryLabels = new Map([
+    ...categoryChips.map((chip) => [chip.dataset.type || "all", chip.textContent.trim() || "Все"]),
+    ...overflowCategories.map((category) => [category, category]),
+  ]);
+  let overflowOptions = [];
+  let overflowWidthFrame = 0;
+
+  const updateToggleWidth = (toggle) => {
+    if (!toggle) return;
+    if (overflowWidthFrame) {
+      cancelAnimationFrame(overflowWidthFrame);
+    }
+    overflowWidthFrame = requestAnimationFrame(() => {
+      const probe = toggle.cloneNode(true);
+      probe.style.position = "fixed";
+      probe.style.left = "-9999px";
+      probe.style.top = "0";
+      probe.style.width = "auto";
+      probe.style.maxWidth = "none";
+      probe.style.visibility = "hidden";
+      probe.style.pointerEvents = "none";
+      probe.style.transition = "none";
+      document.body.appendChild(probe);
+      const measuredWidth = Math.ceil(probe.scrollWidth);
+      probe.remove();
+      overflowWidthFrame = requestAnimationFrame(() => {
+        toggle.style.width = `${measuredWidth}px`;
+      });
+    });
+  };
+
+  const buildCategoryOptionButtons = (categories, menu, onSelect) =>
+    categories.map((category) => {
+      const optionValue = category === "all" ? "all" : category;
+      const optionLabel = categoryLabels.get(optionValue) || category;
+      const option = document.createElement("button");
+      option.className = "filter-option";
+      option.type = "button";
+      option.dataset.type = optionValue;
+      option.innerHTML = `
+        <span>${optionLabel}</span>
+        <span class="sort-option__check">✓</span>
+      `;
+      option.addEventListener("click", () => {
+        onSelect(optionValue);
+      });
+      menu.appendChild(option);
+      return option;
+    });
+
+  const buildOverflowOptions = () => {
+    if (!overflowCategoryMenu) {
+      return;
+    }
+    overflowCategoryMenu.innerHTML = "";
+    overflowOptions = buildCategoryOptionButtons(overflowCategories, overflowCategoryMenu, (category) => {
+      closeOverflowMenu();
+      activateCategory(category);
+    });
+    overflowCategoryControl.hidden = overflowCategories.length === 0;
+    if (mobileMoreMenu) {
+      mobileMoreMenu.innerHTML = "";
+      buildCategoryOptionButtons(categoryOrder, mobileMoreMenu, (category) => {
+        closeMobileMoreMenu();
+        activateCategory(category);
+      });
+    }
+    if (mobileMoreControl) {
+      mobileMoreControl.hidden = discoveredCategories.length === 0;
+    }
+  };
+
+  const positionFloatingMenu = (toggle, menu) => {
+    if (!toggle || !menu) return;
+    const toggleRect = toggle.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const preferredTop = toggleRect.bottom + 6;
+    const menuWidth = Math.max(toggleRect.width, menuRect.width || 178);
+    let left = toggleRect.left;
+    let top = preferredTop;
+
+    if (left + menuWidth > viewportWidth - 12) {
+      left = Math.max(12, viewportWidth - menuWidth - 12);
+    }
+
+    const maxHeight = Math.max(140, viewportHeight - preferredTop - 12);
+    menu.style.minWidth = `${Math.round(toggleRect.width)}px`;
+    menu.style.maxWidth = `${Math.round(Math.max(menuWidth, toggleRect.width))}px`;
+    menu.style.maxHeight = `${Math.round(maxHeight)}px`;
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  };
+
+  const mountOverflowMenuToBody = () => {
+    if (!overflowCategoryMenu || overflowMenuMountedToBody) return;
+    document.body.appendChild(overflowCategoryMenu);
+    overflowCategoryMenu.classList.add("sort-menu--portal");
+    overflowMenuMountedToBody = true;
+  };
+
+  const restoreOverflowMenu = () => {
+    if (!overflowCategoryMenu || !overflowCategoryControl || !overflowMenuMountedToBody) return;
+    overflowCategoryControl.appendChild(overflowCategoryMenu);
+    overflowCategoryMenu.classList.remove("sort-menu--portal");
+    overflowCategoryMenu.style.removeProperty("left");
+    overflowCategoryMenu.style.removeProperty("top");
+    overflowCategoryMenu.style.removeProperty("min-width");
+    overflowCategoryMenu.style.removeProperty("max-width");
+    overflowCategoryMenu.style.removeProperty("max-height");
+    overflowMenuMountedToBody = false;
+  };
+
+  const mountMobileMoreMenuToBody = () => {
+    if (!mobileMoreMenu || mobileMoreMenuMountedToBody) return;
+    document.body.appendChild(mobileMoreMenu);
+    mobileMoreMenu.classList.add("sort-menu--portal");
+    mobileMoreMenuMountedToBody = true;
+  };
+
+  const restoreMobileMoreMenu = () => {
+    if (!mobileMoreMenu || !mobileMoreControl || !mobileMoreMenuMountedToBody) return;
+    mobileMoreControl.appendChild(mobileMoreMenu);
+    mobileMoreMenu.classList.remove("sort-menu--portal");
+    mobileMoreMenu.style.removeProperty("left");
+    mobileMoreMenu.style.removeProperty("top");
+    mobileMoreMenu.style.removeProperty("min-width");
+    mobileMoreMenu.style.removeProperty("max-width");
+    mobileMoreMenu.style.removeProperty("max-height");
+    mobileMoreMenuMountedToBody = false;
+  };
 
   const getNumber = (value) => {
     const parsed = Number(value);
@@ -65,24 +218,49 @@ const setupMenuCatalog = ({
     sortMenu?.setAttribute("aria-hidden", "true");
   };
 
-  const closeTypeMenu = () => {
-    typeMenu?.classList.remove("is-open");
-    typeToggle?.setAttribute("aria-expanded", "false");
-    typeMenu?.setAttribute("aria-hidden", "true");
+  const closeOverflowMenu = () => {
+    overflowCategoryMenu?.classList.remove("is-open");
+    overflowCategoryToggle?.setAttribute("aria-expanded", "false");
+    overflowCategoryMenu?.setAttribute("aria-hidden", "true");
+    overflowCategoryToggle?.classList.remove("is-open");
+    restoreOverflowMenu();
+  };
+
+  const closeMobileMoreMenu = () => {
+    mobileMoreMenu?.classList.remove("is-open");
+    mobileMoreToggle?.setAttribute("aria-expanded", "false");
+    mobileMoreMenu?.setAttribute("aria-hidden", "true");
+    mobileMoreToggle?.classList.remove("is-open");
+    restoreMobileMoreMenu();
   };
 
   const openSortMenu = () => {
-    closeTypeMenu();
+    closeOverflowMenu();
     sortMenu?.classList.add("is-open");
     sortToggle?.setAttribute("aria-expanded", "true");
     sortMenu?.setAttribute("aria-hidden", "false");
   };
 
-  const openTypeMenu = () => {
+  const openOverflowMenu = () => {
+    closeMobileMoreMenu();
     closeSortMenu();
-    typeMenu?.classList.add("is-open");
-    typeToggle?.setAttribute("aria-expanded", "true");
-    typeMenu?.setAttribute("aria-hidden", "false");
+    mountOverflowMenuToBody();
+    positionFloatingMenu(overflowCategoryToggle, overflowCategoryMenu);
+    overflowCategoryMenu?.classList.add("is-open");
+    overflowCategoryToggle?.setAttribute("aria-expanded", "true");
+    overflowCategoryMenu?.setAttribute("aria-hidden", "false");
+    overflowCategoryToggle?.classList.add("is-open");
+  };
+
+  const openMobileMoreMenu = () => {
+    closeOverflowMenu();
+    closeSortMenu();
+    mountMobileMoreMenuToBody();
+    positionFloatingMenu(mobileMoreToggle, mobileMoreMenu);
+    mobileMoreMenu?.classList.add("is-open");
+    mobileMoreToggle?.setAttribute("aria-expanded", "true");
+    mobileMoreMenu?.setAttribute("aria-hidden", "false");
+    mobileMoreToggle?.classList.add("is-open");
   };
 
   const getFilteredCards = (category) => {
@@ -107,18 +285,36 @@ const setupMenuCatalog = ({
     if (sortValue) {
       sortValue.textContent = sortLabels[activeSort] || sortLabels.popular;
     }
-    if (typeValue) {
-      typeValue.textContent = categoryLabels.get(activeCategory) || "Все";
-    }
     categoryChips.forEach((chip) => {
       chip.classList.toggle("is-active", chip.dataset.type === activeCategory);
     });
-    typeOptions.forEach((option) => {
+    overflowOptions.forEach((option) => {
       option.classList.toggle("is-active", option.dataset.type === activeCategory);
     });
+    const isOverflowActive = overflowCategories.includes(activeCategory);
+    const isMobileSelectionActive = activeCategory !== "all";
+    overflowCategoryToggle?.classList.toggle("is-active", isOverflowActive);
+    overflowCategoryToggle?.classList.toggle("has-selection", isOverflowActive);
+    mobileMoreToggle?.classList.toggle("is-active", isMobileSelectionActive);
+    mobileMoreToggle?.classList.toggle("has-selection", isMobileSelectionActive);
+    if (overflowCategoryValue) {
+      overflowCategoryValue.textContent = isOverflowActive ? categoryLabels.get(activeCategory) || activeCategory : "";
+      overflowCategoryValue.hidden = false;
+    }
+    if (mobileMoreValue) {
+      mobileMoreValue.textContent = isMobileSelectionActive ? categoryLabels.get(activeCategory) || activeCategory : "";
+      mobileMoreValue.hidden = false;
+    }
+    updateToggleWidth(overflowCategoryToggle);
+    updateToggleWidth(mobileMoreToggle);
     sortOptions.forEach((option) => {
       option.classList.toggle("is-active", option.dataset.sort === activeSort);
     });
+    if (mobileMoreMenu) {
+      Array.from(mobileMoreMenu.querySelectorAll(".filter-option")).forEach((option) => {
+        option.classList.toggle("is-active", option.dataset.type === activeCategory);
+      });
+    }
   };
 
   const renderMenuCards = (cards, animate = true) => {
@@ -231,21 +427,19 @@ const setupMenuCatalog = ({
 
   categoryChips.forEach((chip) => {
     chip.addEventListener("click", () => {
-      closeTypeMenu();
+      closeOverflowMenu();
       activateCategory(chip.dataset.type || "all");
     });
   });
 
-  typeToggle?.addEventListener("click", () => {
-    if (!typeMenu?.classList.contains("is-open")) openTypeMenu();
-    else closeTypeMenu();
+  overflowCategoryToggle?.addEventListener("click", () => {
+    if (!overflowCategoryMenu?.classList.contains("is-open")) openOverflowMenu();
+    else closeOverflowMenu();
   });
 
-  typeOptions.forEach((option) => {
-    option.addEventListener("click", () => {
-      closeTypeMenu();
-      activateCategory(option.dataset.type || "all");
-    });
+  mobileMoreToggle?.addEventListener("click", () => {
+    if (!mobileMoreMenu?.classList.contains("is-open")) openMobileMoreMenu();
+    else closeMobileMoreMenu();
   });
 
   sortToggle?.addEventListener("click", () => {
@@ -261,9 +455,17 @@ const setupMenuCatalog = ({
     });
   });
 
-  searchInput?.addEventListener("input", () => {
-    searchQuery = String(searchInput.value || "").trim().toLowerCase();
-    applyMenuControls(false);
+  normalizedSearchInputs.forEach((input) => {
+    input.addEventListener("input", () => {
+      const nextValue = String(input.value || "");
+      searchQuery = nextValue.trim().toLowerCase();
+      normalizedSearchInputs.forEach((peer) => {
+        if (peer !== input && peer.value !== nextValue) {
+          peer.value = nextValue;
+        }
+      });
+      applyMenuControls(false);
+    });
   });
 
   document.addEventListener("click", (event) => {
@@ -273,10 +475,36 @@ const setupMenuCatalog = ({
   });
 
   document.addEventListener("click", (event) => {
-    if (!typeMenu || !typeToggle) return;
-    if (typeMenu.contains(event.target) || typeToggle.contains(event.target)) return;
-    closeTypeMenu();
+    if (!overflowCategoryMenu || !overflowCategoryToggle) return;
+    if (overflowCategoryMenu.contains(event.target) || overflowCategoryToggle.contains(event.target)) return;
+    closeOverflowMenu();
   });
+
+  document.addEventListener("click", (event) => {
+    if (!mobileMoreMenu || !mobileMoreToggle) return;
+    if (mobileMoreMenu.contains(event.target) || mobileMoreToggle.contains(event.target)) return;
+    closeMobileMoreMenu();
+  });
+
+  window.addEventListener("resize", () => {
+    if (overflowCategoryMenu?.classList.contains("is-open")) {
+      positionFloatingMenu(overflowCategoryToggle, overflowCategoryMenu);
+    }
+    if (mobileMoreMenu?.classList.contains("is-open")) {
+      positionFloatingMenu(mobileMoreToggle, mobileMoreMenu);
+    }
+    updateToggleWidth(overflowCategoryToggle);
+    updateToggleWidth(mobileMoreToggle);
+  });
+
+  window.addEventListener("scroll", () => {
+    if (overflowCategoryMenu?.classList.contains("is-open")) {
+      positionFloatingMenu(overflowCategoryToggle, overflowCategoryMenu);
+    }
+    if (mobileMoreMenu?.classList.contains("is-open")) {
+      positionFloatingMenu(mobileMoreToggle, mobileMoreMenu);
+    }
+  }, true);
 
   const isMenuMobileViewport = () => window.matchMedia("(max-width: 767px)").matches;
   const collapseMobileMenuCards = (exceptCard = null) => {
@@ -304,7 +532,10 @@ const setupMenuCatalog = ({
     collapseMobileMenuCards();
   });
 
+  buildOverflowOptions();
   applyMenuControls(false);
+  updateToggleWidth(overflowCategoryToggle);
+  updateToggleWidth(mobileMoreToggle);
 };
 
 export { setupMenuCatalog };

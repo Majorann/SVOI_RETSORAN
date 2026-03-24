@@ -15,12 +15,24 @@
         </label>
         <label class="admin-field"><span>Slug папки</span><input class="admin-input" type="text" name="slug" /></label>
         <label class="admin-field" data-promo-field="akciya"><span>Название акции</span><input class="admin-input" type="text" name="name" /></label>
+        <label class="admin-field" data-promo-field="akciya"><span>Условие</span><input class="admin-input" type="text" name="condition" placeholder="ID.QTY &gt;= 3" /></label>
+        <label class="admin-field" data-promo-field="akciya"><span>Награда</span><input class="admin-input" type="text" name="reward" placeholder="POINTS(100)" /></label>
+        <label class="admin-field" data-promo-field="akciya"><span>Notify</span><input class="admin-input" type="text" name="notify" placeholder="Добавлен подарок" /></label>
+        <label class="admin-field" data-promo-field="akciya"><span>Режим награды</span>
+          <select class="admin-select" name="reward_mode">
+            <option value="">нет</option>
+            <option value="once">once</option>
+            <option value="per_match">per_match</option>
+          </select>
+        </label>
+        <label class="admin-field" data-promo-field="akciya"><span>Лимит на заказ</span><input class="admin-input" type="number" min="1" name="limit_per_order" /></label>
+        <label class="admin-field" data-promo-field="akciya"><span>Лимит на пользователя в день</span><input class="admin-input" type="number" min="1" name="limit_per_user_per_day" /></label>
         <label class="admin-field" data-promo-field="reklama"><span>Текст рекламы</span><input class="admin-input" type="text" name="text" /></label>
         <label class="admin-field" data-promo-field="reklama"><span>Ссылка</span><input class="admin-input" type="url" name="link" /></label>
         <label class="admin-field"><span>Приоритет</span><input class="admin-input" type="number" name="priority" value="100" /></label>
         <label class="admin-field"><span>Фото</span><input class="admin-input" type="file" name="photo" accept=".png,.jpg,.jpeg,.webp" /></label>
-        <label class="admin-field"><span>Начало показа</span><input class="admin-input" type="text" name="start_at" placeholder="20.03.2026 12:00" /></label>
-        <label class="admin-field"><span>Конец показа</span><input class="admin-input" type="text" name="end_at" placeholder="27.03.2026 23:59" /></label>
+        <label class="admin-field"><span>Начало показа</span><input class="admin-input" type="datetime-local" name="start_at" /></label>
+        <label class="admin-field"><span>Конец показа</span><input class="admin-input" type="datetime-local" name="end_at" /></label>
       </div>
       <label class="admin-field" data-promo-field="akciya"><span>Описание акции / lore</span><textarea class="admin-textarea" name="lore" rows="3"></textarea></label>
       <div class="admin-checkbox-row admin-checkbox-row--menu">
@@ -30,13 +42,106 @@
         </label>
       </div>
       <label class="admin-field"><span>Причина</span><textarea class="admin-textarea" name="reason" rows="2" required></textarea></label>
-      <button class="admin-button" type="submit">Сохранить промо</button>
+      <div class="admin-actions-row">
+        <button class="admin-button admin-button--ghost" type="button" id="adminPromoValidateButton">Проверить DSL</button>
+        <button class="admin-button" type="submit">Сохранить промо</button>
+      </div>
+        <div class="admin-note" id="adminPromoValidateResult">Проверка DSL ещё не запускалась.</div>
     </form>
   </article>
 
   <article class="admin-card admin-promo-preview-panel">
     <div class="admin-section-head"><h2>Конструктор промо</h2></div>
     <div class="admin-promo-preview">
+      <section class="admin-helper-panel" id="adminPromoDslHelper">
+        <div class="admin-helper-panel__head">
+          <strong>DSL helper для akciya</strong>
+          <span class="admin-note" id="adminPromoHelperStatus">Реклама не использует DSL.</span>
+        </div>
+        <div class="admin-helper-panel__block" data-helper-scope="akciya">
+          <h3>Конструктор условия</h3>
+          <div class="admin-form__grid admin-form__grid--helper">
+            <label class="admin-field"><span>Источник</span>
+              <select class="admin-select" id="promoConditionSource">
+                <option value="item">ID(n)</option>
+                <option value="type">ID.&lt;type&gt;</option>
+                <option value="group">GROUP(...)</option>
+                <option value="order">ORDER.SUM</option>
+              </select>
+            </label>
+            <label class="admin-field" id="promoConditionItemField"><span>ID</span>
+              <input class="admin-input" type="number" min="1" id="promoConditionItemId" list="promoKnownIds" placeholder="101" />
+            </label>
+            <label class="admin-field" id="promoConditionTypeField"><span>Тип</span>
+              <select class="admin-select" id="promoConditionType">
+                {% for item_type in promo_builder_types %}
+                  <option value="{{ item_type }}">{{ item_type }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="admin-field" id="promoConditionGroupField"><span>ID группы</span>
+              <input class="admin-input" type="text" id="promoConditionGroupIds" placeholder="101,205,309" />
+            </label>
+            <label class="admin-field"><span>Метрика</span>
+              <select class="admin-select" id="promoConditionMetric">
+                <option value="QTY">QTY</option>
+                <option value="SUM">SUM</option>
+              </select>
+            </label>
+            <label class="admin-field"><span>Оператор</span>
+              <select class="admin-select" id="promoConditionOperator">
+                <option value=">=">&gt;=</option>
+                <option value="=">=</option>
+                <option value=">">&gt;</option>
+                <option value="<">&lt;</option>
+                <option value="<=">&lt;=</option>
+              </select>
+            </label>
+            <label class="admin-field"><span>Число</span>
+              <input class="admin-input" type="number" min="0" id="promoConditionValue" value="1" />
+            </label>
+          </div>
+          <datalist id="promoKnownIds">
+            {% for item_id in promo_builder_ids %}
+              <option value="{{ item_id }}"></option>
+            {% endfor %}
+          </datalist>
+          <div class="admin-actions-row">
+            <button class="admin-button admin-button--ghost" type="button" id="promoConditionSet">Заменить condition</button>
+            <button class="admin-button admin-button--ghost" type="button" id="promoConditionAnd">Добавить AND</button>
+            <button class="admin-button admin-button--ghost" type="button" id="promoConditionOr">Добавить OR</button>
+          </div>
+          <div class="admin-note" id="promoConditionPreview">Здесь появится собранное условие.</div>
+        </div>
+
+        <div class="admin-helper-panel__block" data-helper-scope="akciya">
+          <h3>Конструктор награды</h3>
+          <div class="admin-form__grid admin-form__grid--helper">
+            <label class="admin-field"><span>Тип награды</span>
+              <select class="admin-select" id="promoRewardKind">
+                <option value="POINTS">POINTS</option>
+                <option value="DISCOUNT_PERCENT">DISCOUNT_PERCENT</option>
+                <option value="DISCOUNT_RUB">DISCOUNT_RUB</option>
+                <option value="GIFT">GIFT</option>
+              </select>
+            </label>
+            <label class="admin-field" id="promoRewardValueField"><span>Значение</span>
+              <input class="admin-input" type="number" min="1" id="promoRewardValue" value="100" />
+            </label>
+            <label class="admin-field" id="promoRewardGiftIdField"><span>ID подарка</span>
+              <input class="admin-input" type="number" min="1" id="promoRewardGiftId" list="promoKnownIds" placeholder="102" />
+            </label>
+            <label class="admin-field" id="promoRewardGiftQtyField"><span>Количество подарка</span>
+              <input class="admin-input" type="number" min="1" id="promoRewardGiftQty" value="1" />
+            </label>
+          </div>
+          <div class="admin-actions-row">
+            <button class="admin-button admin-button--ghost" type="button" id="promoRewardSet">Собрать reward</button>
+          </div>
+          <div class="admin-note" id="promoRewardPreview">Здесь появится собранная награда.</div>
+        </div>
+      </section>
+
       <article class="admin-promo-preview-card" id="adminPromoPreviewCard">
         <div class="admin-promo-preview-card__media" id="adminPromoPreviewMedia"></div>
         <div class="admin-promo-preview-card__content">
@@ -53,7 +158,7 @@
           <a class="admin-button admin-button--ghost admin-button--block" id="adminPromoPreviewLink" href="#" target="_blank" rel="noopener noreferrer" hidden>Открыть ссылку</a>
         </div>
       </article>
-      <div class="admin-note">Доступные поля меняются по типу: для акции скрываются реклама и ссылка, для рекламы скрывается lore акции.</div>
+      <div class="admin-note">Helper работает только для `akciya`. Поля `condition` и `reward` остаются основным источником истины и их можно править вручную.</div>
     </div>
   </article>
 </section>
@@ -68,9 +173,15 @@
               <div class="admin-chip-row">
                 <span class="admin-badge">{{ item.class }}</span>
                 {% if not item.active %}<span class="admin-badge admin-badge--danger">Скрыто</span>{% endif %}
+                {% if item.class == "akciya" and not item.dsl_valid %}<span class="admin-badge admin-badge--danger">DSL error</span>{% endif %}
               </div>
               <strong>{{ item.name or item.text }}</strong>
               <p>{{ item.lore or item.link or "—" }}</p>
+              {% if item.class == "akciya" %}
+                <p><code>{{ item.condition or "condition не задан" }}</code></p>
+                <p><code>{{ item.reward or "reward не задан" }}</code></p>
+                {% if item.dsl_error %}<p>{{ item.dsl_error }}</p>{% endif %}
+              {% endif %}
             </div>
             <form class="admin-promo-row__form" method="post" action="{{ url_for('admin.promo_delete', class_name=item.class, item_id=item.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />

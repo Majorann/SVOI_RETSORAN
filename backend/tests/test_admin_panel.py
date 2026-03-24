@@ -1,5 +1,7 @@
 from datetime import datetime
+from pathlib import Path
 
+import pytest
 from flask import Flask, session
 
 from conftest import write_json
@@ -67,6 +69,36 @@ def test_admin_api_returns_403_for_non_admin(app_module, client, monkeypatch):
     )
     assert response.status_code == 403
     assert response.get_json()["ok"] is False
+
+
+def test_admin_api_runs_content_autosync(app_module, client, monkeypatch):
+    seed_logged_in_session(client)
+    csrf_token = get_csrf_token(client)
+    app_module.admin_service.active_storage = "postgres"
+    monkeypatch.setattr(app_module.admin_service, "is_admin_user", lambda user_id: True)
+    monkeypatch.setattr(
+        app_module.admin_service,
+        "sync_content_from_host",
+        lambda admin_user_id, reason: {
+            "menu_items_synced": 12,
+            "menu_items_deleted": 5,
+            "promotions_synced": 4,
+            "promotions_deleted": 1,
+            "reklama_found": 2,
+        },
+    )
+
+    response = client.post(
+        "/admin/api/content/autosync",
+        json={"reason": "manual sync"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert "меню 12" in payload["toast"]
+    assert "удалено 5" in payload["toast"]
 
 
 def test_admin_orders_filter_renders_all_status_options(app_module, client, monkeypatch):
@@ -418,3 +450,411 @@ def test_admin_audit_filter_options_are_cached():
 
     assert first == second
     assert calls["count"] == 3
+
+
+def test_admin_api_validates_promo_dsl(app_module, client, monkeypatch):
+    seed_logged_in_session(client)
+    csrf_token = get_csrf_token(client)
+    app_module.admin_service.active_storage = "postgres"
+    monkeypatch.setattr(app_module.admin_service, "is_admin_user", lambda user_id: True)
+    monkeypatch.setattr(
+        app_module.admin_service.menu_content,
+        "load_menu_items_admin",
+        lambda: [{"id": 101, "name": "Закуска", "type": "закуски", "price": 300, "active": True}],
+    )
+
+    response = client.post(
+        "/admin/api/promo/validate",
+        json={
+            "name": "Snack bonus",
+            "lore": "За 2 закуски начислим бонусы",
+            "condition": "ID(101).QTY >= 2",
+            "reward": "POINTS(100)",
+            "notify": "Начислены бонусы",
+            "reward_mode": "once",
+            "priority": 10,
+            "active": "1",
+        },
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["summary"]["reward_kind"] == "POINTS"
+
+
+def test_admin_promo_page_renders_dsl_helper(app_module, client, monkeypatch):
+    seed_logged_in_session(client)
+    app_module.admin_service.active_storage = "postgres"
+    monkeypatch.setattr(app_module.admin_service, "is_admin_user", lambda user_id: True)
+    monkeypatch.setattr(app_module.admin_service.menu_content, "load_promo_items", lambda include_inactive=True: [])
+    monkeypatch.setattr(
+        app_module.admin_service.menu_content,
+        "load_menu_items_admin",
+        lambda: [
+            {"id": 101, "name": "Закуска", "type": "закуски", "price": 300, "active": True},
+            {"id": 205, "name": "Суп", "type": "супы", "price": 400, "active": True},
+        ],
+    )
+
+    response = client.get("/admin/promo")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "DSL helper для akciya" in html
+    assert "Конструктор условия" in html
+    assert "Конструктор награды" in html
+    assert "закуски" in html
+    assert "205" in html
+
+
+def test_admin_service_rejects_invalid_promo_dsl_before_save(app_module, monkeypatch):
+    monkeypatch.setattr(
+        app_module.admin_service.menu_content,
+        "load_menu_items_admin",
+        lambda: [{"id": 101, "name": "Закуска", "type": "закуски", "price": 300, "active": True}],
+    )
+
+    with pytest.raises(ValueError, match="DSL акции невалиден"):
+        app_module.admin_service.save_promo_item(
+            form={
+                "class_name": "akciya",
+                "name": "Broken promo",
+                "lore": "Некорректная акция",
+                "condition": "ID(999).QTY >= 2",
+                "reward": "POINTS(100)",
+                "notify": "",
+                "reward_mode": "once",
+                "priority": "10",
+                "reason": "test",
+                "active": "1",
+            },
+            photo=None,
+            admin_user_id=1,
+        )
+
+
+def test_admin_service_save_promo_item_stores_akciya_in_postgres(tmp_path, monkeypatch):
+    promo_root = tmp_path / "promo_items"
+    captured = {}
+
+    class MenuContentStub:
+        def __init__(self):
+            self.invalidated = 0
+
+        def load_promo_items(self, include_inactive=True):
+            return []
+
+        def load_menu_items_admin(self):
+            return [{"id": 74, "name": "FPV-Друн", "type": "закуски", "price": 300, "active": True}]
+
+        def parse_menu_meta(self, path):
+            return {}
+
+        def invalidate_local_cache(self):
+            self.invalidated += 1
+
+        def get_redis_client(self):
+            return None
+
+    service = AdminService(active_storage="postgres", menu_content=MenuContentStub())
+    monkeypatch.setattr("services.admin_service.PROMO_ITEMS_PATH", promo_root)
+    monkeypatch.setattr(service, "log_admin_action", lambda **kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "_pg_store",
+        lambda: type(
+            "PgStoreStub",
+            (),
+            {
+                "upsert_promotion": staticmethod(
+                    lambda payload: (captured.setdefault("payload", dict(payload)), 1)[1]
+                )
+            },
+        )(),
+    )
+
+    service.save_promo_item(
+        form={
+            "class_name": "akciya",
+            "slug": "test-fpv-74-bonus",
+            "name": "Тест FPV 74",
+            "lore": "Тестовая акция",
+            "condition": "ID(74).QTY >= 1",
+            "reward": "POINTS(100)",
+            "notify": "Начислены 100 бонусов",
+            "reward_mode": "once",
+            "priority": "100",
+            "reason": "test",
+            "active": "1",
+        },
+        photo=None,
+        admin_user_id=1,
+    )
+
+    meta_path = promo_root / "akciya" / "test-fpv-74-bonus" / "item.txt"
+    assert meta_path.exists() is False
+    assert captured["payload"]["slug"] == "test-fpv-74-bonus"
+    assert captured["payload"]["name"] == "Тест FPV 74"
+    assert captured["payload"]["condition"] == "ID(74).QTY >= 1"
+    assert captured["payload"]["reward"] == "POINTS(100)"
+    assert captured["payload"]["updated_by_admin_user_id"] == 1
+    assert service.menu_content.invalidated == 1
+
+
+def test_menu_content_loads_menu_items_from_postgres(monkeypatch):
+    service = MenuContentService(
+        active_storage="postgres",
+        menu_cache_enabled=False,
+        menu_cache_key="menu:test",
+        menu_cache_ttl_seconds=60,
+        redis_module=None,
+        redis_url="",
+    )
+
+    class PgStoreStub:
+        @staticmethod
+        def load_menu_items(include_inactive=False):
+            assert include_inactive is False
+            return [
+                {
+                    "id": 12,
+                    "slug": "borsh",
+                    "name": "Борщ",
+                    "lore": "Горячий",
+                    "type": "Супы",
+                    "price": 450,
+                    "photo_path": "menu_items/borsh/photo.webp",
+                    "portion_label": "320",
+                    "popularity": 5,
+                    "featured": True,
+                    "active": True,
+                }
+            ]
+
+    monkeypatch.setattr(
+        "services.menu_content.importlib.import_module",
+        lambda name: PgStoreStub if name == "storage.pg_store" else None,
+    )
+
+    items = service.load_menu_items()
+
+    assert len(items) == 1
+    assert items[0]["id"] == 12
+    assert items[0]["photo"] == "menu_items/borsh/photo.webp"
+    assert items[0]["portion_label"] == "320 г"
+    assert items[0]["featured"] is True
+    assert items[0]["active"] is True
+
+
+def test_menu_content_syncs_host_content_to_postgres(monkeypatch):
+    service = MenuContentService(
+        active_storage="postgres",
+        menu_cache_enabled=False,
+        menu_cache_key="menu:test",
+        menu_cache_ttl_seconds=60,
+        redis_module=None,
+        redis_url="",
+    )
+    invalidated = {"count": 0}
+
+    class PgStoreStub:
+        @staticmethod
+        def sync_menu_items_from_disk():
+            return {"synced": 7, "deleted": 2}
+
+        @staticmethod
+        def sync_promotions_from_disk():
+            return {"synced": 3, "deleted": 1}
+
+    monkeypatch.setattr(
+        service,
+        "_load_disk_promo_items",
+        lambda include_inactive, allowed_classes: [{"id": 1}, {"id": 2}] if allowed_classes == {"reklama"} else [],
+    )
+    monkeypatch.setattr(
+        "services.menu_content.importlib.import_module",
+        lambda name: PgStoreStub if name == "storage.pg_store" else None,
+    )
+    monkeypatch.setattr(service, "invalidate_local_cache", lambda *keys: invalidated.__setitem__("count", invalidated["count"] + 1))
+
+    summary = service.sync_host_content_to_storage()
+
+    assert summary == {
+        "storage": "postgres",
+        "menu_items_synced": 7,
+        "menu_items_deleted": 2,
+        "promotions_synced": 3,
+        "promotions_deleted": 1,
+        "reklama_found": 2,
+    }
+    assert invalidated["count"] == 1
+
+
+def test_admin_service_allows_info_only_akciya_without_dsl(tmp_path, monkeypatch):
+    promo_root = tmp_path / "promo_items"
+    captured = {}
+
+    class MenuContentStub:
+        def __init__(self):
+            self.invalidated = 0
+
+        def load_promo_items(self, include_inactive=True):
+            return []
+
+        def load_menu_items_admin(self):
+            return []
+
+        def parse_menu_meta(self, path):
+            return {}
+
+        def invalidate_local_cache(self):
+            self.invalidated += 1
+
+        def get_redis_client(self):
+            return None
+
+    service = AdminService(active_storage="postgres", menu_content=MenuContentStub())
+    monkeypatch.setattr("services.admin_service.PROMO_ITEMS_PATH", promo_root)
+    monkeypatch.setattr(service, "log_admin_action", lambda **kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "_pg_store",
+        lambda: type(
+            "PgStoreStub",
+            (),
+            {
+                "upsert_promotion": staticmethod(
+                    lambda payload: (captured.setdefault("payload", dict(payload)), 15)[1]
+                )
+            },
+        )(),
+    )
+
+    service.save_promo_item(
+        form={
+            "class_name": "akciya",
+            "slug": "info-promo",
+            "name": "Инфо акция",
+            "lore": "Только описание без DSL",
+            "condition": "",
+            "reward": "",
+            "notify": "",
+            "reward_mode": "",
+            "priority": "100",
+            "reason": "test",
+            "active": "1",
+        },
+        photo=None,
+        admin_user_id=1,
+    )
+
+    assert captured["payload"]["name"] == "Инфо акция"
+    assert captured["payload"]["condition"] == ""
+    assert captured["payload"]["reward"] == ""
+    assert captured["payload"]["reward_mode"] == ""
+    assert service.menu_content.invalidated == 1
+
+
+def test_admin_service_save_menu_item_stores_menu_in_postgres(tmp_path, monkeypatch):
+    menu_root = tmp_path / "menu_items"
+    captured = {}
+
+    class MenuContentStub:
+        def __init__(self):
+            self.invalidated = 0
+
+        def load_menu_items_admin(self):
+            return []
+
+        def invalidate_local_cache(self):
+            self.invalidated += 1
+
+        def get_redis_client(self):
+            return None
+
+    service = AdminService(active_storage="postgres", menu_content=MenuContentStub())
+    monkeypatch.setattr("services.admin_service.MENU_ITEMS_PATH", menu_root)
+    monkeypatch.setattr(service, "log_admin_action", lambda **kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "_pg_store",
+        lambda: type(
+            "PgStoreStub",
+            (),
+            {
+                "upsert_menu_item": staticmethod(
+                    lambda payload: (captured.setdefault("payload", dict(payload)), 33)[1]
+                )
+            },
+        )(),
+    )
+
+    service.save_menu_item(
+        form={
+            "slug": "borsh",
+            "name": "Борщ",
+            "type": "Супы",
+            "price": "450",
+            "weight": "320",
+            "lore": "Горячий",
+            "featured": "1",
+            "popularity": "7",
+            "active": "1",
+            "reason": "test",
+        },
+        photo=None,
+        admin_user_id=1,
+    )
+
+    assert captured["payload"]["slug"] == "borsh"
+    assert captured["payload"]["name"] == "Борщ"
+    assert captured["payload"]["type"] == "Супы"
+    assert captured["payload"]["price"] == 450
+    assert captured["payload"]["portion_label"] == "320"
+    assert captured["payload"]["featured"] is True
+    assert captured["payload"]["popularity"] == 7
+    assert captured["payload"]["updated_by_admin_user_id"] == 1
+    assert service.menu_content.invalidated == 1
+
+
+def test_admin_service_deletes_promo_from_postgres(tmp_path, monkeypatch):
+    promo_root = tmp_path / "promo_items"
+    deleted = []
+
+    class MenuContentStub:
+        def __init__(self):
+            self.invalidated = 0
+
+        def load_promo_items(self, include_inactive=True):
+            return [{"id": 77, "class": "akciya", "name": "Manual promo", "photo": None}]
+
+        def invalidate_local_cache(self):
+            self.invalidated += 1
+
+        def get_redis_client(self):
+            return None
+
+    service = AdminService(active_storage="postgres", menu_content=MenuContentStub())
+    monkeypatch.setattr("services.admin_service.PROMO_ITEMS_PATH", promo_root)
+    monkeypatch.setattr(service, "log_admin_action", lambda **kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "_pg_store",
+        lambda: type(
+            "PgStoreStub",
+            (),
+            {"delete_promotion": staticmethod(lambda promo_id: deleted.append(promo_id))},
+        )(),
+    )
+
+    service.delete_promo_item(
+        admin_user_id=1,
+        class_name="akciya",
+        item_id=77,
+        reason="cleanup",
+    )
+
+    assert deleted == [77]
+    assert service.menu_content.invalidated == 1

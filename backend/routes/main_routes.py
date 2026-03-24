@@ -160,6 +160,7 @@ def notifications_route(load_bookings, get_user_preparing_orders, load_promo_ite
         preparing_orders_view.append(item)
 
     promo_notifications = []
+    promo_candidates = []
     for promo in load_promo_items() or []:
         promo_item = dict(promo)
         promo_class = str(promo_item.get("class") or "").strip().lower()
@@ -171,15 +172,18 @@ def notifications_route(load_bookings, get_user_preparing_orders, load_promo_ite
             promo_item["badge"] = "Акция"
             promo_item["title"] = promo_item.get("name") or "Акция"
             promo_item["text"] = promo_item.get("lore") or ""
+            promo_item["is_highlighted"] = True
         else:
             continue
-        promo_notifications.append(promo_item)
+        promo_candidates.append(promo_item)
+    if promo_candidates:
+        promo_notifications = _pick_random_items(promo_candidates, 1)
 
     return render_template(
         "notifications.html",
         bookings=bookings_view,
         preparing_orders=preparing_orders_view,
-        promo_notifications=_pick_random_items(promo_notifications, 1),
+        promo_notifications=promo_notifications,
         booking_duration_minutes=booking_duration_minutes,
     )
 

@@ -15,6 +15,10 @@ const setupCheckoutPage = ({
   checkoutPointsApplied,
   checkoutBonusEarned,
   checkoutPayable,
+  checkoutPromoHighlight,
+  checkoutPromoList,
+  checkoutPromoMeta,
+  checkoutPromoChip,
   goToPayment,
   serveCustomTime,
   loadCart,
@@ -36,6 +40,123 @@ const setupCheckoutPage = ({
   const menuById = new Map(menuCatalog.map((item) => [Number(item.id), item]));
   const goToPaymentDefaultText = goToPayment?.textContent?.trim() || "Перейти к оплате";
   const goToPaymentInitiallyDisabled = Boolean(goToPayment?.disabled);
+  let promoPreviewAbortController = null;
+  let promoPreviewSequence = 0;
+
+  const renderPromoHighlight = ({
+    promotionsApplied = [],
+    promoPoints = 0,
+    discountTotal = 0,
+  } = {}) => {
+    if (!checkoutPromoHighlight || !checkoutPromoList || !checkoutPromoMeta || !checkoutPromoChip) {
+      return;
+    }
+
+    const hasPromo = promotionsApplied.length > 0;
+    checkoutPromoHighlight.hidden = !hasPromo;
+    checkoutPromoList.innerHTML = "";
+    checkoutPromoMeta.textContent = "";
+    checkoutPromoChip.textContent = hasPromo ? String(promotionsApplied.length) : "0";
+
+    if (!hasPromo) {
+      return;
+    }
+
+    promotionsApplied.forEach((promo) => {
+      const row = document.createElement("div");
+      row.className = "promo-highlight__item";
+
+      let rewardText = `× ${promo.applied_count || 1}`;
+      if (promo.reward_kind === "POINTS" && promoPoints > 0) {
+        rewardText = `+${promoPoints} баллов`;
+      } else if (
+        (promo.reward_kind === "DISCOUNT_PERCENT" || promo.reward_kind === "DISCOUNT_RUB") &&
+        discountTotal > 0
+      ) {
+        rewardText = `-${discountTotal} ₽`;
+      }
+
+      row.innerHTML = `
+        <span class="promo-highlight__name">${promo.name || "Акция"}</span>
+        <span class="promo-highlight__value">${rewardText}</span>
+      `;
+      checkoutPromoList.appendChild(row);
+    });
+
+    if (promoPoints > 0) {
+      checkoutPromoMeta.textContent = `Начислится дополнительно ${promoPoints} бонусов после оплаты.`;
+    } else if (discountTotal > 0) {
+      checkoutPromoMeta.textContent = "Скидка уже включена в итоговую сумму.";
+    }
+  };
+
+  const updateTotalsFromServer = async (cart) => {
+    const fallbackTotal = cart.reduce((sum, item) => sum + Number(item.qty) * Number(item.price), 0);
+    const fallbackBalance = Number(availablePoints?.textContent || 0);
+    const fallbackPointsApplied = usePoints?.checked ? Math.min(fallbackBalance, fallbackTotal) : 0;
+    const fallbackPayableTotal = Math.max(0, fallbackTotal - fallbackPointsApplied);
+    const fallbackBonusEarned = Math.max(0, Math.floor(fallbackPayableTotal * 0.05));
+
+    if (!cart.length) {
+      if (checkoutItemsTotal) checkoutItemsTotal.textContent = String(fallbackTotal);
+      if (checkoutTotal) checkoutTotal.textContent = String(fallbackTotal);
+      if (checkoutPointsApplied) checkoutPointsApplied.textContent = String(fallbackPointsApplied);
+      if (checkoutBonusEarned) checkoutBonusEarned.textContent = String(fallbackBonusEarned);
+      if (checkoutPayable) checkoutPayable.textContent = String(fallbackPayableTotal);
+      renderPromoHighlight();
+      return;
+    }
+
+    promoPreviewAbortController?.abort();
+    promoPreviewAbortController = new AbortController();
+    promoPreviewSequence += 1;
+    const requestSequence = promoPreviewSequence;
+
+    const response = await fetch("/api/checkout/promo-preview", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(getCsrfToken() ? { "X-CSRF-Token": getCsrfToken() } : {}),
+      },
+      body: JSON.stringify({
+        items: cart.map((item) => ({ id: Number(item.id), qty: Number(item.qty) })),
+        use_points: Boolean(usePoints?.checked),
+      }),
+      signal: promoPreviewAbortController.signal,
+    }).catch(() => null);
+
+    if (!response || !response.ok || requestSequence !== promoPreviewSequence) {
+      if (checkoutItemsTotal) checkoutItemsTotal.textContent = String(fallbackTotal);
+      if (checkoutTotal) checkoutTotal.textContent = String(fallbackTotal);
+      if (checkoutPointsApplied) checkoutPointsApplied.textContent = String(fallbackPointsApplied);
+      if (checkoutBonusEarned) checkoutBonusEarned.textContent = String(fallbackBonusEarned);
+      if (checkoutPayable) checkoutPayable.textContent = String(fallbackPayableTotal);
+      return;
+    }
+
+    const result = await response.json().catch(() => ({}));
+    if (!result.ok || requestSequence !== promoPreviewSequence) {
+      if (checkoutItemsTotal) checkoutItemsTotal.textContent = String(fallbackTotal);
+      if (checkoutTotal) checkoutTotal.textContent = String(fallbackTotal);
+      if (checkoutPointsApplied) checkoutPointsApplied.textContent = String(fallbackPointsApplied);
+      if (checkoutBonusEarned) checkoutBonusEarned.textContent = String(fallbackBonusEarned);
+      if (checkoutPayable) checkoutPayable.textContent = String(fallbackPayableTotal);
+      return;
+    }
+
+    const totals = result.totals || {};
+    if (checkoutItemsTotal) checkoutItemsTotal.textContent = String(Number(totals.items_total) || fallbackTotal);
+    if (checkoutTotal) checkoutTotal.textContent = String(Number(totals.items_total) || fallbackTotal);
+    if (checkoutPointsApplied) checkoutPointsApplied.textContent = String(Number(totals.points_applied) || 0);
+    if (checkoutBonusEarned) checkoutBonusEarned.textContent = String(Number(totals.bonus_earned) || 0);
+    if (checkoutPayable) checkoutPayable.textContent = String(Number(totals.payable_total) || 0);
+
+    renderPromoHighlight({
+      promotionsApplied: Array.isArray(result.promotions_applied) ? result.promotions_applied : [],
+      promoPoints: Number(result.promo_points) || 0,
+      discountTotal: Number(result.discount_total) || 0,
+    });
+  };
 
   const normalizeCheckoutItem = (item) => {
     const id = Number(item.id);
@@ -71,10 +192,6 @@ const setupCheckoutPage = ({
   const renderCheckout = () => {
     const cart = getCheckoutCart();
     const total = cart.reduce((sum, item) => sum + Number(item.qty) * Number(item.price), 0);
-    const balance = Number(availablePoints?.textContent || 0);
-    const pointsApplied = usePoints?.checked ? Math.min(balance, total) : 0;
-    const payableTotal = Math.max(0, total - pointsApplied);
-    const bonusEarned = Math.max(0, Math.floor(payableTotal * 0.05));
 
     if (checkoutItemsJson) {
       checkoutItemsJson.value = JSON.stringify(
@@ -82,11 +199,6 @@ const setupCheckoutPage = ({
       );
     }
 
-    if (checkoutItemsTotal) checkoutItemsTotal.textContent = String(total);
-    if (checkoutTotal) checkoutTotal.textContent = String(total);
-    if (checkoutPointsApplied) checkoutPointsApplied.textContent = String(pointsApplied);
-    if (checkoutBonusEarned) checkoutBonusEarned.textContent = String(bonusEarned);
-    if (checkoutPayable) checkoutPayable.textContent = String(payableTotal);
     if (checkoutEmpty) {
       checkoutEmpty.hidden = cart.length > 0;
       checkoutEmpty.style.display = cart.length > 0 ? "none" : "";
@@ -127,6 +239,8 @@ const setupCheckoutPage = ({
         checkoutSummaryList.appendChild(brief);
       });
     }
+
+    updateTotalsFromServer(cart);
   };
 
   const storedComment = sessionStorage.getItem(commentStorageKey) || "";

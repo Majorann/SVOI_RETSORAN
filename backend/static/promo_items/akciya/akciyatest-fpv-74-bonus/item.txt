@@ -1,0 +1,12 @@
+id=999
+class=akciya
+name=Тест FPV 74
+lore=За заказ FPV-Друн начисляем 100 бонусов.
+condition=ID(74).QTY >= 2
+reward=POINTS(100)
+notify=Начислены 100 бонусов
+reward_mode=once
+limit_per_order=1
+limit_per_user_per_day=10
+priority=100
+active=false

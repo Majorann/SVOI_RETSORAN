@@ -1,24 +1,32 @@
 import json
+import importlib
 import os
 import re
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 from config import MENU_ITEMS_PATH, MENU_META_NAME, MENU_PHOTO_NAMES, PROMO_ITEMS_PATH, PROMO_META_NAME, PROMO_PHOTO_NAMES
 from models import MenuItem, PromoItem
+from services.business_logic import current_local_datetime_value
+from services.promotions import parse_and_validate_promo_source
+from services.promotions.ast import PromotionDslError
+from services.promotions.validator import PromotionValidationError
 
 
 class MenuContentService:
     def __init__(
         self,
         *,
+        active_storage: str = "json",
         menu_cache_enabled: bool,
         menu_cache_key: str,
         menu_cache_ttl_seconds: int,
         redis_module,
         redis_url: str,
     ):
+        self.active_storage = active_storage
         self.menu_cache_enabled = menu_cache_enabled
         self.menu_cache_key = menu_cache_key
         self.menu_cache_ttl_seconds = menu_cache_ttl_seconds
@@ -202,9 +210,12 @@ class MenuContentService:
                     if isinstance(items, list):
                         return self._memory_cache_set(memory_key, items)
             except Exception as exc:
-                print(f"[cache] redis menu read failed ({exc}), fallback=disk")
+                print(f"[cache] redis menu read failed ({exc}), fallback=origin")
 
-        items = self.load_menu_items_from_disk(include_inactive=False)
+        if self.active_storage == "postgres":
+            items = self.load_menu_items_from_db(include_inactive=False)
+        else:
+            items = self.load_menu_items_from_disk(include_inactive=False)
 
         if client is not None:
             try:
@@ -222,8 +233,60 @@ class MenuContentService:
         memory_items = self._memory_cache_get(memory_key)
         if memory_items is not None:
             return memory_items
-        items = self.load_menu_items_from_disk(include_inactive=True)
+        if self.active_storage == "postgres":
+            items = self.load_menu_items_from_db(include_inactive=True)
+        else:
+            items = self.load_menu_items_from_disk(include_inactive=True)
         return self._memory_cache_set(memory_key, items)
+
+    def load_menu_items_from_db(self, include_inactive: bool = False):
+        try:
+            pg_store = importlib.import_module("storage.pg_store")
+            rows = pg_store.load_menu_items(include_inactive=include_inactive)
+        except Exception as exc:
+            print(f"[menu] postgres read failed ({exc}), fallback=disk")
+            return self.load_menu_items_from_disk(include_inactive=include_inactive)
+
+        items = []
+        for row in rows:
+            menu_item = self.parse_menu_row(row)
+            if menu_item is None:
+                continue
+            if not include_inactive and not menu_item.get("active", True):
+                continue
+            items.append(menu_item)
+        items.sort(key=lambda item: item["id"])
+        return items
+
+    def sync_host_content_to_storage(self):
+        reklama_items = self._load_disk_promo_items(include_inactive=True, allowed_classes={"reklama"})
+        if self.active_storage != "postgres":
+            self.invalidate_local_cache()
+            return {
+                "storage": self.active_storage,
+                "menu_items_synced": 0,
+                "promotions_synced": 0,
+                "reklama_found": len(reklama_items),
+            }
+
+        pg_store = importlib.import_module("storage.pg_store")
+        menu_result = pg_store.sync_menu_items_from_disk()
+        promotion_result = pg_store.sync_promotions_from_disk()
+        self.invalidate_local_cache()
+        client = self.get_redis_client()
+        if client is not None:
+            try:
+                client.delete(self.menu_cache_key)
+            except Exception:
+                pass
+        return {
+            "storage": self.active_storage,
+            "menu_items_synced": int((menu_result or {}).get("synced", 0)),
+            "menu_items_deleted": int((menu_result or {}).get("deleted", 0)),
+            "promotions_synced": int((promotion_result or {}).get("synced", 0)),
+            "promotions_deleted": int((promotion_result or {}).get("deleted", 0)),
+            "reklama_found": len(reklama_items),
+        }
 
     def load_promo_items(self, include_inactive: bool = False):
         memory_key = "promo:admin" if include_inactive else "promo:public"
@@ -232,6 +295,35 @@ class MenuContentService:
             return memory_items
 
         items = []
+        items.extend(self._load_disk_promo_items(include_inactive=include_inactive, allowed_classes={"reklama"}))
+        if self.active_storage == "postgres":
+            items.extend(self.load_promotions_from_db(include_inactive=include_inactive))
+        else:
+            items.extend(self._load_disk_promo_items(include_inactive=include_inactive, allowed_classes={"akciya"}))
+
+        items.sort(key=lambda item: (-int(item.get("priority", 100) or 100), int(item["id"])))
+        try:
+            print(
+                "[promo] load include_inactive={0} ids={1}".format(
+                    include_inactive,
+                    [
+                        {
+                            "id": item.get("id"),
+                            "class": item.get("class"),
+                            "name": item.get("name") or item.get("text") or "",
+                            "priority": item.get("priority"),
+                            "dsl_valid": item.get("dsl_valid"),
+                        }
+                        for item in items
+                    ],
+                )
+            )
+        except Exception:
+            pass
+        return self._memory_cache_set(memory_key, items)
+
+    def _load_disk_promo_items(self, *, include_inactive: bool, allowed_classes: set[str]):
+        items = []
         if not PROMO_ITEMS_PATH.exists():
             return items
 
@@ -239,18 +331,44 @@ class MenuContentService:
         for meta_path in meta_paths:
             item_dir = meta_path.parent
             relative_slug = item_dir.relative_to(PROMO_ITEMS_PATH).as_posix()
+            item_class = relative_slug.split("/", 1)[0] if relative_slug else ""
+            if item_class not in allowed_classes:
+                continue
             photo_name = self.resolve_photo_name(item_dir, PROMO_PHOTO_NAMES)
-
             meta = self.parse_menu_meta(meta_path)
             promo_item = self.parse_promo_item(meta, relative_slug, photo_name)
             if promo_item is None:
                 continue
             if not include_inactive and not promo_item.get("active", True):
                 continue
+            if not include_inactive and not self.is_promo_in_active_window(promo_item):
+                continue
+            if not include_inactive and promo_item.get("class") == "akciya" and not promo_item.get("dsl_valid", True):
+                continue
             items.append(promo_item)
+        return items
 
-        items.sort(key=lambda item: (item.get("priority", 100), item["id"]))
-        return self._memory_cache_set(memory_key, items)
+    def load_promotions_from_db(self, include_inactive: bool = False):
+        try:
+            pg_store = importlib.import_module("storage.pg_store")
+            promotions = pg_store.load_promotions()
+        except Exception as exc:
+            print(f"[promo] postgres read failed ({exc}), fallback=disk")
+            return self._load_disk_promo_items(include_inactive=include_inactive, allowed_classes={"akciya"})
+
+        items = []
+        for promotion in promotions:
+            promo_item = self.parse_promo_row(promotion)
+            if promo_item is None:
+                continue
+            if not include_inactive and not promo_item.get("active", True):
+                continue
+            if not include_inactive and not self.is_promo_in_active_window(promo_item):
+                continue
+            if not include_inactive and not promo_item.get("dsl_valid", True):
+                continue
+            items.append(promo_item)
+        return items
 
     def is_placeholder_promo(self, meta: dict) -> bool:
         item_class = (meta.get("class", "") or "").strip().lower()
@@ -384,6 +502,38 @@ class MenuContentService:
         )
         return item.to_dict()
 
+    def parse_menu_row(self, row: dict):
+        try:
+            item_id = int(row.get("id", 0))
+            price = int(row.get("price", 0))
+        except (TypeError, ValueError):
+            return None
+        if item_id <= 0:
+            return None
+
+        name = (row.get("name", "") or "").strip()
+        lore = (row.get("lore", "") or "").strip()
+        dish_type = (row.get("type", "") or "").strip()
+        if not all([name, lore, dish_type]):
+            return None
+
+        portion_label = self.normalize_portion_label((row.get("portion_label", "") or "").strip())
+        portion_tone_rgb = self.build_portion_tone_rgb(portion_label) if portion_label else ""
+        item = MenuItem(
+            id=item_id,
+            name=name,
+            lore=lore,
+            type=dish_type,
+            price=price,
+            photo=(row.get("photo") or row.get("photo_path") or "").strip(),
+            portion_label=portion_label,
+            portion_tone_rgb=portion_tone_rgb,
+            popularity=int(row.get("popularity", 0) or 0),
+            featured=bool(row.get("featured", False)),
+            active=bool(row.get("active", True)),
+        )
+        return item.to_dict()
+
     def parse_promo_item(self, meta: dict, slug: str, photo_name):
         try:
             item_id = int(meta.get("id", ""))
@@ -410,7 +560,7 @@ class MenuContentService:
             link = (meta.get("link", "") or "").strip()
             if not text:
                 return None
-            item = PromoItem(
+            item = self._build_promo_item(
                 id=item_id,
                 class_name=item_class,
                 priority=priority,
@@ -418,6 +568,8 @@ class MenuContentService:
                 photo=photo,
                 text=text,
                 link=link,
+                start_at=(meta.get("start_at", "") or "").strip(),
+                end_at=(meta.get("end_at", "") or "").strip(),
             )
             return item.to_dict()
 
@@ -425,7 +577,7 @@ class MenuContentService:
         lore = (meta.get("lore", "") or "").strip()
         if not name or not lore:
             return None
-        item = PromoItem(
+        item = self._build_promo_item(
             id=item_id,
             class_name=item_class,
             priority=priority,
@@ -433,8 +585,117 @@ class MenuContentService:
             photo=photo,
             name=name,
             lore=lore,
+            condition=(meta.get("condition", "") or "").strip(),
+            reward=(meta.get("reward", "") or "").strip(),
+            notify=(meta.get("notify", "") or "").strip(),
+            reward_mode=(meta.get("reward_mode", "once") or "once").strip(),
+            limit_per_order=(meta.get("limit_per_order", "") or "").strip(),
+            limit_per_user_per_day=(meta.get("limit_per_user_per_day", "") or "").strip(),
+            start_at=(meta.get("start_at", "") or "").strip(),
+            end_at=(meta.get("end_at", "") or "").strip(),
         )
+        validation = self.validate_promo_dsl(item.to_dict())
+        item.dsl_valid = validation["valid"]
+        item.dsl_error = validation["error"]
+        if not item.dsl_valid:
+            print(
+                "[promo] invalid dsl id={0} slug={1} error={2}".format(
+                    item_id,
+                    slug,
+                    item.dsl_error,
+                )
+            )
         return item.to_dict()
+
+    def parse_promo_row(self, promotion: dict):
+        try:
+            item_id = int(promotion.get("id", 0))
+        except (TypeError, ValueError):
+            return None
+        if item_id <= 0:
+            return None
+        name = (promotion.get("name", "") or "").strip()
+        lore = (promotion.get("lore", "") or "").strip()
+        if not name or not lore:
+            return None
+        item = self._build_promo_item(
+            id=item_id,
+            class_name="akciya",
+            priority=int(promotion.get("priority", 100) or 100),
+            active=bool(promotion.get("active", True)),
+            photo=promotion.get("photo"),
+            name=name,
+            lore=lore,
+            condition=(promotion.get("condition", "") or "").strip(),
+            reward=(promotion.get("reward", "") or "").strip(),
+            notify=(promotion.get("notify", "") or "").strip(),
+            reward_mode=(promotion.get("reward_mode", "once") or "once").strip(),
+            limit_per_order=str(promotion.get("limit_per_order", "") or "").strip(),
+            limit_per_user_per_day=str(promotion.get("limit_per_user_per_day", "") or "").strip(),
+            start_at=(promotion.get("start_at", "") or "").strip(),
+            end_at=(promotion.get("end_at", "") or "").strip(),
+        )
+        validation = self.validate_promo_dsl(item.to_dict())
+        item.dsl_valid = validation["valid"]
+        item.dsl_error = validation["error"]
+        return item.to_dict()
+
+    def _build_promo_item(self, **payload):
+        try:
+            return PromoItem(**payload)
+        except TypeError:
+            base_kwargs = {
+                "id": payload.get("id"),
+                "class_name": payload.get("class_name"),
+                "priority": payload.get("priority"),
+                "active": payload.get("active"),
+                "photo": payload.get("photo"),
+                "text": payload.get("text", ""),
+                "link": payload.get("link", ""),
+                "name": payload.get("name", ""),
+                "lore": payload.get("lore", ""),
+            }
+            item = PromoItem(**base_kwargs)
+            for key, value in payload.items():
+                if key in base_kwargs:
+                    continue
+                setattr(item, key, value)
+            return item
+
+    def validate_promo_dsl(self, promo_item: dict):
+        if str(promo_item.get("class") or "").strip().lower() != "akciya":
+            return {"valid": True, "error": ""}
+        condition = str(promo_item.get("condition") or "").strip()
+        reward = str(promo_item.get("reward") or "").strip()
+        if not condition and not reward:
+            return {"valid": True, "error": ""}
+        try:
+            parse_and_validate_promo_source(
+                promo_item,
+                menu_items=self.load_menu_items_admin(),
+            )
+            return {"valid": True, "error": ""}
+        except (PromotionValidationError, PromotionDslError) as exc:
+            return {"valid": False, "error": str(exc)}
+
+    def is_promo_in_active_window(self, promo_item: dict, now: datetime | None = None) -> bool:
+        current = now or current_local_datetime_value()
+        start_at = self.parse_iso_datetime(promo_item.get("start_at"))
+        end_at = self.parse_iso_datetime(promo_item.get("end_at"))
+        if start_at and current < start_at:
+            return False
+        if end_at and current > end_at:
+            return False
+        return True
+
+    def parse_iso_datetime(self, value):
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return None
 
     def promo_items_to_news_cards(self, items):
         cards = []

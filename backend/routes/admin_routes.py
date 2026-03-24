@@ -60,6 +60,29 @@ def create_admin_blueprint(admin_service):
             dashboard=admin_service.get_dashboard_data(),
         )
 
+    @admin.post("/api/content/autosync")
+    def api_content_autosync():
+        blocked = guard(is_api=True)
+        if blocked is not None:
+            return blocked
+        try:
+            summary = admin_service.sync_content_from_host(
+                admin_user_id=int(session["user_id"]),
+                reason=required_reason(),
+            )
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        toast = (
+            "Автосогласование завершено: меню {0} (удалено {1}), акции {2} (удалено {3}), реклама {4}".format(
+                summary.get("menu_items_synced", 0),
+                summary.get("menu_items_deleted", 0),
+                summary.get("promotions_synced", 0),
+                summary.get("promotions_deleted", 0),
+                summary.get("reklama_found", 0),
+            )
+        )
+        return jsonify({"ok": True, "toast": toast, "summary": summary})
+
     @admin.get("/orders")
     def orders():
         blocked = guard()
@@ -193,12 +216,23 @@ def create_admin_blueprint(admin_service):
             return blocked
         filters = {"class_name": request.args.get("class_name", "")}
         all_promo_items = admin_service.menu_content.load_promo_items(include_inactive=True)
+        menu_items = admin_service.menu_content.load_menu_items_admin()
+        promo_builder_types = sorted({str(item.get("type") or "").strip() for item in menu_items if str(item.get("type") or "").strip()})
+        promo_builder_ids = sorted(
+            {
+                int(item.get("id"))
+                for item in menu_items
+                if str(item.get("id") or "").strip().isdigit()
+            }
+        )[:50]
         return render_template(
             "admin/promo.html",
             title="Акции и реклама",
             admin_section="promo",
             promo_items=admin_service.list_promo_items(filters, items=all_promo_items),
             filters=filters,
+            promo_builder_types=promo_builder_types,
+            promo_builder_ids=promo_builder_ids,
         )
 
     @admin.get("/analytics")
@@ -390,6 +424,18 @@ def create_admin_blueprint(admin_service):
         except ValueError as exc:
             return redirect(url_for("admin.promo", toast=str(exc)))
         return redirect(url_for("admin.promo", toast="Промо сохранено."))
+
+    @admin.post("/api/promo/validate")
+    def api_promo_validate():
+        blocked = guard(is_api=True)
+        if blocked is not None:
+            return blocked
+        payload = request.get_json(silent=True) or {}
+        try:
+            preview = admin_service.preview_promo_dsl(payload)
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify(preview)
 
     @admin.post("/promo/<class_name>/<int:item_id>/delete")
     def promo_delete(class_name: str, item_id: int):

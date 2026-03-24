@@ -313,3 +313,321 @@ def test_booking_time_checks_use_app_timezone_helpers(app_module, monkeypatch, t
         120,
     )
     assert pruned_bookings == []
+
+
+def test_payment_flow_applies_dsl_promotion_and_stores_application(app_module, client, monkeypatch):
+    user = build_user(
+        app_module,
+        balance=0,
+        cards=[
+            {
+                "id": 1,
+                "brand": "MIR",
+                "last4": "4242",
+                "expiry": "12/30",
+                "holder": "TEST USER",
+                "active": True,
+            }
+        ],
+    )
+    write_json(app_module.USERS_PATH, [user])
+
+    menu_items = [
+        {
+            "id": 101,
+            "name": "Закуска",
+            "type": "закуски",
+            "price": 300,
+            "photo": "menu_items/test/photo.png",
+            "active": True,
+        }
+    ]
+    promo_items = [
+        {
+            "id": 900,
+            "class": "akciya",
+            "name": "Snack bonus",
+            "lore": "За 2 закуски начислим бонусы",
+            "priority": 10,
+            "active": True,
+            "condition": "ID(101).QTY >= 2",
+            "reward": "POINTS(50)",
+            "notify": "Начислены бонусы",
+            "reward_mode": "once",
+            "limit_per_order": "",
+            "limit_per_user_per_day": "",
+            "start_at": "",
+            "end_at": "",
+            "dsl_valid": True,
+        }
+    ]
+    saved_applications = []
+    monkeypatch.setattr(app_module, "load_menu_items", lambda: menu_items)
+    monkeypatch.setattr(app_module, "load_promo_items", lambda: promo_items)
+    monkeypatch.setattr(app_module, "load_promo_application_counts", lambda **kwargs: {})
+    monkeypatch.setattr(
+        app_module,
+        "save_promotion_applications",
+        lambda **kwargs: saved_applications.append(kwargs),
+    )
+
+    csrf_token = get_csrf_token(client)
+    login_response = client.post(
+        "/login",
+        data={
+            "csrf_token": csrf_token,
+            "phone": user["phone"],
+            "password": "1234",
+        },
+    )
+    assert login_response.status_code == 200
+
+    booking_dt = datetime.now() + timedelta(days=1)
+    booking_response = client.post(
+        "/book",
+        json={
+            "table_id": 1,
+            "date": booking_dt.strftime("%Y-%m-%d"),
+            "time": booking_dt.strftime("%H:%M"),
+            "name": user["name"],
+        },
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert booking_response.status_code == 200
+
+    payment_response = client.post(
+        "/payment",
+        data={
+            "csrf_token": csrf_token,
+            "items_json": json.dumps([{"id": 101, "qty": 2}], ensure_ascii=False),
+            "comment": "Тест акции",
+            "serve_mode": "booking_start",
+        },
+    )
+    assert payment_response.status_code == 200
+    payment_html = payment_response.get_data(as_text=True)
+    preview_token_marker = 'name="preview_token" value="'
+    preview_token = payment_html.split(preview_token_marker, 1)[1].split('"', 1)[0]
+
+    confirm_response = client.post(
+        "/payment/confirm",
+        data={
+            "csrf_token": csrf_token,
+            "preview_token": preview_token,
+        },
+        follow_redirects=False,
+    )
+    assert confirm_response.status_code == 302
+
+    orders = read_json(app_module.ORDERS_PATH)
+    assert len(orders) == 1
+    assert orders[0]["promo_points"] == 50
+    assert orders[0]["promotions_applied"] == [
+        {
+            "promo_id": 900,
+            "name": "Snack bonus",
+            "reward_kind": "POINTS",
+            "applied_count": 1,
+            "priority": 10,
+            "notify": "Начислены бонусы",
+        }
+    ]
+    assert saved_applications[0]["order_id"] == 1
+    assert saved_applications[0]["user_id"] == user["id"]
+    assert saved_applications[0]["applied_promotions"][0]["promo_id"] == 900
+
+    users = read_json(app_module.USERS_PATH)
+    assert users[0]["balance"] == orders[0]["bonus_earned"] + 50
+
+
+def test_checkout_preview_token_is_bound_to_user(app_module):
+    token = app_module.issue_checkout_preview_token({"payable_total": 123}, user_id=1)
+
+    assert app_module.verify_checkout_preview_token(token, expected_user_id=1) == {"payable_total": 123}
+    assert app_module.verify_checkout_preview_token(token, expected_user_id=2) is None
+
+
+def test_payment_confirm_recomputes_promotions_at_confirmation(app_module, client, monkeypatch):
+    user = build_user(
+        app_module,
+        balance=0,
+        cards=[
+            {
+                "id": 1,
+                "brand": "MIR",
+                "last4": "4242",
+                "expiry": "12/30",
+                "holder": "TEST USER",
+                "active": True,
+            }
+        ],
+    )
+    write_json(app_module.USERS_PATH, [user])
+
+    menu_items = [
+        {
+            "id": 101,
+            "name": "Закуска",
+            "type": "закуски",
+            "price": 300,
+            "photo": "menu_items/test/photo.png",
+            "active": True,
+        }
+    ]
+    promo_items = [
+        {
+            "id": 901,
+            "class": "akciya",
+            "name": "Transient bonus",
+            "lore": "За 2 закуски начислим бонусы",
+            "priority": 10,
+            "active": True,
+            "condition": "ID(101).QTY >= 2",
+            "reward": "POINTS(50)",
+            "notify": "Начислены бонусы",
+            "reward_mode": "once",
+            "limit_per_order": "",
+            "limit_per_user_per_day": "",
+            "start_at": "",
+            "end_at": "",
+            "dsl_valid": True,
+        }
+    ]
+    monkeypatch.setattr(app_module, "load_menu_items", lambda: menu_items)
+    monkeypatch.setattr(app_module, "load_promo_items", lambda: promo_items)
+
+    csrf_token = get_csrf_token(client)
+    login_response = client.post(
+        "/login",
+        data={
+            "csrf_token": csrf_token,
+            "phone": user["phone"],
+            "password": "1234",
+        },
+    )
+    assert login_response.status_code == 200
+
+    booking_dt = datetime.now() + timedelta(days=1)
+    booking_response = client.post(
+        "/book",
+        json={
+            "table_id": 1,
+            "date": booking_dt.strftime("%Y-%m-%d"),
+            "time": booking_dt.strftime("%H:%M"),
+            "name": user["name"],
+        },
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert booking_response.status_code == 200
+
+    payment_response = client.post(
+        "/payment",
+        data={
+            "csrf_token": csrf_token,
+            "items_json": json.dumps([{"id": 101, "qty": 2}], ensure_ascii=False),
+            "comment": "Тест пересчёта",
+            "serve_mode": "booking_start",
+        },
+    )
+    assert payment_response.status_code == 200
+    payment_html = payment_response.get_data(as_text=True)
+    preview_token_marker = 'name="preview_token" value="'
+    preview_token = payment_html.split(preview_token_marker, 1)[1].split('"', 1)[0]
+
+    monkeypatch.setattr(app_module, "load_promo_items", lambda: [])
+
+    confirm_response = client.post(
+        "/payment/confirm",
+        data={
+            "csrf_token": csrf_token,
+            "preview_token": preview_token,
+        },
+        follow_redirects=False,
+    )
+    assert confirm_response.status_code == 302
+
+    orders = read_json(app_module.ORDERS_PATH)
+    assert len(orders) == 1
+    assert orders[0]["promo_points"] == 0
+    assert orders[0]["promotions_applied"] == []
+
+
+def test_delivery_does_not_apply_akciya_promotions(app_module, client, monkeypatch):
+    user = build_user(app_module, balance=0)
+    write_json(app_module.USERS_PATH, [user])
+
+    promo_item = {
+        "id": 901,
+        "class": "akciya",
+        "name": "Delivery blocked",
+        "lore": "Не должна применяться на доставке",
+        "priority": 10,
+        "active": True,
+        "condition": "ORDER.SUM >= 100",
+        "reward": "POINTS(50)",
+        "notify": "Начислены бонусы",
+        "reward_mode": "once",
+        "limit_per_order": "",
+        "limit_per_user_per_day": "",
+        "start_at": "",
+        "end_at": "",
+        "dsl_valid": True,
+    }
+    monkeypatch.setattr(app_module, "load_promo_items", lambda: [promo_item])
+    csrf_token = get_csrf_token(client)
+    client.post(
+        "/login",
+        data={"csrf_token": csrf_token, "phone": user["phone"], "password": "1234"},
+    )
+    menu_item = app_module.load_menu_items()[0]
+
+    delivery_response = client.post(
+        "/delivery/payment",
+        data={
+            "csrf_token": csrf_token,
+            "items_json": json.dumps([{"id": menu_item["id"], "qty": 1}], ensure_ascii=False),
+            "delivery_name": user["name"],
+            "delivery_phone": user["phone"],
+            "delivery_street": "Советский проспект",
+            "delivery_house": "10",
+        },
+        follow_redirects=False,
+    )
+
+    assert delivery_response.status_code == 302
+    with client.session_transaction() as session_state:
+        preview = session_state["delivery_checkout_preview"]
+    assert preview["promo_points"] == 0
+    assert preview["promotions_applied"] == []
+
+
+def test_notifications_show_only_one_promo_item(app_module, client, monkeypatch):
+    user = build_user(app_module, balance=0)
+    write_json(app_module.USERS_PATH, [user])
+    csrf_token = get_csrf_token(client)
+    client.post(
+        "/login",
+        data={"csrf_token": csrf_token, "phone": user["phone"], "password": "1234"},
+    )
+    monkeypatch.setattr(
+        app_module,
+        "load_promo_items",
+        lambda: [
+            {"id": 1, "class": "reklama", "text": "Реклама 1", "active": True},
+            {"id": 2, "class": "akciya", "name": "Акция 2", "lore": "Описание", "active": True},
+        ],
+    )
+    monkeypatch.setattr(
+        app_module.menu_content,
+        "load_promo_items",
+        lambda include_inactive=False: [
+            {"id": 1, "class": "reklama", "text": "Реклама 1", "active": True},
+            {"id": 2, "class": "akciya", "name": "Акция 2", "lore": "Описание", "active": True},
+        ],
+    )
+
+    response = client.get("/notifications")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert html.count("notice--promo") == 1

@@ -18,6 +18,7 @@ def calculate_order_totals(
     items,
     *,
     service_fee=0,
+    discount_total=0,
     points_balance=0,
     use_points=False,
     requested_points=None,
@@ -25,14 +26,16 @@ def calculate_order_totals(
     items_total = calculate_items_total(items)
     service_fee = max(0, int(service_fee or 0))
     gross_total = items_total + service_fee
+    discount_total = max(0, min(gross_total, int(discount_total or 0)))
+    discounted_total = max(0, gross_total - discount_total)
     points_balance = max(0, int(points_balance or 0))
 
     if requested_points is None:
-        requested_points = gross_total if use_points else 0
+        requested_points = discounted_total if use_points else 0
     requested_points = max(0, int(requested_points or 0))
 
-    points_applied = min(requested_points, points_balance, gross_total)
-    payable_total = max(0, gross_total - points_applied)
+    points_applied = min(requested_points, points_balance, discounted_total)
+    payable_total = max(0, discounted_total - points_applied)
     bonus_earned = int(payable_total * 0.05) if payable_total > 0 else 0
     return {
         "items_total": items_total,
@@ -69,9 +72,11 @@ def summarize_saved_order_totals(order, *, default_service_fee=0, recompute_zero
 
     points_applied = max(0, int(order.get("points_applied", 0) or 0))
     gross_total = items_total + service_fee
+    discount_total = max(0, int(order.get("discount_total", 0) or 0))
+    discounted_total = max(0, gross_total - discount_total)
     payable_total_raw = order.get("payable_total")
     payable_total = (
-        max(0, gross_total - points_applied)
+        max(0, discounted_total - points_applied)
         if payable_total_raw in (None, "")
         else max(0, int(payable_total_raw or 0))
     )

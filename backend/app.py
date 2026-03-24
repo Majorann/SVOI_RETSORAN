@@ -22,6 +22,7 @@ from routes.booking_routes import (
 from routes.profile_routes import add_card_route, delete_card_route, profile_route
 from routes.orders_routes import (
     checkout_route,
+    checkout_promo_preview_route,
     order_detail_route,
     orders_route,
     payment_confirm_route,
@@ -61,6 +62,14 @@ if _DATABASE_URL:
         from storage import pg_store as _pg_store_module
     except Exception as exc:
         raise RuntimeError(f"Postgres storage import failed: {exc}") from exc
+
+
+def _empty_promo_application_counts(**_kwargs):
+    return {}
+
+
+def _noop_save_promotion_applications(**_kwargs):
+    return None
 
 _redis_module = None
 _REDIS_URL = (os.getenv("REDIS_URL") or "").strip()
@@ -197,6 +206,16 @@ def _assert_storage_configuration():
 
 _activate_postgres_storage()
 _assert_storage_configuration()
+load_promo_application_counts = (
+    _pg_store_module.load_promotion_application_counts
+    if ACTIVE_STORAGE == "postgres" and _pg_store_module is not None
+    else _empty_promo_application_counts
+)
+save_promotion_applications = (
+    _pg_store_module.save_promotion_applications
+    if ACTIVE_STORAGE == "postgres" and _pg_store_module is not None
+    else _noop_save_promotion_applications
+)
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -365,12 +384,27 @@ storage = StorageFacade(
     store_save_users=store_save_users,
 )
 menu_content = MenuContentService(
+    active_storage=ACTIVE_STORAGE,
     menu_cache_enabled=MENU_CACHE_ENABLED,
     menu_cache_key=MENU_CACHE_KEY,
     menu_cache_ttl_seconds=MENU_CACHE_TTL_SECONDS,
     redis_module=_redis_module,
     redis_url=_REDIS_URL,
 )
+if ACTIVE_STORAGE == "postgres":
+    try:
+        sync_summary = menu_content.sync_host_content_to_storage()
+        print(
+            "[storage] host autosync menu={0} deleted_menu={1} promotions={2} deleted_promotions={3} reklama={4}".format(
+                sync_summary.get("menu_items_synced", 0),
+                sync_summary.get("menu_items_deleted", 0),
+                sync_summary.get("promotions_synced", 0),
+                sync_summary.get("promotions_deleted", 0),
+                sync_summary.get("reklama_found", 0),
+            )
+        )
+    except Exception as exc:
+        print(f"[storage] host autosync failed ({exc})")
 admin_service = None
 if AdminService is not None and create_admin_blueprint is not None:
     admin_service = AdminService(
@@ -597,13 +631,27 @@ def delivery_confirm():
         load_orders,
         next_order_id,
         save_orders,
+        USERS_PATH,
+        load_users,
+        save_users,
         verify_checkout_preview_token,
+        load_promo_application_counts,
+        save_promotion_applications,
+        load_promo_items,
+        load_menu_items,
     )
 
 
 @app.post("/delivery/payment")
 def delivery_payment():
-    return delivery_payment_route(resolve_order_items, issue_checkout_preview_token)
+    return delivery_payment_route(
+        resolve_order_items,
+        load_orders,
+        load_promo_application_counts,
+        load_promo_items,
+        load_menu_items,
+        issue_checkout_preview_token,
+    )
 
 
 @app.get("/delivery/payment")
@@ -707,7 +755,23 @@ def payment():
         latest_user_booking_status,
         resolve_order_items,
         parse_serving_option,
+        load_orders,
+        load_promo_application_counts,
+        load_promo_items,
+        load_menu_items,
         issue_checkout_preview_token,
+    )
+
+
+@app.post("/api/checkout/promo-preview")
+def checkout_promo_preview():
+    return checkout_promo_preview_route(
+        load_users,
+        resolve_order_items,
+        load_orders,
+        load_promo_application_counts,
+        load_promo_items,
+        load_menu_items,
     )
 
 
@@ -724,6 +788,10 @@ def payment_confirm():
         USERS_PATH,
         save_users,
         verify_checkout_preview_token,
+        load_promo_application_counts,
+        save_promotion_applications,
+        load_promo_items,
+        load_menu_items,
     )
 
 

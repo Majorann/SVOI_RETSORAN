@@ -37,17 +37,29 @@ def availability_route(load_bookings, parse_datetime, overlaps_booking):
     selected_date = request.args.get("date")
     selected_time = request.args.get("time")
     if not selected_date or not selected_time:
-        return jsonify({"ok": False, "error": "date/time required"}), 400
+        response = jsonify({"ok": False, "error": "date/time required"})
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response, 400
     bookings = load_bookings()
     selected_dt = parse_datetime(selected_date, selected_time)
     if selected_dt is None:
-        return jsonify({"ok": False, "error": "Некорректные дата или время."}), 400
+        response = jsonify({"ok": False, "error": "Некорректные дата или время."})
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response, 400
     reserved_ids = [
         item["table_id"]
         for item in bookings
         if overlaps_booking(item, selected_dt)
     ]
-    return jsonify({"ok": True, "reserved": reserved_ids})
+    response = jsonify({"ok": True, "reserved": reserved_ids})
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 def book_table_route(

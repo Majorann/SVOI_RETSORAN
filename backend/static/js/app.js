@@ -138,15 +138,20 @@ window.addEventListener("DOMContentLoaded", async () => {
   const menuList = document.getElementById("menuList") || document.querySelector(".menu");
   const menuCards = Array.from(document.querySelectorAll(".menu-card--menu"));
   const categoryChips = Array.from(document.querySelectorAll(".menu-chip"));
-  const typeToggle = document.getElementById("typeToggle");
-  const typeMenu = document.getElementById("typeMenu");
-  const typeOptions = Array.from(document.querySelectorAll(".filter-option"));
-  const typeValue = document.getElementById("typeValue");
+  const overflowCategoryControl = document.getElementById("overflowCategoryControl");
+  const overflowCategoryToggle = document.getElementById("overflowCategoryToggle");
+  const overflowCategoryMenu = document.getElementById("overflowCategoryMenu");
+  const overflowCategoryValue = document.getElementById("overflowCategoryValue");
+  const mobileMoreControl = document.getElementById("mobileMoreControl");
+  const mobileMoreToggle = document.getElementById("mobileMoreToggle");
+  const mobileMoreMenu = document.getElementById("mobileMoreMenu");
+  const mobileMoreValue = document.getElementById("mobileMoreValue");
   const sortToggle = document.getElementById("sortToggle");
   const sortMenu = document.getElementById("sortMenu");
   const sortOptions = Array.from(document.querySelectorAll(".sort-option"));
   const sortValue = document.getElementById("sortValue");
   const menuSearchInput = document.getElementById("menuSearchInput");
+  const cartMenuSearchInput = document.getElementById("cartMenuSearchInput");
   const menuEmptyState = document.getElementById("menuEmptyState");
   const cartDrawer = document.getElementById("cartDrawer");
   const cartOverlay = document.getElementById("cartOverlay");
@@ -209,15 +214,19 @@ window.addEventListener("DOMContentLoaded", async () => {
       menuList,
       menuCards,
       categoryChips,
-      typeToggle,
-      typeMenu,
-      typeOptions,
-      typeValue,
+      overflowCategoryControl,
+      overflowCategoryToggle,
+      overflowCategoryMenu,
+      overflowCategoryValue,
+      mobileMoreControl,
+      mobileMoreToggle,
+      mobileMoreMenu,
+      mobileMoreValue,
       sortToggle,
       sortMenu,
       sortOptions,
       sortValue,
-      searchInput: menuSearchInput,
+      searchInputs: [menuSearchInput, cartMenuSearchInput].filter(Boolean),
       emptyState: menuEmptyState,
     });
   }
@@ -310,6 +319,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       checkoutPointsApplied,
       checkoutBonusEarned: document.getElementById("checkoutBonusEarned"),
       checkoutPayable,
+      checkoutPromoHighlight: document.getElementById("checkoutPromoHighlight"),
+      checkoutPromoList: document.getElementById("checkoutPromoList"),
+      checkoutPromoMeta: document.getElementById("checkoutPromoMeta"),
+      checkoutPromoChip: document.getElementById("checkoutPromoChip"),
       goToPayment,
       serveCustomTime,
       loadCart,

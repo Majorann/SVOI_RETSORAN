@@ -1,9 +1,12 @@
+import json
 import os
 import threading
 import time
 from datetime import date, datetime, time as dt_time, timedelta
+from pathlib import Path
 
 import psycopg
+from config import MENU_ITEMS_PATH, MENU_PHOTO_NAMES, PROMO_ITEMS_PATH
 from services.business_logic import current_time_value
 
 
@@ -156,6 +159,27 @@ def _execute_schema(cur):
     )
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS menu_items (
+            id INTEGER PRIMARY KEY,
+            slug TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            lore TEXT NOT NULL DEFAULT '',
+            type TEXT NOT NULL DEFAULT '',
+            price INTEGER NOT NULL DEFAULT 0,
+            photo_path TEXT NOT NULL DEFAULT '',
+            portion_label TEXT NOT NULL DEFAULT '',
+            popularity INTEGER NOT NULL DEFAULT 0,
+            featured BOOLEAN NOT NULL DEFAULT FALSE,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_by_admin_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            updated_by_admin_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+        );
+        """
+    )
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS admin_users (
             user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
             created_at TEXT NOT NULL DEFAULT '',
@@ -175,6 +199,45 @@ def _execute_schema(cur):
             reason TEXT NOT NULL DEFAULT '',
             payload_json TEXT NOT NULL DEFAULT '',
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS promotions (
+            id BIGSERIAL PRIMARY KEY,
+            slug TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            lore TEXT NOT NULL DEFAULT '',
+            class_name TEXT NOT NULL DEFAULT 'akciya',
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            priority INTEGER NOT NULL DEFAULT 100,
+            condition TEXT NOT NULL DEFAULT '',
+            reward TEXT NOT NULL DEFAULT '',
+            notify TEXT NOT NULL DEFAULT '',
+            reward_mode TEXT NOT NULL DEFAULT 'once',
+            limit_per_order INTEGER,
+            limit_per_user_per_day INTEGER,
+            start_at TIMESTAMPTZ,
+            end_at TIMESTAMPTZ,
+            photo_path TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_by_admin_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            updated_by_admin_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+        );
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS promotion_applications (
+            id BIGSERIAL PRIMARY KEY,
+            promotion_id BIGINT NOT NULL REFERENCES promotions(id) ON DELETE CASCADE,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            applied_count INTEGER NOT NULL DEFAULT 0,
+            reward_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb
         );
         """
     )
@@ -217,6 +280,12 @@ def _execute_schema(cur):
         "CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);"
     )
     cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_menu_items_active_type ON menu_items(active, type, id);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_menu_items_featured ON menu_items(featured, popularity DESC, id ASC);"
+    )
+    cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_admin_users_created_by ON admin_users(created_by);"
     )
     cur.execute(
@@ -227,6 +296,18 @@ def _execute_schema(cur):
     )
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_admin_actions_entity ON admin_actions(entity_type, entity_id);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_promotions_active_priority ON promotions(active, priority DESC, id ASC);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_promotions_window ON promotions(start_at, end_at);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_promotion_applications_promo_user_applied ON promotion_applications(promotion_id, user_id, applied_at DESC);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_promotion_applications_order_id ON promotion_applications(order_id);"
     )
     cur.execute(
         """
@@ -312,6 +393,14 @@ def _coerce_list(value):
     return value if isinstance(value, list) else []
 
 
+def _coerce_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _parse_date(value):
     if isinstance(value, date) and not isinstance(value, datetime):
         return value
@@ -337,6 +426,13 @@ def _parse_optional_time(value):
     if not text:
         return None
     return _parse_time(text)
+
+
+def _parse_optional_datetime(value):
+    text = _coerce_text(value).strip()
+    if not text:
+        return None
+    return datetime.fromisoformat(text)
 
 
 def _time_hhmm(value):
@@ -636,6 +732,352 @@ def _migrate_legacy_orders_columns(cur):
     )
 
 
+def _read_legacy_meta(path: Path):
+    data = {}
+    for encoding in ("utf-8", "utf-8-sig", "cp1251"):
+        try:
+            raw_text = path.read_text(encoding=encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        raw_text = path.read_text(encoding="utf-8", errors="replace")
+
+    for raw_line in raw_text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        data[key.strip().lower().lstrip("\ufeff")] = value.strip()
+    return data
+
+
+def _legacy_photo_path(item_dir: Path, root_path: Path, prefix: str, preferred_names):
+    for photo_name in preferred_names:
+        candidate = item_dir / photo_name
+        if candidate.exists():
+            try:
+                relative_path = candidate.relative_to(root_path).as_posix()
+            except ValueError:
+                relative_path = candidate.name
+            return f"{prefix}/{relative_path}"
+    for extension in ("*.webp", "*.png", "*.jpg", "*.jpeg"):
+        candidates = sorted(item_dir.glob(extension))
+        if not candidates:
+            continue
+        candidate = candidates[0]
+        try:
+            relative_path = candidate.relative_to(root_path).as_posix()
+        except ValueError:
+            relative_path = candidate.name
+        return f"{prefix}/{relative_path}"
+    return ""
+
+
+def _normalize_slug(value):
+    text = _coerce_text(value).strip().replace("\\", "/")
+    parts = [segment for segment in text.split("/") if segment]
+    if len(parts) >= 3 and parts[0] == "promo_items" and parts[1] == "akciya":
+        return "/".join(parts[2:-1]) or parts[-2]
+    if len(parts) >= 3 and parts[0] == "menu_items":
+        return parts[-2]
+    if len(parts) >= 3 and parts[0] == "akciya":
+        return "/".join(parts[1:])
+    if parts:
+        return "/".join(parts)
+    return "promotion"
+
+
+def _legacy_menu_item_rows():
+    rows = []
+    if not MENU_ITEMS_PATH.exists():
+        return rows
+    for meta_path in sorted(MENU_ITEMS_PATH.rglob("item.txt")):
+        meta = _read_legacy_meta(meta_path)
+        item_id = _coerce_int(meta.get("id"), 0)
+        if item_id <= 0:
+            continue
+        name = _coerce_text(meta.get("name")).strip()
+        lore = _coerce_text(meta.get("lore")).strip()
+        item_type = _coerce_text(meta.get("type")).strip()
+        if not name or not lore or not item_type:
+            continue
+        rows.append(
+            {
+                "id": item_id,
+                "slug": meta_path.parent.name,
+                "name": name,
+                "lore": lore,
+                "type": item_type,
+                "price": _coerce_int(meta.get("price"), 0),
+                "photo_path": _legacy_photo_path(
+                    meta_path.parent,
+                    MENU_ITEMS_PATH,
+                    "menu_items",
+                    MENU_PHOTO_NAMES,
+                ),
+                "portion_label": _coerce_text(
+                    meta.get("portion")
+                    or meta.get("weight")
+                    or meta.get("grams")
+                    or meta.get("gram")
+                    or meta.get("volume")
+                    or meta.get("serving")
+                    or meta.get("yield")
+                ).strip(),
+                "popularity": _coerce_int(meta.get("popularity") or meta.get("orders_count"), 0),
+                "featured": _coerce_bool(meta.get("featured"), False),
+                "active": _coerce_bool(meta.get("active") if "active" in meta else meta.get("available"), True),
+            }
+        )
+    return rows
+
+
+def _legacy_promotion_rows():
+    rows = []
+    if not PROMO_ITEMS_PATH.exists():
+        return rows
+    for meta_path in sorted(PROMO_ITEMS_PATH.rglob("item.txt")):
+        try:
+            relative_parts = meta_path.relative_to(PROMO_ITEMS_PATH).parts
+        except ValueError:
+            continue
+        if len(relative_parts) < 2 or relative_parts[0] != "akciya":
+            continue
+        meta = _read_legacy_meta(meta_path)
+        if str(meta.get("class") or "").strip().lower() != "akciya":
+            continue
+        name = _coerce_text(meta.get("name")).strip()
+        lore = _coerce_text(meta.get("lore")).strip()
+        if not name or not lore:
+            continue
+        promo_id = _coerce_int(meta.get("id"), 0)
+        if promo_id <= 0:
+            continue
+        photo_path = _legacy_photo_path(
+            meta_path.parent,
+            PROMO_ITEMS_PATH,
+            "promo_items",
+            ("photo.png", "photo.webp", "photo.jpg", "photo.jpeg"),
+        )
+        rows.append(
+            {
+                "id": promo_id,
+                "slug": "/".join(relative_parts[1:-1]),
+                "name": name,
+                "lore": lore,
+                "active": _coerce_bool(meta.get("active"), True),
+                "priority": _coerce_int(meta.get("priority"), 100),
+                "condition": _coerce_text(meta.get("condition")).strip(),
+                "reward": _coerce_text(meta.get("reward")).strip(),
+                "notify": _coerce_text(meta.get("notify")).strip(),
+                "reward_mode": _coerce_text(meta.get("reward_mode"), "once").strip() or "once",
+                "limit_per_order": _coerce_int(meta.get("limit_per_order"), 0) or None,
+                "limit_per_user_per_day": _coerce_int(meta.get("limit_per_user_per_day"), 0) or None,
+                "start_at": _parse_optional_datetime(meta.get("start_at")),
+                "end_at": _parse_optional_datetime(meta.get("end_at")),
+                "photo_path": photo_path,
+            }
+        )
+    return rows
+
+
+def _upsert_menu_items_in_tx(cur, menu_items):
+    rows = []
+    for menu_item in _coerce_list(menu_items):
+        if not isinstance(menu_item, dict):
+            continue
+        item_id = _coerce_int(menu_item.get("id"), 0)
+        if item_id <= 0:
+            continue
+        rows.append(
+            (
+                item_id,
+                _normalize_slug(menu_item.get("slug") or menu_item.get("photo_path") or menu_item.get("name")),
+                _coerce_text(menu_item.get("name")).strip(),
+                _coerce_text(menu_item.get("lore")).strip(),
+                _coerce_text(menu_item.get("type")).strip(),
+                _coerce_int(menu_item.get("price"), 0),
+                _coerce_text(menu_item.get("photo_path")).strip(),
+                _coerce_text(menu_item.get("portion_label") or menu_item.get("weight")).strip(),
+                _coerce_int(menu_item.get("popularity"), 0),
+                _coerce_bool(menu_item.get("featured"), False),
+                _coerce_bool(menu_item.get("active"), True),
+                menu_item.get("created_by_admin_user_id"),
+                menu_item.get("updated_by_admin_user_id"),
+            )
+        )
+    if not rows:
+        return
+    cur.executemany(
+        """
+        INSERT INTO menu_items (
+            id,
+            slug,
+            name,
+            lore,
+            type,
+            price,
+            photo_path,
+            portion_label,
+            popularity,
+            featured,
+            active,
+            created_by_admin_user_id,
+            updated_by_admin_user_id
+        )
+        VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
+        ON CONFLICT (id)
+        DO UPDATE SET
+            slug = EXCLUDED.slug,
+            name = EXCLUDED.name,
+            lore = EXCLUDED.lore,
+            type = EXCLUDED.type,
+            price = EXCLUDED.price,
+            photo_path = EXCLUDED.photo_path,
+            portion_label = EXCLUDED.portion_label,
+            popularity = EXCLUDED.popularity,
+            featured = EXCLUDED.featured,
+            active = EXCLUDED.active,
+            updated_at = NOW(),
+            updated_by_admin_user_id = EXCLUDED.updated_by_admin_user_id
+        """,
+        rows,
+    )
+
+
+def _upsert_promotions_in_tx(cur, promotions):
+    rows = []
+    for promotion in _coerce_list(promotions):
+        if not isinstance(promotion, dict):
+            continue
+        promotion_id = _coerce_int(promotion.get("id"), 0)
+        if promotion_id <= 0:
+            continue
+        rows.append(
+            (
+                promotion_id,
+                _normalize_slug(promotion.get("slug") or promotion.get("photo_path") or promotion.get("name")),
+                _coerce_text(promotion.get("name")).strip(),
+                _coerce_text(promotion.get("lore")).strip(),
+                "akciya",
+                _coerce_bool(promotion.get("active"), True),
+                _coerce_int(promotion.get("priority"), 100),
+                _coerce_text(promotion.get("condition")).strip(),
+                _coerce_text(promotion.get("reward")).strip(),
+                _coerce_text(promotion.get("notify")).strip(),
+                _coerce_text(promotion.get("reward_mode"), "once").strip() or "once",
+                (_coerce_int(promotion.get("limit_per_order"), 0) or None),
+                (_coerce_int(promotion.get("limit_per_user_per_day"), 0) or None),
+                _parse_optional_datetime(promotion.get("start_at")),
+                _parse_optional_datetime(promotion.get("end_at")),
+                _coerce_text(promotion.get("photo_path")).strip(),
+                promotion.get("created_by_admin_user_id"),
+                promotion.get("updated_by_admin_user_id"),
+            )
+        )
+    if not rows:
+        return
+    cur.executemany(
+        """
+        INSERT INTO promotions (
+            id,
+            slug,
+            name,
+            lore,
+            class_name,
+            active,
+            priority,
+            condition,
+            reward,
+            notify,
+            reward_mode,
+            limit_per_order,
+            limit_per_user_per_day,
+            start_at,
+            end_at,
+            photo_path,
+            created_by_admin_user_id,
+            updated_by_admin_user_id
+        )
+        VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
+        ON CONFLICT (id)
+        DO UPDATE SET
+            slug = EXCLUDED.slug,
+            name = EXCLUDED.name,
+            lore = EXCLUDED.lore,
+            class_name = EXCLUDED.class_name,
+            active = EXCLUDED.active,
+            priority = EXCLUDED.priority,
+            condition = EXCLUDED.condition,
+            reward = EXCLUDED.reward,
+            notify = EXCLUDED.notify,
+            reward_mode = EXCLUDED.reward_mode,
+            limit_per_order = EXCLUDED.limit_per_order,
+            limit_per_user_per_day = EXCLUDED.limit_per_user_per_day,
+            start_at = EXCLUDED.start_at,
+            end_at = EXCLUDED.end_at,
+            photo_path = EXCLUDED.photo_path,
+            updated_at = NOW(),
+            updated_by_admin_user_id = EXCLUDED.updated_by_admin_user_id
+        """,
+        rows,
+    )
+
+
+def _maybe_migrate_legacy_promotions(cur):
+    if _count_rows(cur, "promotions") > 0:
+        return
+    rows = _legacy_promotion_rows()
+    if not rows:
+        return
+    _upsert_promotions_in_tx(cur, rows)
+
+
+def _maybe_migrate_legacy_menu_items(cur):
+    if _count_rows(cur, "menu_items") > 0:
+        return
+    rows = _legacy_menu_item_rows()
+    if not rows:
+        return
+    _upsert_menu_items_in_tx(cur, rows)
+
+
+def _delete_missing_menu_items_in_tx(cur, present_ids):
+    normalized_ids = sorted({int(item_id) for item_id in present_ids if _coerce_int(item_id, 0) > 0})
+    if normalized_ids:
+        cur.execute(
+            """
+            DELETE FROM menu_items
+            WHERE id <> ALL(%s)
+            """,
+            (normalized_ids,),
+        )
+    else:
+        cur.execute("DELETE FROM menu_items")
+    return _coerce_int(getattr(cur, "rowcount", 0), 0)
+
+
+def _delete_missing_promotions_in_tx(cur, present_ids):
+    normalized_ids = sorted({int(item_id) for item_id in present_ids if _coerce_int(item_id, 0) > 0})
+    if normalized_ids:
+        cur.execute(
+            """
+            DELETE FROM promotions
+            WHERE class_name = 'akciya'
+              AND id <> ALL(%s)
+            """,
+            (normalized_ids,),
+        )
+    else:
+        cur.execute("DELETE FROM promotions WHERE class_name = 'akciya'")
+    return _coerce_int(getattr(cur, "rowcount", 0), 0)
+
+
 def _maybe_migrate_legacy_app_state(cur):
     if not _table_exists(cur, "app_state"):
         return
@@ -678,6 +1120,8 @@ def _ensure_schema():
                 _execute_schema(cur)
                 _migrate_legacy_orders_columns(cur)
                 _maybe_migrate_legacy_app_state(cur)
+                _maybe_migrate_legacy_menu_items(cur)
+                _maybe_migrate_legacy_promotions(cur)
         _SCHEMA_READY = True
 
 
@@ -987,3 +1431,289 @@ def ping():
         return True
 
     return _run_db_operation(operation)
+
+
+def load_menu_items(*, include_inactive: bool = False):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            if include_inactive:
+                cur.execute(
+                    """
+                    SELECT
+                        id,
+                        slug,
+                        name,
+                        lore,
+                        type,
+                        price,
+                        photo_path,
+                        portion_label,
+                        popularity,
+                        featured,
+                        active
+                    FROM menu_items
+                    ORDER BY id ASC
+                    """
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT
+                        id,
+                        slug,
+                        name,
+                        lore,
+                        type,
+                        price,
+                        photo_path,
+                        portion_label,
+                        popularity,
+                        featured,
+                        active
+                    FROM menu_items
+                    WHERE active = TRUE
+                    ORDER BY id ASC
+                    """
+                )
+            rows = cur.fetchall()
+        return [
+            {
+                "id": row[0],
+                "slug": _coerce_text(row[1]),
+                "name": _coerce_text(row[2]),
+                "lore": _coerce_text(row[3]),
+                "type": _coerce_text(row[4]),
+                "price": _coerce_int(row[5], 0),
+                "photo": _coerce_text(row[6]),
+                "portion_label": _coerce_text(row[7]),
+                "popularity": _coerce_int(row[8], 0),
+                "featured": bool(row[9]),
+                "active": bool(row[10]),
+            }
+            for row in rows
+        ]
+
+    return _run_db_operation(operation)
+
+
+def upsert_menu_item(menu_item: dict):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM menu_items")
+                next_id_row = cur.fetchone()
+                item_id = _coerce_int(menu_item.get("id"), 0) or _coerce_int(next_id_row[0], 1)
+                payload = dict(menu_item)
+                payload["id"] = item_id
+                _upsert_menu_items_in_tx(cur, [payload])
+        return item_id
+
+    return _run_db_operation(operation)
+
+
+def sync_menu_items_from_disk():
+    def operation():
+        _ensure_schema()
+        rows = _legacy_menu_item_rows()
+        conn = _get_conn()
+        with conn.transaction():
+            with conn.cursor() as cur:
+                _upsert_menu_items_in_tx(cur, rows)
+                deleted_count = _delete_missing_menu_items_in_tx(cur, [row.get("id") for row in rows])
+        return {
+            "scanned": len(rows),
+            "synced": len(rows),
+            "deleted": deleted_count,
+        }
+
+    return _run_db_operation(operation)
+
+
+def load_promotions():
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    slug,
+                    name,
+                    lore,
+                    active,
+                    priority,
+                    condition,
+                    reward,
+                    notify,
+                    reward_mode,
+                    limit_per_order,
+                    limit_per_user_per_day,
+                    start_at,
+                    end_at,
+                    photo_path
+                FROM promotions
+                WHERE class_name = 'akciya'
+                ORDER BY priority DESC, id ASC
+                """
+            )
+            rows = cur.fetchall()
+        return [
+            {
+                "id": row[0],
+                "slug": _coerce_text(row[1]),
+                "class": "akciya",
+                "name": _coerce_text(row[2]),
+                "lore": _coerce_text(row[3]),
+                "active": bool(row[4]),
+                "priority": _coerce_int(row[5], 100),
+                "condition": _coerce_text(row[6]),
+                "reward": _coerce_text(row[7]),
+                "notify": _coerce_text(row[8]),
+                "reward_mode": _coerce_text(row[9], "once") or "once",
+                "limit_per_order": "" if row[10] is None else str(row[10]),
+                "limit_per_user_per_day": "" if row[11] is None else str(row[11]),
+                "start_at": row[12].isoformat() if isinstance(row[12], datetime) else _coerce_text(row[12]),
+                "end_at": row[13].isoformat() if isinstance(row[13], datetime) else _coerce_text(row[13]),
+                "photo": _coerce_text(row[14]) or None,
+            }
+            for row in rows
+        ]
+
+    return _run_db_operation(operation)
+
+
+def upsert_promotion(promotion: dict):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COALESCE(MAX(id), 0) + 1 FROM promotions"
+                )
+                next_id_row = cur.fetchone()
+                promotion_id = _coerce_int(promotion.get("id"), 0) or _coerce_int(next_id_row[0], 1)
+                payload = dict(promotion)
+                payload["id"] = promotion_id
+                _upsert_promotions_in_tx(cur, [payload])
+        return promotion_id
+
+    return _run_db_operation(operation)
+
+
+def delete_promotion(promotion_id: int):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM promotions WHERE id = %s", (int(promotion_id),))
+
+    _run_db_operation(operation)
+
+
+def sync_promotions_from_disk():
+    def operation():
+        _ensure_schema()
+        rows = _legacy_promotion_rows()
+        conn = _get_conn()
+        with conn.transaction():
+            with conn.cursor() as cur:
+                _upsert_promotions_in_tx(cur, rows)
+                deleted_count = _delete_missing_promotions_in_tx(cur, [row.get("id") for row in rows])
+        return {
+            "scanned": len(rows),
+            "synced": len(rows),
+            "deleted": deleted_count,
+        }
+
+    return _run_db_operation(operation)
+
+
+def load_promotion_application_counts(*, user_id: int | None, at: datetime | None = None):
+    if not user_id:
+        return {}
+
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        current = at or datetime.now()
+        day_start = current.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT promotion_id, COALESCE(SUM(applied_count), 0) AS applied_total
+                FROM promotion_applications
+                WHERE user_id = %s
+                  AND applied_at >= %s
+                  AND applied_at < %s
+                GROUP BY promotion_id
+                """,
+                (int(user_id), day_start, day_end),
+            )
+            rows = cur.fetchall()
+        return {int(row[0]): _coerce_int(row[1], 0) for row in rows}
+
+    return _run_db_operation(operation)
+
+
+def save_promotion_applications(*, order_id: int, user_id: int, applied_promotions: list[dict], applied_at: datetime | None = None):
+    if not applied_promotions:
+        return
+
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM promotion_applications WHERE order_id = %s", (int(order_id),))
+                rows = []
+                for applied in _coerce_list(applied_promotions):
+                    if not isinstance(applied, dict):
+                        continue
+                    promotion_id = _coerce_int(applied.get("promo_id"), 0)
+                    applied_count = _coerce_int(applied.get("applied_count"), 0)
+                    if promotion_id <= 0 or applied_count <= 0:
+                        continue
+                    reward_snapshot = json.dumps(
+                        {
+                            "promotion_name": _coerce_text(applied.get("name")),
+                            "reward_kind": _coerce_text(applied.get("reward_kind")),
+                            "notify": _coerce_text(applied.get("notify")),
+                            "priority": _coerce_int(applied.get("priority"), 0),
+                        },
+                        ensure_ascii=False,
+                    )
+                    rows.append(
+                        (
+                            promotion_id,
+                            int(user_id),
+                            int(order_id),
+                            applied_at or datetime.now(),
+                            applied_count,
+                            reward_snapshot,
+                        )
+                    )
+                if rows:
+                    cur.executemany(
+                        """
+                        INSERT INTO promotion_applications (
+                            promotion_id,
+                            user_id,
+                            order_id,
+                            applied_at,
+                            applied_count,
+                            reward_snapshot
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                        """,
+                        rows,
+                    )
+
+    _run_db_operation(operation)
