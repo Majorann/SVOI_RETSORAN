@@ -17,8 +17,8 @@
       <div><span>Создано</span><strong>{{ booking.created_at|ru_datetime }}</strong></div>
       <div><span>ID пользователя</span><strong><a href="{{ url_for('admin.user_detail', user_id=booking.user_id) }}">{{ booking.user_id }}</a></strong></div>
     </div>
-    <div class="admin-inline-form">
-      <button class="admin-button admin-button--danger" type="button" data-admin-api="{{ url_for('admin.api_booking_cancel', booking_id=booking.id) }}" data-admin-title="Отменить бронь" data-admin-message="Бронь будет удалена из bookings. Причина обязательна.">Отменить бронь</button>
+    <div class="admin-inline-form admin-inline-form--detail-action">
+      <button class="admin-button admin-button--danger" type="button" data-admin-api="{{ url_for('admin.api_booking_cancel', booking_id=booking.id) }}" data-admin-redirect-url="{{ url_for('admin.bookings') }}" data-admin-title="Отменить бронь" data-admin-message="Бронь будет отменена. Причина обязательна.">Отменить бронь</button>
     </div>
   </article>
 

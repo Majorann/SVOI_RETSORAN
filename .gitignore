@@ -11,3 +11,5 @@ __pycache__/
 *.log
 .vscode/
 .idea/
+backend/ops/ngrok_latest/
+backend/ops/ngrok_latest.zip

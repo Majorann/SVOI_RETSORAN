@@ -200,10 +200,11 @@ body.page-admin {
 
 .admin-toolbar__actions--filters {
   justify-content: flex-start;
+  align-items: flex-end;
 }
 
 .admin-toolbar__actions--delivery {
-  align-items: end;
+  align-items: flex-end;
 }
 
 .admin-card {
@@ -391,6 +392,10 @@ body.page-admin {
 
 .admin-inline-form--jump {
   margin-left: auto;
+}
+
+.admin-inline-form--detail-action {
+  margin-top: 10px;
 }
 
 .admin-select-wrap {
@@ -1052,6 +1057,15 @@ body.page-admin {
 
 .admin-chip-row--spread {
   justify-content: space-between;
+}
+
+.admin-chip-row--toolbar {
+  align-self: flex-end;
+  min-height: 42px;
+}
+
+.admin-chip-row--toolbar .admin-chip {
+  min-height: 42px;
 }
 
 [data-promo-field][hidden] {

@@ -59,6 +59,7 @@ document.querySelectorAll("[data-admin-api]").forEach((button) => {
       message: button.dataset.adminMessage,
       payloadSource: button.dataset.adminPayloadSource,
       payloadKey: button.dataset.adminPayloadKey,
+      redirectUrl: button.dataset.adminRedirectUrl,
     });
   });
 });
@@ -91,6 +92,11 @@ modalConfirm?.addEventListener("click", async () => {
     }
     closeModal();
     sessionStorage.setItem("adminToast", data.toast || "Действие выполнено.");
+    const redirectUrl = currentAction.redirectUrl || data.redirect_url || "";
+    if (redirectUrl) {
+      window.location.assign(redirectUrl);
+      return;
+    }
     window.location.reload();
   } catch (error) {
     showToast(error.message || "Ошибка запроса.", "error");

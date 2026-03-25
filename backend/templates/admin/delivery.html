@@ -26,8 +26,16 @@
           {% endfor %}
         </select>
       </label>
-      <button class="admin-button admin-button--apply" type="submit">Применить</button>
-      <div class="admin-chip-row">
+      <label class="admin-field admin-field--compact">
+        <span>На странице</span>
+        <select class="admin-select admin-select--compact-wide" name="per_page">
+          {% for size in [10, 25, 50] %}
+            <option value="{{ size }}" {% if filters.per_page == size|string %}selected{% endif %}>{{ size }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="admin-button admin-button--apply admin-button--compact" type="submit">Применить</button>
+      <div class="admin-chip-row admin-chip-row--toolbar">
         <a class="admin-chip {% if filters.preset == 'today' %}is-active{% endif %}" href="{{ url_for('admin.delivery', preset='today') }}">Сегодня</a>
         <a class="admin-chip {% if filters.preset == 'last_hour' %}is-active{% endif %}" href="{{ url_for('admin.delivery', preset='last_hour') }}">Последний час</a>
         <a class="admin-chip {% if filters.preset == 'active' %}is-active{% endif %}" href="{{ url_for('admin.delivery', preset='active') }}">В работе</a>
@@ -75,4 +83,28 @@
     <div class="admin-empty">Заказы на доставку не найдены.</div>
   {% endif %}
 </section>
+
+{% if pagination and pagination.total_pages > 1 %}
+<section class="admin-card">
+  <div class="admin-toolbar__actions admin-toolbar__actions--filters">
+    <span class="admin-note">Страница {{ pagination.page }} из {{ pagination.total_pages }} · Всего доставок: {{ pagination.total }}</span>
+    <div class="admin-chip-row">
+      {% if pagination.has_prev %}
+        <a class="admin-chip" href="{{ url_for('admin.delivery', page=pagination.prev_page, **query_params) }}">Назад</a>
+      {% endif %}
+      <span class="admin-chip">{{ pagination.page }}</span>
+      {% if pagination.has_next %}
+        <a class="admin-chip is-active" href="{{ url_for('admin.delivery', page=pagination.next_page, **query_params) }}">Дальше</a>
+      {% endif %}
+    </div>
+    <form class="admin-inline-form admin-inline-form--jump" method="get">
+      {% for key, value in query_params.items() %}
+        <input type="hidden" name="{{ key }}" value="{{ value }}" />
+      {% endfor %}
+      <input class="admin-input admin-input--jump" type="number" name="page" min="1" max="{{ pagination.total_pages }}" value="{{ pagination.page }}" />
+      <button class="admin-button admin-button--compact" type="submit">Перейти</button>
+    </form>
+  </div>
+</section>
+{% endif %}
 {% endblock %}

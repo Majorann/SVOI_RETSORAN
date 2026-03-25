@@ -63,14 +63,14 @@ const setupMenuCatalog = ({
     ...overflowCategories.map((category) => [category, category]),
   ]);
   let overflowOptions = [];
-  let overflowWidthFrame = 0;
+  const VALUE_SWAP_OUT_MS = 150;
 
   const updateToggleWidth = (toggle) => {
     if (!toggle) return;
-    if (overflowWidthFrame) {
-      cancelAnimationFrame(overflowWidthFrame);
+    if (toggle._widthFrame) {
+      cancelAnimationFrame(toggle._widthFrame);
     }
-    overflowWidthFrame = requestAnimationFrame(() => {
+    toggle._widthFrame = requestAnimationFrame(() => {
       const probe = toggle.cloneNode(true);
       probe.style.position = "fixed";
       probe.style.left = "-9999px";
@@ -83,10 +83,54 @@ const setupMenuCatalog = ({
       document.body.appendChild(probe);
       const measuredWidth = Math.ceil(probe.scrollWidth);
       probe.remove();
-      overflowWidthFrame = requestAnimationFrame(() => {
+      toggle._widthFrame = requestAnimationFrame(() => {
         toggle.style.width = `${measuredWidth}px`;
       });
     });
+  };
+
+  const animateToggleValue = (toggle, valueNode, nextText, isActive) => {
+    if (!toggle || !valueNode) return;
+    const normalizedText = isActive ? String(nextText || "").trim() : "";
+    const currentText = valueNode.dataset.renderedValue ?? valueNode.textContent ?? "";
+    const currentActive = toggle.classList.contains("has-selection");
+
+    if (valueNode._swapTimer) {
+      clearTimeout(valueNode._swapTimer);
+      valueNode._swapTimer = 0;
+    }
+
+    if (currentText === normalizedText && currentActive === isActive) {
+      valueNode.hidden = false;
+      updateToggleWidth(toggle);
+      return;
+    }
+
+    const commitNextValue = () => {
+      valueNode.textContent = normalizedText;
+      valueNode.dataset.renderedValue = normalizedText;
+      valueNode.hidden = false;
+      toggle.classList.toggle("has-selection", isActive);
+      updateToggleWidth(toggle);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          valueNode.classList.remove("is-swapping");
+        });
+      });
+    };
+
+    valueNode.hidden = false;
+    valueNode.classList.add("is-swapping");
+
+    if (currentText) {
+      valueNode._swapTimer = window.setTimeout(() => {
+        valueNode._swapTimer = 0;
+        commitNextValue();
+      }, VALUE_SWAP_OUT_MS);
+      return;
+    }
+
+    commitNextValue();
   };
 
   const buildCategoryOptionButtons = (categories, menu, onSelect) =>
@@ -294,19 +338,19 @@ const setupMenuCatalog = ({
     const isOverflowActive = overflowCategories.includes(activeCategory);
     const isMobileSelectionActive = activeCategory !== "all";
     overflowCategoryToggle?.classList.toggle("is-active", isOverflowActive);
-    overflowCategoryToggle?.classList.toggle("has-selection", isOverflowActive);
     mobileMoreToggle?.classList.toggle("is-active", isMobileSelectionActive);
-    mobileMoreToggle?.classList.toggle("has-selection", isMobileSelectionActive);
-    if (overflowCategoryValue) {
-      overflowCategoryValue.textContent = isOverflowActive ? categoryLabels.get(activeCategory) || activeCategory : "";
-      overflowCategoryValue.hidden = false;
-    }
-    if (mobileMoreValue) {
-      mobileMoreValue.textContent = isMobileSelectionActive ? categoryLabels.get(activeCategory) || activeCategory : "";
-      mobileMoreValue.hidden = false;
-    }
-    updateToggleWidth(overflowCategoryToggle);
-    updateToggleWidth(mobileMoreToggle);
+    animateToggleValue(
+      overflowCategoryToggle,
+      overflowCategoryValue,
+      categoryLabels.get(activeCategory) || activeCategory,
+      isOverflowActive,
+    );
+    animateToggleValue(
+      mobileMoreToggle,
+      mobileMoreValue,
+      categoryLabels.get(activeCategory) || activeCategory,
+      isMobileSelectionActive,
+    );
     sortOptions.forEach((option) => {
       option.classList.toggle("is-active", option.dataset.sort === activeSort);
     });

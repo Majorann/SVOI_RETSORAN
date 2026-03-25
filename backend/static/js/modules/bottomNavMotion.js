@@ -79,10 +79,10 @@
       event.preventDefault();
       setActive(item);
       pulseNavItem(item);
-      // Keep tab transition long enough for pulse to be noticeable.
+      // Keep a short pulse without making navigation feel delayed.
       window.setTimeout(() => {
         window.location.href = href;
-      }, 300);
+      }, 120);
     });
   });
 
@@ -93,4 +93,3 @@
 };
 
 export { setupBottomNavMotion };
-

@@ -53,20 +53,19 @@ def _resolve_checkout_items_from_preview(preview_items, menu_items: list[dict]) 
     return resolved_items
 
 
-def orders_route(load_orders):
+def orders_route(list_user_orders):
     user_id = session.get("user_id")
     if not user_id:
         return redirect(url_for("login", error="Войдите, чтобы открыть историю заказов."))
-    user_orders = [o for o in load_orders() if o.get("user_id") == user_id]
-    user_orders.sort(key=lambda o: o.get("created_at", ""), reverse=True)
+    user_orders = list_user_orders(user_id)
     return render_template("orders.html", orders=user_orders)
 
 
-def order_detail_route(order_id, load_orders):
+def order_detail_route(order_id, get_user_order):
     user_id = session.get("user_id")
     if not user_id:
         return redirect(url_for("login", error="Войдите, чтобы открыть детали заказа."))
-    order = next((o for o in load_orders() if o.get("id") == order_id and o.get("user_id") == user_id), None)
+    order = get_user_order(user_id, order_id)
     if order is None:
         return render_template("placeholder.html", title="Заказ не найден"), 404
     return render_template("order-detail.html", order=order)
@@ -74,9 +73,8 @@ def order_detail_route(order_id, load_orders):
 
 def checkout_route(
     latest_user_booking_status,
-    parse_datetime,
     booking_duration_minutes,
-    load_users,
+    get_user_by_id,
     load_menu_items,
 ):
     user_id = session.get("user_id")
@@ -95,8 +93,7 @@ def checkout_route(
             custom_time_max = (booking_local_dt + timedelta(minutes=booking_duration_minutes - 1)).strftime("%H:%M")
     user = getattr(g, "current_user", None)
     if not user or user.get("id") != user_id:
-        users = load_users()
-        user = next((u for u in users if u.get("id") == user_id), None)
+        user = get_user_by_id(user_id)
     cards = list((user or {}).get("cards", []))
     active_card = next((card for card in cards if card.get("active")), None)
     checkout_error = request.args.get("error")
@@ -123,11 +120,11 @@ def checkout_route(
     )
 
 def payment_route(
-    load_users,
+    get_user_by_id,
     latest_user_booking_status,
     resolve_order_items,
     parse_serving_option,
-    load_orders,
+    list_user_orders,
     load_promo_application_counts,
     load_promo_items,
     load_menu_items,
@@ -139,8 +136,7 @@ def payment_route(
 
     user = getattr(g, "current_user", None)
     if not user or user.get("id") != user_id:
-        users = load_users()
-        user = next((u for u in users if u.get("id") == user_id), None)
+        user = get_user_by_id(user_id)
     cards = list((user or {}).get("cards", []))
     active_card = next((card for card in cards if card.get("active")), None)
     user_balance = int((user or {}).get("balance", 0) or 0)
@@ -164,7 +160,7 @@ def payment_route(
         points_balance=user_balance,
         use_points=use_points,
         user_id=user_id,
-        load_orders_fn=load_orders,
+        load_orders_fn=lambda: list_user_orders(user_id),
         load_promo_application_counts_fn=load_promo_application_counts,
         promo_items=load_promo_items(),
         menu_items=load_menu_items(),
@@ -233,9 +229,9 @@ def payment_route(
 
 
 def checkout_promo_preview_route(
-    load_users,
+    get_user_by_id,
     resolve_order_items,
-    load_orders,
+    list_user_orders,
     load_promo_application_counts,
     load_promo_items,
     load_menu_items,
@@ -266,7 +262,7 @@ def checkout_promo_preview_route(
 
     user = getattr(g, "current_user", None)
     if not user or user.get("id") != user_id:
-        user = next((u for u in load_users() if u.get("id") == user_id), None)
+        user = get_user_by_id(user_id)
     if user is None:
         return jsonify({"ok": False, "error": "Пользователь не найден."}), 404
 
@@ -276,7 +272,7 @@ def checkout_promo_preview_route(
         points_balance=int((user or {}).get("balance", 0) or 0),
         use_points=use_points,
         user_id=user_id,
-        load_orders_fn=load_orders,
+        load_orders_fn=lambda: list_user_orders(user_id),
         load_promo_application_counts_fn=load_promo_application_counts,
         promo_items=load_promo_items(),
         menu_items=load_menu_items(),
@@ -296,19 +292,15 @@ def checkout_promo_preview_route(
 
 def payment_confirm_route(
     latest_user_booking_status,
-    load_users,
-    json_file_lock,
-    orders_path,
-    load_orders,
-    next_order_id,
-    save_orders,
-    users_path,
-    save_users,
+    get_user_by_id,
+    create_order,
+    apply_user_balance_delta,
     verify_checkout_preview_token,
     load_promo_application_counts,
     save_promotion_applications,
     load_promo_items,
     load_menu_items,
+    list_user_orders,
 ):
     user_id = session.get("user_id")
     if not user_id:
@@ -331,8 +323,7 @@ def payment_confirm_route(
 
     user = getattr(g, "current_user", None)
     if not user or user.get("id") != user_id:
-        users = load_users()
-        user = next((u for u in users if u.get("id") == user_id), None)
+        user = get_user_by_id(user_id)
     if user is None:
         session.clear()
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
@@ -362,7 +353,7 @@ def payment_confirm_route(
         points_balance=current_balance,
         requested_points=requested_points,
         user_id=user_id,
-        load_orders_fn=load_orders,
+        load_orders_fn=lambda: list_user_orders(user_id),
         load_promo_application_counts_fn=load_promo_application_counts,
         promo_items=load_promo_items(),
         menu_items=load_menu_items(),
@@ -378,11 +369,8 @@ def payment_confirm_route(
     totals = pricing["totals"]
     priced_items = pricing["items"]
 
-    with json_file_lock(orders_path):
-        orders = load_orders()
-        order_id = next_order_id(orders)
-        new_order = {
-            "id": order_id,
+    new_order = create_order(
+        {
             "user_id": user_id,
             "status": "preparing",
             "created_at": current_timestamp_value(),
@@ -409,29 +397,23 @@ def payment_confirm_route(
                 "expiry": active_card.get("expiry"),
             },
         }
-        orders.append(new_order)
-        save_orders(orders)
-        save_promotion_applications(
-            order_id=order_id,
-            user_id=user_id,
-            applied_promotions=pricing["promotions_applied"],
-            applied_at=datetime.fromisoformat(new_order["created_at"]),
-        )
+    )
+    order_id = int(new_order["id"])
+    save_promotion_applications(
+        order_id=order_id,
+        user_id=user_id,
+        applied_promotions=pricing["promotions_applied"],
+        applied_at=datetime.fromisoformat(new_order["created_at"]),
+    )
 
-    with json_file_lock(users_path):
-        users = load_users()
-        user = next((u for u in users if u.get("id") == user_id), None)
-        if user is not None:
-            current_balance = int(user.get("balance", 0) or 0)
-            user["balance"] = (
-                max(0, current_balance - totals["points_applied"])
-                + totals["bonus_earned"]
-                + pricing["promo_points"]
-            )
-            save_users(users)
-            g.current_user = user
-            g.current_user_id = user_id
-            g.current_user_loaded = True
+    user = apply_user_balance_delta(
+        user_id,
+        -int(totals["points_applied"] or 0) + int(totals["bonus_earned"] or 0) + int(pricing["promo_points"] or 0),
+    )
+    if user is not None:
+        g.current_user = user
+        g.current_user_id = user_id
+        g.current_user_loaded = True
 
     session.pop("checkout_preview", None)
     order_url = url_for("order_detail", order_id=order_id, paid="1")

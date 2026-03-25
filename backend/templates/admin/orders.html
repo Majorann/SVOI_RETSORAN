@@ -58,7 +58,7 @@
         </select>
       </label>
       <button class="admin-button admin-button--apply admin-button--compact" type="submit">Применить</button>
-      <div class="admin-chip-row">
+      <div class="admin-chip-row admin-chip-row--toolbar">
         <a class="admin-chip {% if filters.preset == 'today' %}is-active{% endif %}" href="{{ url_for('admin.orders', preset='today') }}">Сегодня</a>
         <a class="admin-chip {% if filters.preset == 'last_hour' %}is-active{% endif %}" href="{{ url_for('admin.orders', preset='last_hour') }}">Последний час</a>
         <a class="admin-chip {% if filters.preset == 'active' %}is-active{% endif %}" href="{{ url_for('admin.orders', preset='active') }}">Активные</a>

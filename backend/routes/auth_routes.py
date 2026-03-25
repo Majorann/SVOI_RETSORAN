@@ -1,6 +1,5 @@
-from datetime import datetime
-
 from flask import redirect, render_template, request, session, url_for
+from services.business_logic import current_timestamp_value
 
 
 def normalize_phone(phone_raw):
@@ -17,11 +16,9 @@ def normalize_phone(phone_raw):
 
 
 def login_route(
-    load_users,
-    save_users,
+    get_user_by_phone,
+    update_user_password_hash,
     verify_and_upgrade_password,
-    json_file_lock,
-    users_path,
     debug_login_failure=None,
     log_session_debug=None,
 ):
@@ -34,20 +31,14 @@ def login_route(
             if debug_login_failure is not None:
                 debug_login_failure("invalid_phone", phone_raw=phone_raw, normalized_phone=None)
             return render_template("login.html", error="Введите корректный номер телефона.", form_phone=phone_raw)
-        users = load_users()
-        user = next((u for u in users if normalize_phone(u.get("phone")) == phone), None)
+        user = get_user_by_phone(phone)
         password_ok, password_upgraded = verify_and_upgrade_password(user, password) if user else (False, False)
         if not password_ok:
             if debug_login_failure is not None:
                 debug_login_failure("invalid_credentials", phone_raw=phone_raw, normalized_phone=phone)
             return render_template("login.html", error="Неверный телефон или пароль.", form_phone=phone_raw)
         if password_upgraded:
-            with json_file_lock(users_path):
-                persisted_users = load_users()
-                persisted_user = next((u for u in persisted_users if u.get("id") == user.get("id")), None)
-                if persisted_user is not None:
-                    persisted_user["password_hash"] = user.get("password_hash")
-                    save_users(persisted_users)
+            update_user_password_hash(user.get("id"), user.get("password_hash"))
         preserved_csrf = session.get("csrf_token")
         session.clear()
         if preserved_csrf:
@@ -72,12 +63,9 @@ def login_route(
 
 
 def register_route(
-    load_users,
-    save_users,
-    next_user_id,
+    get_user_by_phone,
+    create_user,
     hash_password,
-    json_file_lock,
-    users_path,
 ):
     if request.method == "POST":
         name = (request.form.get("name") or "").strip()
@@ -91,26 +79,19 @@ def register_route(
                 form_name=name,
                 form_phone=phone_raw,
             )
-        with json_file_lock(users_path):
-            users = load_users()
-            if any(normalize_phone(u.get("phone")) == phone for u in users):
-                return render_template(
-                    "register.html",
-                    error="Этот номер уже зарегистрирован.",
-                    form_name=name,
-                    form_phone=phone_raw,
-                )
-            new_user = {
-                "id": next_user_id(users),
-                "name": name,
-                "phone": phone,
-                "password_hash": hash_password(password),
-                "balance": 0,
-                "cards": [],
-                "created_at": datetime.now().isoformat(timespec="seconds"),
-            }
-            users.append(new_user)
-            save_users(users)
+        if get_user_by_phone(phone) is not None:
+            return render_template(
+                "register.html",
+                error="Этот номер уже зарегистрирован.",
+                form_name=name,
+                form_phone=phone_raw,
+            )
+        new_user = create_user(
+            name=name,
+            phone=phone,
+            password_hash=hash_password(password),
+            created_at=current_timestamp_value(),
+        )
         preserved_csrf = session.get("csrf_token")
         session.clear()
         if preserved_csrf:

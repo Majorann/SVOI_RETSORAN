@@ -36,6 +36,8 @@ class MenuContentService:
         self._redis_client_lock = threading.Lock()
         self._memory_cache = {}
         self._memory_cache_lock = threading.Lock()
+        self._disk_menu_photo_cache = None
+        self._disk_menu_photo_cache_lock = threading.Lock()
 
     def _memory_cache_get(self, key: str):
         now = time.monotonic()
@@ -62,6 +64,44 @@ class MenuContentService:
                 return
             for key in keys:
                 self._memory_cache.pop(key, None)
+
+    def _build_disk_menu_photo_cache(self):
+        cache = {}
+        if not MENU_ITEMS_PATH.exists():
+            return cache
+
+        for item_dir in sorted(MENU_ITEMS_PATH.iterdir()):
+            if not item_dir.is_dir():
+                continue
+            meta_path = item_dir / MENU_META_NAME
+            photo_name = self.resolve_photo_name(item_dir, MENU_PHOTO_NAMES)
+            if not meta_path.exists() or not photo_name:
+                continue
+            try:
+                meta = self.parse_menu_meta(meta_path)
+                item_id = int(meta.get("id", 0))
+            except (TypeError, ValueError):
+                continue
+            if item_id <= 0:
+                continue
+            cache[item_id] = f"menu_items/{item_dir.name}/{photo_name}"
+
+        return cache
+
+    def _get_disk_menu_photo_cache(self):
+        with self._disk_menu_photo_cache_lock:
+            if self._disk_menu_photo_cache is None:
+                self._disk_menu_photo_cache = self._build_disk_menu_photo_cache()
+            return self._disk_menu_photo_cache
+
+    def resolve_menu_photo_path(self, item_id: int, photo_path: str):
+        normalized = (photo_path or "").strip().lstrip("/")
+        if normalized:
+            candidate = MENU_ITEMS_PATH.parent / normalized
+            if candidate.exists():
+                return normalized
+
+        return self._get_disk_menu_photo_cache().get(item_id, normalized)
 
     def get_redis_client(self):
         if not self.menu_cache_enabled or not self.redis_url or self.redis_module is None:
@@ -90,6 +130,18 @@ class MenuContentService:
             )
             return self._redis_client
 
+    def _load_pg_store(self):
+        try:
+            return importlib.import_module("storage.pg_store")
+        except Exception as exc:
+            raise RuntimeError(f"Postgres content storage import failed: {exc}") from exc
+
+    def verify_storage_readiness(self):
+        if self.active_storage != "postgres":
+            return
+        self.load_menu_items_from_db(include_inactive=True)
+        self.load_promotions_from_db(include_inactive=True)
+
     def load_menu_items_from_disk(self, include_inactive: bool = False):
         items_with_meta = []
         if not MENU_ITEMS_PATH.exists():
@@ -116,7 +168,7 @@ class MenuContentService:
         return items
 
     def update_menu_meta_id(self, meta_path: Path, new_id: int):
-        raw_text = self.read_text_with_fallback(meta_path, ("utf-8", "utf-8-sig", "cp1251"))
+        raw_text = self.read_text_utf8(meta_path)
         lines = raw_text.splitlines(keepends=True)
         updated = False
 
@@ -241,11 +293,10 @@ class MenuContentService:
 
     def load_menu_items_from_db(self, include_inactive: bool = False):
         try:
-            pg_store = importlib.import_module("storage.pg_store")
+            pg_store = self._load_pg_store()
             rows = pg_store.load_menu_items(include_inactive=include_inactive)
         except Exception as exc:
-            print(f"[menu] postgres read failed ({exc}), fallback=disk")
-            return self.load_menu_items_from_disk(include_inactive=include_inactive)
+            raise RuntimeError(f"Postgres menu read failed: {exc}") from exc
 
         items = []
         for row in rows:
@@ -282,9 +333,11 @@ class MenuContentService:
         return {
             "storage": self.active_storage,
             "menu_items_synced": int((menu_result or {}).get("synced", 0)),
-            "menu_items_deleted": int((menu_result or {}).get("deleted", 0)),
+            "menu_items_disabled": int((menu_result or {}).get("disabled", (menu_result or {}).get("deleted", 0))),
+            "menu_items_deleted": int((menu_result or {}).get("disabled", (menu_result or {}).get("deleted", 0))),
             "promotions_synced": int((promotion_result or {}).get("synced", 0)),
-            "promotions_deleted": int((promotion_result or {}).get("deleted", 0)),
+            "promotions_disabled": int((promotion_result or {}).get("disabled", (promotion_result or {}).get("deleted", 0))),
+            "promotions_deleted": int((promotion_result or {}).get("disabled", (promotion_result or {}).get("deleted", 0))),
             "reklama_found": len(reklama_items),
         }
 
@@ -294,11 +347,11 @@ class MenuContentService:
         if memory_items is not None:
             return memory_items
 
-        items = []
-        items.extend(self._load_disk_promo_items(include_inactive=include_inactive, allowed_classes={"reklama"}))
         if self.active_storage == "postgres":
-            items.extend(self.load_promotions_from_db(include_inactive=include_inactive))
+            items = self.load_promotions_from_db(include_inactive=include_inactive)
         else:
+            items = []
+            items.extend(self._load_disk_promo_items(include_inactive=include_inactive, allowed_classes={"reklama"}))
             items.extend(self._load_disk_promo_items(include_inactive=include_inactive, allowed_classes={"akciya"}))
 
         items.sort(key=lambda item: (-int(item.get("priority", 100) or 100), int(item["id"])))
@@ -350,11 +403,10 @@ class MenuContentService:
 
     def load_promotions_from_db(self, include_inactive: bool = False):
         try:
-            pg_store = importlib.import_module("storage.pg_store")
+            pg_store = self._load_pg_store()
             promotions = pg_store.load_promotions()
         except Exception as exc:
-            print(f"[promo] postgres read failed ({exc}), fallback=disk")
-            return self._load_disk_promo_items(include_inactive=include_inactive, allowed_classes={"akciya"})
+            raise RuntimeError(f"Postgres promotions read failed: {exc}") from exc
 
         items = []
         for promotion in promotions:
@@ -384,7 +436,7 @@ class MenuContentService:
 
     def parse_menu_meta(self, meta_path: Path):
         data = {}
-        raw_text = self.read_text_with_fallback(meta_path, ("utf-8", "utf-8-sig", "cp1251"))
+        raw_text = self.read_text_utf8(meta_path)
         for raw_line in raw_text.splitlines():
             line = raw_line.strip()
             if not line or line.startswith("#") or "=" not in line:
@@ -393,6 +445,14 @@ class MenuContentService:
             normalized_key = key.strip().lower().lstrip("\ufeff")
             data[normalized_key] = value.strip()
         return data
+
+    def read_text_utf8(self, path: Path):
+        for encoding in ("utf-8", "utf-8-sig"):
+            try:
+                return path.read_text(encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+        return path.read_text(encoding="utf-8", errors="replace")
 
     def read_text_with_fallback(self, path: Path, encodings):
         for encoding in encodings:
@@ -525,7 +585,10 @@ class MenuContentService:
             lore=lore,
             type=dish_type,
             price=price,
-            photo=(row.get("photo") or row.get("photo_path") or "").strip(),
+            photo=self.resolve_menu_photo_path(
+                item_id,
+                (row.get("photo") or row.get("photo_path") or "").strip(),
+            ),
             portion_label=portion_label,
             portion_tone_rgb=portion_tone_rgb,
             popularity=int(row.get("popularity", 0) or 0),
@@ -614,6 +677,31 @@ class MenuContentService:
             return None
         if item_id <= 0:
             return None
+        class_name = str(promotion.get("class") or promotion.get("class_name") or "akciya").strip().lower()
+        priority = int(promotion.get("priority", 100) or 100)
+        active = bool(promotion.get("active", True))
+        photo = promotion.get("photo")
+        start_at = (promotion.get("start_at", "") or "").strip()
+        end_at = (promotion.get("end_at", "") or "").strip()
+
+        if class_name == "reklama":
+            text = (promotion.get("text", "") or "").strip()
+            link = (promotion.get("link", "") or "").strip()
+            if not text:
+                return None
+            item = self._build_promo_item(
+                id=item_id,
+                class_name=class_name,
+                priority=priority,
+                active=active,
+                photo=photo,
+                text=text,
+                link=link,
+                start_at=start_at,
+                end_at=end_at,
+            )
+            return item.to_dict()
+
         name = (promotion.get("name", "") or "").strip()
         lore = (promotion.get("lore", "") or "").strip()
         if not name or not lore:
@@ -621,9 +709,9 @@ class MenuContentService:
         item = self._build_promo_item(
             id=item_id,
             class_name="akciya",
-            priority=int(promotion.get("priority", 100) or 100),
-            active=bool(promotion.get("active", True)),
-            photo=promotion.get("photo"),
+            priority=priority,
+            active=active,
+            photo=photo,
             name=name,
             lore=lore,
             condition=(promotion.get("condition", "") or "").strip(),
@@ -632,8 +720,8 @@ class MenuContentService:
             reward_mode=(promotion.get("reward_mode", "once") or "once").strip(),
             limit_per_order=str(promotion.get("limit_per_order", "") or "").strip(),
             limit_per_user_per_day=str(promotion.get("limit_per_user_per_day", "") or "").strip(),
-            start_at=(promotion.get("start_at", "") or "").strip(),
-            end_at=(promotion.get("end_at", "") or "").strip(),
+            start_at=start_at,
+            end_at=end_at,
         )
         validation = self.validate_promo_dsl(item.to_dict())
         item.dsl_valid = validation["valid"]

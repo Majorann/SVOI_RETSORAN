@@ -2,6 +2,7 @@ from datetime import timedelta
 import json
 import os
 from services.business_logic import current_time_value
+from services.order_status import apply_persisted_status_fields_value
 
 
 def _read_json_list(path):
@@ -48,11 +49,29 @@ def load_bookings(bookings_path, parse_datetime_fn, booking_duration_minutes):
 
 
 def load_orders(orders_path):
-    return _read_json_list(orders_path)
+    orders = _read_json_list(orders_path)
+    changed = False
+    now = current_time_value()
+    for order in orders:
+        if not isinstance(order, dict):
+            continue
+        if "effective_status" in order and "effective_status_updated_at" in order and "is_delivery_overdue" in order:
+            continue
+        apply_persisted_status_fields_value(order, now)
+        changed = True
+    if changed:
+        save_orders(orders_path, orders)
+    return orders
 
 
 def save_orders(orders_path, orders):
-    _write_json_list(orders_path, orders)
+    now = current_time_value()
+    normalized_orders = []
+    for order in orders:
+        if not isinstance(order, dict):
+            continue
+        normalized_orders.append(apply_persisted_status_fields_value(dict(order), now))
+    _write_json_list(orders_path, normalized_orders)
 
 
 def load_users(users_path):

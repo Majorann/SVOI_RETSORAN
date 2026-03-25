@@ -73,11 +73,11 @@ def create_admin_blueprint(admin_service):
         except ValueError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         toast = (
-            "Автосогласование завершено: меню {0} (удалено {1}), акции {2} (удалено {3}), реклама {4}".format(
+            "Автосогласование завершено: меню {0} (отключено {1}), акции {2} (отключено {3}), реклама {4}".format(
                 summary.get("menu_items_synced", 0),
-                summary.get("menu_items_deleted", 0),
+                summary.get("menu_items_disabled", 0),
                 summary.get("promotions_synced", 0),
-                summary.get("promotions_deleted", 0),
+                summary.get("promotions_disabled", 0),
                 summary.get("reklama_found", 0),
             )
         )
@@ -175,13 +175,17 @@ def create_admin_blueprint(admin_service):
             "delivery_address": request.args.get("delivery_address", ""),
             "status": request.args.get("status", ""),
             "preset": request.args.get("preset", ""),
+            "per_page": request.args.get("per_page", "25"),
         }
+        delivery_orders, pagination = admin_service.paginate_delivery_orders(filters, page=query_page(), per_page=query_per_page())
         return render_template(
             "admin/delivery.html",
             title="Доставка",
             admin_section="delivery",
-            delivery_orders=admin_service.list_delivery_orders(filters),
+            delivery_orders=delivery_orders,
             filters=filters,
+            pagination=pagination,
+            query_params=current_query_params(),
             statuses=ADMIN_DELIVERY_STATUSES,
             status_options=[{"value": status, "label": admin_service.order_status_filter_label(status, "delivery")} for status in ADMIN_DELIVERY_STATUSES],
         )

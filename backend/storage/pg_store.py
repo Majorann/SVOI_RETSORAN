@@ -2,17 +2,19 @@ import json
 import os
 import threading
 import time
-from datetime import date, datetime, time as dt_time, timedelta
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 
 import psycopg
 from config import MENU_ITEMS_PATH, MENU_PHOTO_NAMES, PROMO_ITEMS_PATH
 from services.business_logic import current_time_value
+from services.order_status import apply_persisted_status_fields_value
 
 
 _SCHEMA_READY = False
 _SCHEMA_LOCK = threading.Lock()
 _LOCAL = threading.local()
+_IS_HF_SPACE = bool(os.getenv("SPACE_ID") or os.getenv("HF_SPACE_ID"))
 
 
 def _env_int(name, default):
@@ -27,6 +29,10 @@ def _env_int(name, default):
 
 DB_OPERATION_RETRIES = max(1, _env_int("DB_OPERATION_RETRIES", 3))
 DB_RETRY_DELAY_SECONDS = max(1, _env_int("DB_RETRY_DELAY_SECONDS", 2))
+PG_CONNECT_TIMEOUT_SECONDS = max(
+    1,
+    _env_int("PG_CONNECT_TIMEOUT_SECONDS", 5 if _IS_HF_SPACE else 10),
+)
 
 
 def _database_url():
@@ -37,7 +43,11 @@ def _database_url():
 
 
 def _connect():
-    return psycopg.connect(_database_url(), autocommit=True, connect_timeout=10)
+    return psycopg.connect(
+        _database_url(),
+        autocommit=True,
+        connect_timeout=PG_CONNECT_TIMEOUT_SECONDS,
+    )
 
 
 def _get_conn():
@@ -72,7 +82,7 @@ def _execute_schema(cur):
             phone TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
             balance INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT ''
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         """
     )
@@ -86,7 +96,7 @@ def _execute_schema(cur):
             active BOOLEAN NOT NULL DEFAULT FALSE,
             holder TEXT,
             expiry TEXT,
-            created_at TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE (user_id, created_at, last4)
         );
         """
@@ -100,7 +110,7 @@ def _execute_schema(cur):
             booking_date DATE NOT NULL,
             booking_time TIME NOT NULL,
             name TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE (user_id, table_id, booking_date, booking_time, created_at)
         );
         """
@@ -112,7 +122,10 @@ def _execute_schema(cur):
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             order_type TEXT NOT NULL DEFAULT 'dine_in',
             status TEXT NOT NULL DEFAULT 'preparing',
-            created_at TEXT NOT NULL DEFAULT '',
+            effective_status TEXT NOT NULL DEFAULT 'preparing',
+            effective_status_updated_at TIMESTAMPTZ,
+            is_delivery_overdue BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             items_total INTEGER NOT NULL DEFAULT 0,
             points_applied INTEGER NOT NULL DEFAULT 0,
             payable_total INTEGER NOT NULL DEFAULT 0,
@@ -139,7 +152,7 @@ def _execute_schema(cur):
             delivery_comment TEXT NOT NULL DEFAULT '',
             delivery_address TEXT NOT NULL DEFAULT '',
             delivery_eta_minutes INTEGER NOT NULL DEFAULT 20,
-            cancelled_at TEXT NOT NULL DEFAULT ''
+            cancelled_at TIMESTAMPTZ
         );
         """
     )
@@ -182,7 +195,7 @@ def _execute_schema(cur):
         """
         CREATE TABLE IF NOT EXISTS admin_users (
             user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-            created_at TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
             note TEXT NOT NULL DEFAULT ''
         );
@@ -210,6 +223,8 @@ def _execute_schema(cur):
             name TEXT NOT NULL,
             lore TEXT NOT NULL DEFAULT '',
             class_name TEXT NOT NULL DEFAULT 'akciya',
+            text TEXT NOT NULL DEFAULT '',
+            link TEXT NOT NULL DEFAULT '',
             active BOOLEAN NOT NULL DEFAULT TRUE,
             priority INTEGER NOT NULL DEFAULT 100,
             condition TEXT NOT NULL DEFAULT '',
@@ -245,6 +260,9 @@ def _execute_schema(cur):
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS serving_label TEXT NOT NULL DEFAULT ''")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS serving_time TEXT NOT NULL DEFAULT ''")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS service_fee INTEGER NOT NULL DEFAULT 0")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS effective_status TEXT NOT NULL DEFAULT 'preparing'")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS effective_status_updated_at TIMESTAMPTZ")
+    cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_delivery_overdue BOOLEAN NOT NULL DEFAULT FALSE")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS booking_table_id INTEGER")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS booking_date DATE")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS booking_time TIME")
@@ -252,6 +270,9 @@ def _execute_schema(cur):
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_card_brand TEXT NOT NULL DEFAULT ''")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_card_last4 TEXT NOT NULL DEFAULT ''")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_card_expiry TEXT NOT NULL DEFAULT ''")
+    cur.execute("ALTER TABLE orders ALTER COLUMN cancelled_at DROP NOT NULL")
+    cur.execute("ALTER TABLE promotions ADD COLUMN IF NOT EXISTS text TEXT NOT NULL DEFAULT ''")
+    cur.execute("ALTER TABLE promotions ADD COLUMN IF NOT EXISTS link TEXT NOT NULL DEFAULT ''")
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_user_cards_user_id ON user_cards(user_id);"
     )
@@ -269,6 +290,12 @@ def _execute_schema(cur):
     )
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_orders_type_created ON orders(order_type, created_at DESC);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_orders_effective_status_created ON orders(effective_status, created_at DESC);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_orders_delivery_overdue_created ON orders(is_delivery_overdue, created_at DESC) WHERE order_type = 'delivery';"
     )
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_orders_booking_slot ON orders(booking_table_id, booking_date, booking_time);"
@@ -372,6 +399,110 @@ def _column_exists(cur, table_name, column_name):
     return bool(row[0]) if row else False
 
 
+def _column_type_info(cur, table_name, column_name):
+    cur.execute(
+        """
+        SELECT data_type, udt_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = %s
+          AND column_name = %s
+        """,
+        (table_name, column_name),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return "", ""
+    return _coerce_text(row[0]), _coerce_text(row[1])
+
+
+def _normalize_timestamptz_column(cur, table_name, column_name, *, nullable: bool, default_sql: str | None):
+    if not _table_exists(cur, table_name):
+        return
+    if not _column_exists(cur, table_name, column_name):
+        return
+
+    _, udt_name = _column_type_info(cur, table_name, column_name)
+    if udt_name == "timestamptz":
+        if default_sql:
+            cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} SET DEFAULT {default_sql}")
+        else:
+            cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} DROP DEFAULT")
+        if nullable:
+            cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} DROP NOT NULL")
+        else:
+            cur.execute(f"UPDATE {table_name} SET {column_name} = NOW() WHERE {column_name} IS NULL")
+            cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} SET NOT NULL")
+        return
+
+    cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} DROP DEFAULT")
+
+    if udt_name == "timestamp":
+        cur.execute(
+            f"""
+            ALTER TABLE {table_name}
+            ALTER COLUMN {column_name} TYPE TIMESTAMPTZ
+            USING {column_name} AT TIME ZONE 'UTC'
+            """
+        )
+    else:
+        fallback_sql = "NULL" if nullable else "NOW()"
+        cur.execute(
+            f"""
+            ALTER TABLE {table_name}
+            ALTER COLUMN {column_name} TYPE TIMESTAMPTZ
+            USING (
+                CASE
+                    WHEN NULLIF(BTRIM({column_name}::text), '') IS NULL THEN {fallback_sql}
+                    WHEN BTRIM({column_name}::text) ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}(?:[ T][0-9]{{2}}:[0-9]{{2}}(?::[0-9]{{2}}(?:\\.[0-9]+)?)?)?(?:Z|[+-][0-9]{{2}}:[0-9]{{2}})?$'
+                        THEN CASE
+                            WHEN BTRIM({column_name}::text) ~ '(?:Z|[+-][0-9]{{2}}:[0-9]{{2}})$'
+                                THEN BTRIM({column_name}::text)::TIMESTAMPTZ
+                            ELSE BTRIM({column_name}::text)::TIMESTAMP AT TIME ZONE 'UTC'
+                        END
+                    ELSE {fallback_sql}
+                END
+            )
+            """
+        )
+
+    if default_sql:
+        cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} SET DEFAULT {default_sql}")
+    if nullable:
+        cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} DROP NOT NULL")
+    else:
+        cur.execute(f"UPDATE {table_name} SET {column_name} = NOW() WHERE {column_name} IS NULL")
+        cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} SET NOT NULL")
+
+
+def _normalize_legacy_temporal_columns(cur):
+    columns = (
+        ("users", "created_at", False, "NOW()"),
+        ("user_cards", "created_at", False, "NOW()"),
+        ("bookings", "created_at", False, "NOW()"),
+        ("orders", "created_at", False, "NOW()"),
+        ("orders", "cancelled_at", True, None),
+        ("orders", "effective_status_updated_at", True, None),
+        ("admin_users", "created_at", False, "NOW()"),
+        ("admin_actions", "created_at", False, "NOW()"),
+        ("menu_items", "created_at", False, "NOW()"),
+        ("menu_items", "updated_at", False, "NOW()"),
+        ("promotions", "start_at", True, None),
+        ("promotions", "end_at", True, None),
+        ("promotions", "created_at", False, "NOW()"),
+        ("promotions", "updated_at", False, "NOW()"),
+        ("promotion_applications", "applied_at", False, "NOW()"),
+    )
+    for table_name, column_name, nullable, default_sql in columns:
+        _normalize_timestamptz_column(
+            cur,
+            table_name,
+            column_name,
+            nullable=nullable,
+            default_sql=default_sql,
+        )
+
+
 def _coerce_int(value, default=0):
     try:
         return int(value)
@@ -435,6 +566,34 @@ def _parse_optional_datetime(value):
     return datetime.fromisoformat(text)
 
 
+def _parse_optional_datetime_utc(value):
+    parsed = _parse_optional_datetime(value)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc)
+    return parsed.replace(tzinfo=timezone.utc)
+
+
+def _serialize_datetime_utc(value):
+    if isinstance(value, datetime):
+        normalized = value.astimezone(timezone.utc) if value.tzinfo is not None else value
+        return normalized.replace(tzinfo=None).isoformat(timespec="seconds")
+    return _coerce_text(value)
+
+
+def _serialize_date(value):
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value.isoformat()
+    return _coerce_text(value)
+
+
+def _serialize_time(value):
+    if isinstance(value, dt_time):
+        return value.replace(microsecond=0).isoformat()
+    return _coerce_text(value)
+
+
 def _time_hhmm(value):
     if isinstance(value, dt_time):
         return value.strftime("%H:%M")
@@ -463,7 +622,7 @@ def _replace_users_in_tx(cur, users):
                 _coerce_text(user.get("phone")),
                 _coerce_text(user.get("password_hash")),
                 _coerce_int(user.get("balance"), 0),
-                _coerce_text(user.get("created_at")),
+                _parse_optional_datetime_utc(user.get("created_at")) or datetime.now(timezone.utc),
             )
         )
         for card in _coerce_list(user.get("cards")):
@@ -477,7 +636,7 @@ def _replace_users_in_tx(cur, users):
                     bool(card.get("active")),
                     _coerce_text(card.get("holder")) or None,
                     _coerce_text(card.get("expiry")) or None,
-                    _coerce_text(card.get("created_at")),
+                    _parse_optional_datetime_utc(card.get("created_at")) or datetime.now(timezone.utc),
                 )
             )
 
@@ -529,7 +688,7 @@ def _replace_bookings_in_tx(cur, bookings):
                     _parse_date(booking.get("date")),
                     _parse_time(booking.get("time")),
                     _coerce_text(booking.get("name")),
-                    _coerce_text(booking.get("created_at")),
+                    _parse_optional_datetime_utc(booking.get("created_at")) or datetime.now(timezone.utc),
                 )
             )
         except (TypeError, ValueError):
@@ -553,11 +712,13 @@ def _replace_orders_in_tx(cur, orders):
 
     order_rows = []
     item_rows = []
+    now = current_time_value()
     for order in _coerce_list(orders):
         if not isinstance(order, dict):
             continue
-        order_id = _coerce_int(order.get("id"), 0)
-        user_id = _coerce_int(order.get("user_id"), 0)
+        normalized_order = apply_persisted_status_fields_value(dict(order), now)
+        order_id = _coerce_int(normalized_order.get("id"), 0)
+        user_id = _coerce_int(normalized_order.get("user_id"), 0)
         if order_id <= 0 or user_id <= 0:
             continue
 
@@ -565,44 +726,47 @@ def _replace_orders_in_tx(cur, orders):
             (
                 order_id,
                 user_id,
-                _coerce_text(order.get("order_type"), "dine_in") or "dine_in",
-                _coerce_text(order.get("status"), "preparing") or "preparing",
-                _coerce_text(order.get("created_at")),
-                _coerce_int(order.get("items_total"), 0),
-                _coerce_int(order.get("points_applied"), 0),
-                _coerce_int(order.get("payable_total"), 0),
-                _coerce_int(order.get("bonus_earned"), 0),
-                _coerce_text(order.get("comment")),
-                _coerce_text((_coerce_dict(order.get("serving"))).get("mode")),
-                _coerce_text((_coerce_dict(order.get("serving"))).get("label")),
-                _coerce_text((_coerce_dict(order.get("serving"))).get("time")),
+                _coerce_text(normalized_order.get("order_type"), "dine_in") or "dine_in",
+                _coerce_text(normalized_order.get("status"), "preparing") or "preparing",
+                _coerce_text(normalized_order.get("effective_status"), "preparing") or "preparing",
+                _parse_optional_datetime_utc(normalized_order.get("effective_status_updated_at")),
+                bool(normalized_order.get("is_delivery_overdue")),
+                _parse_optional_datetime_utc(normalized_order.get("created_at")) or datetime.now(timezone.utc),
+                _coerce_int(normalized_order.get("items_total"), 0),
+                _coerce_int(normalized_order.get("points_applied"), 0),
+                _coerce_int(normalized_order.get("payable_total"), 0),
+                _coerce_int(normalized_order.get("bonus_earned"), 0),
+                _coerce_text(normalized_order.get("comment")),
+                _coerce_text((_coerce_dict(normalized_order.get("serving"))).get("mode")),
+                _coerce_text((_coerce_dict(normalized_order.get("serving"))).get("label")),
+                _coerce_text((_coerce_dict(normalized_order.get("serving"))).get("time")),
                 (
-                    _coerce_int((_coerce_dict(order.get("booking"))).get("table_id"), 0)
+                    _coerce_int((_coerce_dict(normalized_order.get("booking"))).get("table_id"), 0)
                     or None
                 ),
-                _parse_optional_date((_coerce_dict(order.get("booking"))).get("date")),
-                _parse_optional_time((_coerce_dict(order.get("booking"))).get("time")),
-                _coerce_text((_coerce_dict(order.get("booking"))).get("status")),
-                _coerce_text((_coerce_dict(order.get("payment_card"))).get("brand")),
-                _coerce_text((_coerce_dict(order.get("payment_card"))).get("last4")),
-                _coerce_text((_coerce_dict(order.get("payment_card"))).get("expiry")),
-                _coerce_text(order.get("delivery_name")),
-                _coerce_text(order.get("delivery_phone")),
-                _coerce_text(order.get("delivery_street")),
-                _coerce_text(order.get("delivery_house")),
-                _coerce_text(order.get("delivery_apartment")),
-                _coerce_text(order.get("delivery_entrance")),
-                _coerce_text(order.get("delivery_floor")),
-                _coerce_text(order.get("delivery_intercom")),
-                _coerce_text(order.get("delivery_comment")),
-                _coerce_text(order.get("delivery_address")),
-                _coerce_int(order.get("delivery_eta_minutes"), 20),
-                _coerce_text(order.get("cancelled_at")),
+                _parse_optional_date((_coerce_dict(normalized_order.get("booking"))).get("date")),
+                _parse_optional_time((_coerce_dict(normalized_order.get("booking"))).get("time")),
+                _coerce_text((_coerce_dict(normalized_order.get("booking"))).get("status")),
+                _coerce_text((_coerce_dict(normalized_order.get("payment_card"))).get("brand")),
+                _coerce_text((_coerce_dict(normalized_order.get("payment_card"))).get("last4")),
+                _coerce_text((_coerce_dict(normalized_order.get("payment_card"))).get("expiry")),
+                _coerce_text(normalized_order.get("delivery_name")),
+                _coerce_text(normalized_order.get("delivery_phone")),
+                _coerce_text(normalized_order.get("delivery_street")),
+                _coerce_text(normalized_order.get("delivery_house")),
+                _coerce_text(normalized_order.get("delivery_apartment")),
+                _coerce_text(normalized_order.get("delivery_entrance")),
+                _coerce_text(normalized_order.get("delivery_floor")),
+                _coerce_text(normalized_order.get("delivery_intercom")),
+                _coerce_text(normalized_order.get("delivery_comment")),
+                _coerce_text(normalized_order.get("delivery_address")),
+                _coerce_int(normalized_order.get("delivery_eta_minutes"), 20),
+                _parse_optional_datetime_utc(normalized_order.get("cancelled_at")),
             )
         )
 
         position = 0
-        for item in _coerce_list(order.get("items")):
+        for item in _coerce_list(normalized_order.get("items")):
             if not isinstance(item, dict):
                 continue
             item_rows.append(
@@ -626,6 +790,9 @@ def _replace_orders_in_tx(cur, orders):
                 user_id,
                 order_type,
                 status,
+                effective_status,
+                effective_status_updated_at,
+                is_delivery_overdue,
                 created_at,
                 items_total,
                 points_applied,
@@ -657,7 +824,8 @@ def _replace_orders_in_tx(cur, orders):
             )
             VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s
             )
             """,
             order_rows,
@@ -842,14 +1010,11 @@ def _legacy_promotion_rows():
             relative_parts = meta_path.relative_to(PROMO_ITEMS_PATH).parts
         except ValueError:
             continue
-        if len(relative_parts) < 2 or relative_parts[0] != "akciya":
+        if len(relative_parts) < 2 or relative_parts[0] not in {"akciya", "reklama"}:
             continue
         meta = _read_legacy_meta(meta_path)
-        if str(meta.get("class") or "").strip().lower() != "akciya":
-            continue
-        name = _coerce_text(meta.get("name")).strip()
-        lore = _coerce_text(meta.get("lore")).strip()
-        if not name or not lore:
+        class_name = str(meta.get("class") or relative_parts[0]).strip().lower()
+        if class_name not in {"akciya", "reklama"}:
             continue
         promo_id = _coerce_int(meta.get("id"), 0)
         if promo_id <= 0:
@@ -860,12 +1025,46 @@ def _legacy_promotion_rows():
             "promo_items",
             ("photo.png", "photo.webp", "photo.jpg", "photo.jpeg"),
         )
+        if class_name == "reklama":
+            text = _coerce_text(meta.get("text")).strip()
+            if not text:
+                continue
+            rows.append(
+                {
+                    "id": promo_id,
+                    "slug": "/".join(relative_parts[1:-1]),
+                    "name": f"reklama-{promo_id}",
+                    "lore": "",
+                    "class": class_name,
+                    "text": text,
+                    "link": _coerce_text(meta.get("link")).strip(),
+                    "active": _coerce_bool(meta.get("active"), True),
+                    "priority": _coerce_int(meta.get("priority"), 100),
+                    "condition": "",
+                    "reward": "",
+                    "notify": "",
+                    "reward_mode": "",
+                    "limit_per_order": None,
+                    "limit_per_user_per_day": None,
+                    "start_at": _parse_optional_datetime(meta.get("start_at")),
+                    "end_at": _parse_optional_datetime(meta.get("end_at")),
+                    "photo_path": photo_path,
+                }
+            )
+            continue
+        name = _coerce_text(meta.get("name")).strip()
+        lore = _coerce_text(meta.get("lore")).strip()
+        if not name or not lore:
+            continue
         rows.append(
             {
                 "id": promo_id,
                 "slug": "/".join(relative_parts[1:-1]),
                 "name": name,
                 "lore": lore,
+                "class": class_name,
+                "text": "",
+                "link": "",
                 "active": _coerce_bool(meta.get("active"), True),
                 "priority": _coerce_int(meta.get("priority"), 100),
                 "condition": _coerce_text(meta.get("condition")).strip(),
@@ -956,13 +1155,16 @@ def _upsert_promotions_in_tx(cur, promotions):
         promotion_id = _coerce_int(promotion.get("id"), 0)
         if promotion_id <= 0:
             continue
+        class_name = _coerce_text(promotion.get("class") or promotion.get("class_name"), "akciya").strip() or "akciya"
         rows.append(
             (
                 promotion_id,
-                _normalize_slug(promotion.get("slug") or promotion.get("photo_path") or promotion.get("name")),
-                _coerce_text(promotion.get("name")).strip(),
+                _normalize_slug(promotion.get("slug") or promotion.get("photo_path") or promotion.get("name") or promotion.get("text")),
+                _coerce_text(promotion.get("name")).strip() or (f"reklama-{promotion_id}" if class_name == "reklama" else ""),
                 _coerce_text(promotion.get("lore")).strip(),
-                "akciya",
+                class_name,
+                _coerce_text(promotion.get("text")).strip(),
+                _coerce_text(promotion.get("link")).strip(),
                 _coerce_bool(promotion.get("active"), True),
                 _coerce_int(promotion.get("priority"), 100),
                 _coerce_text(promotion.get("condition")).strip(),
@@ -988,6 +1190,8 @@ def _upsert_promotions_in_tx(cur, promotions):
             name,
             lore,
             class_name,
+            text,
+            link,
             active,
             priority,
             condition,
@@ -1003,7 +1207,7 @@ def _upsert_promotions_in_tx(cur, promotions):
             updated_by_admin_user_id
         )
         VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON CONFLICT (id)
         DO UPDATE SET
@@ -1011,6 +1215,8 @@ def _upsert_promotions_in_tx(cur, promotions):
             name = EXCLUDED.name,
             lore = EXCLUDED.lore,
             class_name = EXCLUDED.class_name,
+            text = EXCLUDED.text,
+            link = EXCLUDED.link,
             active = EXCLUDED.active,
             priority = EXCLUDED.priority,
             condition = EXCLUDED.condition,
@@ -1052,13 +1258,23 @@ def _delete_missing_menu_items_in_tx(cur, present_ids):
     if normalized_ids:
         cur.execute(
             """
-            DELETE FROM menu_items
+            UPDATE menu_items
+            SET active = FALSE,
+                updated_at = NOW()
             WHERE id <> ALL(%s)
+              AND active <> FALSE
             """,
             (normalized_ids,),
         )
     else:
-        cur.execute("DELETE FROM menu_items")
+        cur.execute(
+            """
+            UPDATE menu_items
+            SET active = FALSE,
+                updated_at = NOW()
+            WHERE active <> FALSE
+            """
+        )
     return _coerce_int(getattr(cur, "rowcount", 0), 0)
 
 
@@ -1067,14 +1283,25 @@ def _delete_missing_promotions_in_tx(cur, present_ids):
     if normalized_ids:
         cur.execute(
             """
-            DELETE FROM promotions
-            WHERE class_name = 'akciya'
+            UPDATE promotions
+            SET active = FALSE,
+                updated_at = NOW()
+            WHERE class_name IN ('akciya', 'reklama')
               AND id <> ALL(%s)
+              AND active <> FALSE
             """,
             (normalized_ids,),
         )
     else:
-        cur.execute("DELETE FROM promotions WHERE class_name = 'akciya'")
+        cur.execute(
+            """
+            UPDATE promotions
+            SET active = FALSE,
+                updated_at = NOW()
+            WHERE class_name IN ('akciya', 'reklama')
+              AND active <> FALSE
+            """
+        )
     return _coerce_int(getattr(cur, "rowcount", 0), 0)
 
 
@@ -1118,6 +1345,7 @@ def _ensure_schema():
         with conn.transaction():
             with conn.cursor() as cur:
                 _execute_schema(cur)
+                _normalize_legacy_temporal_columns(cur)
                 _migrate_legacy_orders_columns(cur)
                 _maybe_migrate_legacy_app_state(cur)
                 _maybe_migrate_legacy_menu_items(cur)
@@ -1139,6 +1367,207 @@ def _run_db_operation(operation):
     raise last_error
 
 
+_ORDER_SELECT_COLUMNS = """
+    id,
+    user_id,
+    order_type,
+    status,
+    effective_status,
+    effective_status_updated_at,
+    is_delivery_overdue,
+    created_at,
+    items_total,
+    points_applied,
+    payable_total,
+    bonus_earned,
+    comment,
+    serving_mode,
+    serving_label,
+    serving_time,
+    booking_table_id,
+    booking_date,
+    booking_time,
+    booking_status,
+    payment_card_brand,
+    payment_card_last4,
+    payment_card_expiry,
+    delivery_name,
+    delivery_phone,
+    delivery_street,
+    delivery_house,
+    delivery_apartment,
+    delivery_entrance,
+    delivery_floor,
+    delivery_intercom,
+    delivery_comment,
+    delivery_address,
+    delivery_eta_minutes,
+    cancelled_at
+"""
+
+
+def _booking_row_to_dict(row):
+    return {
+        "user_id": row[0],
+        "table_id": row[1],
+        "date": _serialize_date(row[2]),
+        "time": _time_hhmm(row[3]),
+        "name": _coerce_text(row[4]),
+        "created_at": _serialize_datetime_utc(row[5]),
+    }
+
+
+def _parse_booking_datetime(booking: dict):
+    date_value = _coerce_text((booking or {}).get("date")).strip()
+    time_value = _coerce_text((booking or {}).get("time")).strip()
+    if not date_value or not time_value:
+        return None
+    try:
+        return datetime.fromisoformat(f"{date_value}T{time_value}")
+    except ValueError:
+        return None
+
+
+def _next_integer_id(cur, table_name: str):
+    if table_name not in {"users", "orders"}:
+        raise ValueError(f"Unsupported table for integer id allocation: {table_name}")
+    cur.execute(f"LOCK TABLE {table_name} IN EXCLUSIVE MODE")
+    cur.execute(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {table_name}")
+    row = cur.fetchone()
+    return _coerce_int(row[0], 1) if row else 1
+
+
+def _card_row_to_dict(row):
+    return {
+        "brand": _coerce_text(row[1]),
+        "last4": _coerce_text(row[2]),
+        "active": bool(row[3]),
+        "holder": _coerce_text(row[4]) or None,
+        "expiry": _coerce_text(row[5]) or None,
+        "created_at": _serialize_datetime_utc(row[6]),
+    }
+
+
+def _load_user_cards_by_user_ids(cur, user_ids):
+    if not user_ids:
+        return {}
+    cur.execute(
+        """
+        SELECT user_id, brand, last4, active, holder, expiry, created_at
+        FROM user_cards
+        WHERE user_id = ANY(%s)
+        ORDER BY user_id, created_at, id
+        """,
+        (user_ids,),
+    )
+    cards_by_user = {}
+    for row in cur.fetchall():
+        cards_by_user.setdefault(row[0], []).append(_card_row_to_dict(row))
+    return cards_by_user
+
+
+def _user_row_to_dict(row, cards_by_user):
+    return {
+        "id": row[0],
+        "name": _coerce_text(row[1]),
+        "phone": _coerce_text(row[2]),
+        "password_hash": _coerce_text(row[3]),
+        "balance": _coerce_int(row[4], 0),
+        "cards": cards_by_user.get(row[0], []),
+        "created_at": _serialize_datetime_utc(row[5]),
+    }
+
+
+def _load_order_items_by_order_ids(cur, order_ids):
+    if not order_ids:
+        return {}
+    cur.execute(
+        """
+        SELECT order_id, item_id, name, price, qty, photo
+        FROM order_items
+        WHERE order_id = ANY(%s)
+        ORDER BY order_id, position
+        """,
+        (order_ids,),
+    )
+    items_by_order = {}
+    for row in cur.fetchall():
+        items_by_order.setdefault(row[0], []).append(
+            {
+                "id": row[1],
+                "name": _coerce_text(row[2]),
+                "price": _coerce_int(row[3], 0),
+                "qty": _coerce_int(row[4], 0),
+                "photo": row[5],
+            }
+        )
+    return items_by_order
+
+
+def _order_row_to_dict(row, items_by_order):
+    order = {
+        "id": row[0],
+        "user_id": row[1],
+        "status": _coerce_text(row[3]),
+        "effective_status": _coerce_text(row[4]),
+        "effective_status_updated_at": _serialize_datetime_utc(row[5]),
+        "is_delivery_overdue": bool(row[6]),
+        "created_at": _serialize_datetime_utc(row[7]),
+        "items": items_by_order.get(row[0], []),
+        "items_total": _coerce_int(row[8], 0),
+        "points_applied": _coerce_int(row[9], 0),
+        "payable_total": _coerce_int(row[10], 0),
+        "bonus_earned": _coerce_int(row[11], 0),
+        "comment": _coerce_text(row[12]),
+        "serving": {
+            "mode": _coerce_text(row[13]),
+            "label": _coerce_text(row[14]),
+            **({"time": _coerce_text(row[15])} if _coerce_text(row[15]) else {}),
+        },
+        "booking": {
+            **({"table_id": row[16]} if row[16] is not None else {}),
+            **({"date": _serialize_date(row[17])} if row[17] is not None else {}),
+            **({"time": _time_hhmm(row[18])} if row[18] is not None else {}),
+            **({"status": _coerce_text(row[19])} if _coerce_text(row[19]) else {}),
+        },
+        "payment_card": {
+            **({"brand": _coerce_text(row[20])} if _coerce_text(row[20]) else {}),
+            **({"last4": _coerce_text(row[21])} if _coerce_text(row[21]) else {}),
+            **({"expiry": _coerce_text(row[22])} if _coerce_text(row[22]) else {}),
+        },
+        "delivery_name": _coerce_text(row[23]),
+        "delivery_phone": _coerce_text(row[24]),
+        "delivery_street": _coerce_text(row[25]),
+        "delivery_house": _coerce_text(row[26]),
+        "delivery_apartment": _coerce_text(row[27]),
+        "delivery_entrance": _coerce_text(row[28]),
+        "delivery_floor": _coerce_text(row[29]),
+        "delivery_intercom": _coerce_text(row[30]),
+        "delivery_comment": _coerce_text(row[31]),
+        "delivery_address": _coerce_text(row[32]),
+        "delivery_eta_minutes": _coerce_int(row[33], 20),
+    }
+    order_type = _coerce_text(row[2], "dine_in") or "dine_in"
+    if order_type:
+        order["order_type"] = order_type
+    if not order["serving"].get("mode") and not order["serving"].get("label") and not order["serving"].get("time"):
+        order["serving"] = {}
+    if not order["booking"]:
+        order["booking"] = {}
+    if not order["payment_card"]:
+        order["payment_card"] = {}
+    cancelled_at = _serialize_datetime_utc(row[34])
+    if cancelled_at:
+        order["cancelled_at"] = cancelled_at
+    return order
+
+
+def _hydrate_orders(cur, order_rows, *, include_items: bool):
+    order_ids = [row[0] for row in order_rows]
+    items_by_order = _load_order_items_by_order_ids(cur, order_ids) if include_items else {}
+    return [_order_row_to_dict(row, items_by_order) for row in order_rows]
+
+
 def load_bookings_raw(_bookings_path):
     def operation():
         _ensure_schema()
@@ -1152,17 +1581,7 @@ def load_bookings_raw(_bookings_path):
                 """
             )
             rows = cur.fetchall()
-        return [
-            {
-                "user_id": row[0],
-                "table_id": row[1],
-                "date": row[2].isoformat() if isinstance(row[2], date) else _coerce_text(row[2]),
-                "time": _time_hhmm(row[3]),
-                "name": _coerce_text(row[4]),
-                "created_at": _coerce_text(row[5]),
-            }
-            for row in rows
-        ]
+        return [_booking_row_to_dict(row) for row in rows]
 
     return _run_db_operation(operation)
 
@@ -1200,121 +1619,14 @@ def load_orders(_orders_path):
         conn = _get_conn()
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT
-                    id,
-                    user_id,
-                    order_type,
-                    status,
-                    created_at,
-                    items_total,
-                    points_applied,
-                    payable_total,
-                    bonus_earned,
-                    comment,
-                    serving_mode,
-                    serving_label,
-                    serving_time,
-                    booking_table_id,
-                    booking_date,
-                    booking_time,
-                    booking_status,
-                    payment_card_brand,
-                    payment_card_last4,
-                    payment_card_expiry,
-                    delivery_name,
-                    delivery_phone,
-                    delivery_street,
-                    delivery_house,
-                    delivery_apartment,
-                    delivery_entrance,
-                    delivery_floor,
-                    delivery_intercom,
-                    delivery_comment,
-                    delivery_address,
-                    delivery_eta_minutes,
-                    cancelled_at
+                f"""
+                SELECT { _ORDER_SELECT_COLUMNS }
                 FROM orders
                 ORDER BY created_at, id
                 """
             )
             order_rows = cur.fetchall()
-            cur.execute(
-                """
-                SELECT order_id, item_id, name, price, qty, photo
-                FROM order_items
-                ORDER BY order_id, position
-                """
-            )
-            item_rows = cur.fetchall()
-
-        items_by_order = {}
-        for row in item_rows:
-            items_by_order.setdefault(row[0], []).append(
-                {
-                    "id": row[1],
-                    "name": _coerce_text(row[2]),
-                    "price": _coerce_int(row[3], 0),
-                    "qty": _coerce_int(row[4], 0),
-                    "photo": row[5],
-                }
-            )
-
-        orders = []
-        for row in order_rows:
-            order = {
-                "id": row[0],
-                "user_id": row[1],
-                "status": _coerce_text(row[3]),
-                "created_at": _coerce_text(row[4]),
-                "items": items_by_order.get(row[0], []),
-                "items_total": _coerce_int(row[5], 0),
-                "points_applied": _coerce_int(row[6], 0),
-                "payable_total": _coerce_int(row[7], 0),
-                "bonus_earned": _coerce_int(row[8], 0),
-                "comment": _coerce_text(row[9]),
-                "serving": {
-                    "mode": _coerce_text(row[10]),
-                    "label": _coerce_text(row[11]),
-                    **({"time": _coerce_text(row[12])} if _coerce_text(row[12]) else {}),
-                },
-                "booking": {
-                    **({"table_id": row[13]} if row[13] is not None else {}),
-                    **({"date": row[14].isoformat()} if isinstance(row[14], date) else {}),
-                    **({"time": _time_hhmm(row[15])} if row[15] is not None else {}),
-                    **({"status": _coerce_text(row[16])} if _coerce_text(row[16]) else {}),
-                },
-                "payment_card": {
-                    **({"brand": _coerce_text(row[17])} if _coerce_text(row[17]) else {}),
-                    **({"last4": _coerce_text(row[18])} if _coerce_text(row[18]) else {}),
-                    **({"expiry": _coerce_text(row[19])} if _coerce_text(row[19]) else {}),
-                },
-                "delivery_name": _coerce_text(row[20]),
-                "delivery_phone": _coerce_text(row[21]),
-                "delivery_street": _coerce_text(row[22]),
-                "delivery_house": _coerce_text(row[23]),
-                "delivery_apartment": _coerce_text(row[24]),
-                "delivery_entrance": _coerce_text(row[25]),
-                "delivery_floor": _coerce_text(row[26]),
-                "delivery_intercom": _coerce_text(row[27]),
-                "delivery_comment": _coerce_text(row[28]),
-                "delivery_address": _coerce_text(row[29]),
-                "delivery_eta_minutes": _coerce_int(row[30], 20),
-            }
-            order_type = _coerce_text(row[2], "dine_in") or "dine_in"
-            if order_type:
-                order["order_type"] = order_type
-            if not order["serving"].get("mode") and not order["serving"].get("label") and not order["serving"].get("time"):
-                order["serving"] = {}
-            if not order["booking"]:
-                order["booking"] = {}
-            if not order["payment_card"]:
-                order["payment_card"] = {}
-            cancelled_at = _coerce_text(row[31])
-            if cancelled_at:
-                order["cancelled_at"] = cancelled_at
-            orders.append(order)
-        return orders
+            return _hydrate_orders(cur, order_rows, include_items=True)
 
     return _run_db_operation(operation)
 
@@ -1351,32 +1663,696 @@ def load_users(_users_path):
                 """
             )
             card_rows = cur.fetchall()
-
         cards_by_user = {}
         for row in card_rows:
-            cards_by_user.setdefault(row[0], []).append(
-                {
-                    "brand": _coerce_text(row[1]),
-                    "last4": _coerce_text(row[2]),
-                    "active": bool(row[3]),
-                    "holder": _coerce_text(row[4]) or None,
-                    "expiry": _coerce_text(row[5]) or None,
-                    "created_at": _coerce_text(row[6]),
-                }
-            )
+            cards_by_user.setdefault(row[0], []).append(_card_row_to_dict(row))
+        return [_user_row_to_dict(row, cards_by_user) for row in user_rows]
 
-        return [
-            {
-                "id": row[0],
-                "name": _coerce_text(row[1]),
-                "phone": _coerce_text(row[2]),
-                "password_hash": _coerce_text(row[3]),
-                "balance": _coerce_int(row[4], 0),
-                "cards": cards_by_user.get(row[0], []),
-                "created_at": _coerce_text(row[5]),
-            }
-            for row in user_rows
-        ]
+    return _run_db_operation(operation)
+
+
+def get_user_by_id(user_id: int):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, name, phone, password_hash, balance, created_at
+                FROM users
+                WHERE id = %s
+                """,
+                (int(user_id),),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            cards_by_user = _load_user_cards_by_user_ids(cur, [int(user_id)])
+        return _user_row_to_dict(row, cards_by_user)
+
+    return _run_db_operation(operation)
+
+
+def get_user_by_phone(phone: str):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
+        if not digits:
+            return None
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, name, phone, password_hash, balance, created_at
+                FROM users
+                WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = %s
+                LIMIT 1
+                """,
+                (digits,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            cards_by_user = _load_user_cards_by_user_ids(cur, [row[0]])
+        return _user_row_to_dict(row, cards_by_user)
+
+    return _run_db_operation(operation)
+
+
+def create_user(user: dict):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.transaction():
+            with conn.cursor() as cur:
+                user_id = _next_integer_id(cur, "users")
+                cur.execute(
+                    """
+                    INSERT INTO users (id, name, phone, password_hash, balance, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        user_id,
+                        _coerce_text((user or {}).get("name")),
+                        _coerce_text((user or {}).get("phone")),
+                        _coerce_text((user or {}).get("password_hash")),
+                        _coerce_int((user or {}).get("balance"), 0),
+                        _parse_optional_datetime_utc((user or {}).get("created_at")) or datetime.now(timezone.utc),
+                    ),
+                )
+                cur.execute(
+                    """
+                    SELECT id, name, phone, password_hash, balance, created_at
+                    FROM users
+                    WHERE id = %s
+                    """,
+                    (user_id,),
+                )
+                row = cur.fetchone()
+                cards_by_user = _load_user_cards_by_user_ids(cur, [user_id])
+        return _user_row_to_dict(row, cards_by_user) if row is not None else None
+
+    return _run_db_operation(operation)
+
+
+def update_user_password_hash(user_id: int, password_hash: str):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE users
+                    SET password_hash = %s
+                    WHERE id = %s
+                    RETURNING id, name, phone, password_hash, balance, created_at
+                    """,
+                    (_coerce_text(password_hash), int(user_id)),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                cards_by_user = _load_user_cards_by_user_ids(cur, [int(user_id)])
+        return _user_row_to_dict(row, cards_by_user)
+
+    return _run_db_operation(operation)
+
+
+def add_user_card(user_id: int, card: dict):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        normalized_user_id = int(user_id)
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM users WHERE id = %s", (normalized_user_id,))
+                if cur.fetchone() is None:
+                    return None
+                cur.execute("UPDATE user_cards SET active = FALSE WHERE user_id = %s", (normalized_user_id,))
+                cur.execute(
+                    """
+                    INSERT INTO user_cards (
+                        user_id, brand, last4, active, holder, expiry, created_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        normalized_user_id,
+                        _coerce_text((card or {}).get("brand"), "MIR"),
+                        _coerce_text((card or {}).get("last4")),
+                        _coerce_bool((card or {}).get("active"), True),
+                        _coerce_text((card or {}).get("holder")) or None,
+                        _coerce_text((card or {}).get("expiry")) or None,
+                        _parse_optional_datetime_utc((card or {}).get("created_at")) or datetime.now(timezone.utc),
+                    ),
+                )
+                cur.execute(
+                    """
+                    SELECT id, name, phone, password_hash, balance, created_at
+                    FROM users
+                    WHERE id = %s
+                    """,
+                    (normalized_user_id,),
+                )
+                row = cur.fetchone()
+                cards_by_user = _load_user_cards_by_user_ids(cur, [normalized_user_id])
+        return _user_row_to_dict(row, cards_by_user) if row is not None else None
+
+    return _run_db_operation(operation)
+
+
+def remove_user_card(user_id: int, *, created_at: str = "", last4: str = ""):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        normalized_user_id = int(user_id)
+        normalized_created_at = _parse_optional_datetime_utc(created_at)
+        normalized_last4 = _coerce_text(last4).strip()
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, name, phone, password_hash, balance, created_at
+                    FROM users
+                    WHERE id = %s
+                    """,
+                    (normalized_user_id,),
+                )
+                user_row = cur.fetchone()
+                if user_row is None:
+                    return {"user": None, "removed": False}
+                target_id = None
+                removed_card_active = False
+                if normalized_created_at is not None:
+                    cur.execute(
+                        """
+                        SELECT id, active
+                        FROM user_cards
+                        WHERE user_id = %s AND created_at = %s
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (normalized_user_id, normalized_created_at),
+                    )
+                    target_row = cur.fetchone()
+                    if target_row is not None:
+                        target_id = target_row[0]
+                        removed_card_active = bool(target_row[1])
+                if target_id is None and normalized_last4:
+                    cur.execute(
+                        """
+                        SELECT id, active
+                        FROM user_cards
+                        WHERE user_id = %s AND last4 = %s
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT 1
+                        """,
+                        (normalized_user_id, normalized_last4),
+                    )
+                    target_row = cur.fetchone()
+                    if target_row is not None:
+                        target_id = target_row[0]
+                        removed_card_active = bool(target_row[1])
+                if target_id is None:
+                    cards_by_user = _load_user_cards_by_user_ids(cur, [normalized_user_id])
+                    return {"user": _user_row_to_dict(user_row, cards_by_user), "removed": False}
+                cur.execute("DELETE FROM user_cards WHERE id = %s", (target_id,))
+                if removed_card_active:
+                    cur.execute(
+                        """
+                        SELECT id
+                        FROM user_cards
+                        WHERE user_id = %s
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT 1
+                        """,
+                        (normalized_user_id,),
+                    )
+                    replacement = cur.fetchone()
+                    if replacement is not None:
+                        cur.execute("UPDATE user_cards SET active = TRUE WHERE id = %s", (replacement[0],))
+                cards_by_user = _load_user_cards_by_user_ids(cur, [normalized_user_id])
+        return {
+            "user": _user_row_to_dict(user_row, cards_by_user) if user_row is not None else None,
+            "removed": True,
+        }
+
+    return _run_db_operation(operation)
+
+
+def list_user_bookings(user_id: int, *, include_expired: bool = False, booking_duration_minutes: int = 60):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT user_id, table_id, booking_date, booking_time, name, created_at
+                FROM bookings
+                WHERE user_id = %s
+                ORDER BY booking_date DESC, booking_time DESC, created_at DESC, id DESC
+                """,
+                (int(user_id),),
+            )
+            rows = cur.fetchall()
+        bookings = [_booking_row_to_dict(row) for row in rows]
+        if include_expired:
+            return bookings
+        now = current_time_value()
+        active = []
+        for booking in bookings:
+            booking_dt = _parse_booking_datetime(booking)
+            if booking_dt is None:
+                continue
+            if booking_dt + timedelta(minutes=max(1, int(booking_duration_minutes or 60))) <= now:
+                continue
+            active.append(booking)
+        return active
+
+    return _run_db_operation(operation)
+
+
+def list_reserved_table_ids(date_str: str, time_str: str, *, booking_duration_minutes: int = 60):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        selected_at = datetime.fromisoformat(f"{_coerce_text(date_str)}T{_coerce_text(time_str)}")
+        selected_until = selected_at + timedelta(minutes=max(1, int(booking_duration_minutes or 60)))
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT table_id
+                FROM bookings
+                WHERE tsrange(
+                    booking_date + booking_time,
+                    booking_date + booking_time + make_interval(mins => %s),
+                    '[)'
+                ) && tsrange(%s::timestamp, %s::timestamp, '[)')
+                ORDER BY table_id ASC
+                """,
+                (max(1, int(booking_duration_minutes or 60)), selected_at, selected_until),
+            )
+            rows = cur.fetchall()
+        return [_coerce_int(row[0], 0) for row in rows if _coerce_int(row[0], 0) > 0]
+
+    return _run_db_operation(operation)
+
+
+def list_user_orders(user_id: int):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT { _ORDER_SELECT_COLUMNS }
+                FROM orders
+                WHERE user_id = %s
+                ORDER BY created_at DESC, id DESC
+                """,
+                (int(user_id),),
+            )
+            order_rows = cur.fetchall()
+            return _hydrate_orders(cur, order_rows, include_items=False)
+
+    return _run_db_operation(operation)
+
+
+def get_user_order(user_id: int, order_id: int):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT { _ORDER_SELECT_COLUMNS }
+                FROM orders
+                WHERE user_id = %s AND id = %s
+                LIMIT 1
+                """,
+                (int(user_id), int(order_id)),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            orders = _hydrate_orders(cur, [row], include_items=True)
+            return orders[0] if orders else None
+
+    return _run_db_operation(operation)
+
+
+def create_booking_if_available(booking: dict, *, booking_duration_minutes: int = 60):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        normalized_user_id = _coerce_int((booking or {}).get("user_id"), 0)
+        normalized_table_id = _coerce_int((booking or {}).get("table_id"), 0)
+        booking_date = _parse_date((booking or {}).get("date"))
+        booking_time = _parse_time((booking or {}).get("time"))
+        selected_at = datetime.fromisoformat(f"{booking_date.isoformat()}T{booking_time.strftime('%H:%M:%S')}")
+        selected_until = selected_at + timedelta(minutes=max(1, int(booking_duration_minutes or 60)))
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute("LOCK TABLE bookings IN SHARE ROW EXCLUSIVE MODE")
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM bookings
+                    WHERE table_id = %s
+                      AND tsrange(
+                            booking_date + booking_time,
+                            booking_date + booking_time + make_interval(mins => %s),
+                            '[)'
+                      ) && tsrange(%s::timestamp, %s::timestamp, '[)')
+                    LIMIT 1
+                    """,
+                    (
+                        normalized_table_id,
+                        max(1, int(booking_duration_minutes or 60)),
+                        selected_at,
+                        selected_until,
+                    ),
+                )
+                if cur.fetchone() is not None:
+                    return False
+                cur.execute(
+                    """
+                    INSERT INTO bookings (
+                        user_id, table_id, booking_date, booking_time, name, created_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        normalized_user_id,
+                        normalized_table_id,
+                        booking_date,
+                        booking_time,
+                        _coerce_text((booking or {}).get("name")),
+                        _parse_optional_datetime_utc((booking or {}).get("created_at")) or datetime.now(timezone.utc),
+                    ),
+                )
+                return True
+
+    return _run_db_operation(operation)
+
+
+def delete_user_booking(user_id: int, table_id: int, date_str: str, time_str: str):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM bookings
+                    WHERE user_id = %s
+                      AND table_id = %s
+                      AND booking_date = %s
+                      AND booking_time = %s
+                    RETURNING id
+                    """,
+                    (int(user_id), int(table_id), _parse_date(date_str), _parse_time(time_str)),
+                )
+                return cur.fetchone() is not None
+
+    return _run_db_operation(operation)
+
+
+def cancel_booking_with_orders(user_id: int, table_id: int, date_str: str, time_str: str, cancelled_at: str):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        normalized_user_id = int(user_id)
+        normalized_table_id = int(table_id)
+        normalized_date = _parse_date(date_str)
+        normalized_time = _parse_time(time_str)
+        normalized_cancelled_at = _parse_optional_datetime_utc(cancelled_at) or datetime.now(timezone.utc)
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM bookings
+                    WHERE user_id = %s
+                      AND table_id = %s
+                      AND booking_date = %s
+                      AND booking_time = %s
+                    RETURNING id
+                    """,
+                    (normalized_user_id, normalized_table_id, normalized_date, normalized_time),
+                )
+                booking_removed = cur.fetchone() is not None
+                if not booking_removed:
+                    return False
+                cur.execute(
+                    """
+                    UPDATE orders
+                    SET
+                        status = 'cancelled',
+                        effective_status = 'cancelled',
+                        effective_status_updated_at = %s,
+                        is_delivery_overdue = FALSE,
+                        cancelled_at = %s
+                    WHERE user_id = %s
+                      AND LOWER(COALESCE(order_type, 'dine_in')) <> 'delivery'
+                      AND LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'canceled')
+                      AND booking_table_id = %s
+                      AND booking_date = %s
+                      AND booking_time = %s
+                    """,
+                    (
+                        normalized_cancelled_at,
+                        normalized_cancelled_at,
+                        normalized_user_id,
+                        normalized_table_id,
+                        normalized_date,
+                        normalized_time,
+                    ),
+                )
+                return True
+
+    return _run_db_operation(operation)
+
+
+def refresh_persisted_order_fields(*, order_ids: list[int] | None = None, user_id: int | None = None, active_only: bool = False):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        conditions = []
+        params = []
+        if order_ids:
+            normalized_order_ids = [int(order_id) for order_id in order_ids if int(order_id) > 0]
+            if not normalized_order_ids:
+                return 0
+            conditions.append("id = ANY(%s)")
+            params.append(normalized_order_ids)
+        if user_id is not None:
+            conditions.append("user_id = %s")
+            params.append(int(user_id))
+        if active_only:
+            conditions.append(
+                """
+                (
+                    COALESCE(effective_status, '') = ''
+                    OR LOWER(COALESCE(effective_status, status, '')) NOT IN ('served', 'cancelled')
+                    OR (LOWER(COALESCE(order_type, 'dine_in')) = 'delivery' AND COALESCE(is_delivery_overdue, FALSE) = FALSE)
+                )
+                """
+            )
+        where_sql = "WHERE " + " AND ".join(condition.strip() for condition in conditions) if conditions else ""
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT { _ORDER_SELECT_COLUMNS }
+                    FROM orders
+                    {where_sql}
+                    ORDER BY id ASC
+                    """,
+                    tuple(params),
+                )
+                order_rows = cur.fetchall()
+                orders = _hydrate_orders(cur, order_rows, include_items=False)
+                current = current_time_value()
+                updates = []
+                for order in orders:
+                    persisted = apply_persisted_status_fields_value(dict(order), current)
+                    effective_status_changed = _coerce_text(order.get("effective_status")) != _coerce_text(persisted.get("effective_status"))
+                    overdue_changed = bool(order.get("is_delivery_overdue")) != bool(persisted.get("is_delivery_overdue"))
+                    if not effective_status_changed and not overdue_changed:
+                        continue
+                    updates.append(
+                        (
+                            _coerce_text(persisted.get("effective_status"), "preparing") or "preparing",
+                            _coerce_text(persisted.get("effective_status_updated_at")),
+                            bool(persisted.get("is_delivery_overdue")),
+                            int(order["id"]),
+                        )
+                    )
+                if updates:
+                    cur.executemany(
+                        """
+                        UPDATE orders
+                        SET
+                            effective_status = %s,
+                            effective_status_updated_at = %s,
+                            is_delivery_overdue = %s
+                        WHERE id = %s
+                        """,
+                        updates,
+                    )
+                return len(updates)
+
+    return _run_db_operation(operation)
+
+
+def create_order(order: dict):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.transaction():
+            with conn.cursor() as cur:
+                order_id = _next_integer_id(cur, "orders")
+                now = current_time_value()
+                normalized_order = apply_persisted_status_fields_value({**dict(order or {}), "id": order_id}, now)
+                user_id = _coerce_int(normalized_order.get("user_id"), 0)
+                if user_id <= 0:
+                    raise ValueError("Order user_id is required")
+                cur.execute(
+                    """
+                    INSERT INTO orders (
+                        id,
+                        user_id,
+                        order_type,
+                        status,
+                        effective_status,
+                        effective_status_updated_at,
+                        is_delivery_overdue,
+                        created_at,
+                        items_total,
+                        points_applied,
+                        payable_total,
+                        bonus_earned,
+                        comment,
+                        serving_mode,
+                        serving_label,
+                        serving_time,
+                        booking_table_id,
+                        booking_date,
+                        booking_time,
+                        booking_status,
+                        payment_card_brand,
+                        payment_card_last4,
+                        payment_card_expiry,
+                        delivery_name,
+                        delivery_phone,
+                        delivery_street,
+                        delivery_house,
+                        delivery_apartment,
+                        delivery_entrance,
+                        delivery_floor,
+                        delivery_intercom,
+                        delivery_comment,
+                        delivery_address,
+                        delivery_eta_minutes,
+                        cancelled_at
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s
+                    )
+                    """,
+                    (
+                        order_id,
+                        user_id,
+                        _coerce_text(normalized_order.get("order_type"), "dine_in") or "dine_in",
+                        _coerce_text(normalized_order.get("status"), "preparing") or "preparing",
+                        _coerce_text(normalized_order.get("effective_status"), "preparing") or "preparing",
+                        _parse_optional_datetime_utc(normalized_order.get("effective_status_updated_at")),
+                        bool(normalized_order.get("is_delivery_overdue")),
+                        _parse_optional_datetime_utc(normalized_order.get("created_at")) or datetime.now(timezone.utc),
+                        _coerce_int(normalized_order.get("items_total"), 0),
+                        _coerce_int(normalized_order.get("points_applied"), 0),
+                        _coerce_int(normalized_order.get("payable_total"), 0),
+                        _coerce_int(normalized_order.get("bonus_earned"), 0),
+                        _coerce_text(normalized_order.get("comment")),
+                        _coerce_text((_coerce_dict(normalized_order.get("serving"))).get("mode")),
+                        _coerce_text((_coerce_dict(normalized_order.get("serving"))).get("label")),
+                        _coerce_text((_coerce_dict(normalized_order.get("serving"))).get("time")),
+                        _coerce_int((_coerce_dict(normalized_order.get("booking"))).get("table_id"), 0) or None,
+                        _parse_optional_date((_coerce_dict(normalized_order.get("booking"))).get("date")),
+                        _parse_optional_time((_coerce_dict(normalized_order.get("booking"))).get("time")),
+                        _coerce_text((_coerce_dict(normalized_order.get("booking"))).get("status")),
+                        _coerce_text((_coerce_dict(normalized_order.get("payment_card"))).get("brand")),
+                        _coerce_text((_coerce_dict(normalized_order.get("payment_card"))).get("last4")),
+                        _coerce_text((_coerce_dict(normalized_order.get("payment_card"))).get("expiry")),
+                        _coerce_text(normalized_order.get("delivery_name")),
+                        _coerce_text(normalized_order.get("delivery_phone")),
+                        _coerce_text(normalized_order.get("delivery_street")),
+                        _coerce_text(normalized_order.get("delivery_house")),
+                        _coerce_text(normalized_order.get("delivery_apartment")),
+                        _coerce_text(normalized_order.get("delivery_entrance")),
+                        _coerce_text(normalized_order.get("delivery_floor")),
+                        _coerce_text(normalized_order.get("delivery_intercom")),
+                        _coerce_text(normalized_order.get("delivery_comment")),
+                        _coerce_text(normalized_order.get("delivery_address")),
+                        _coerce_int(normalized_order.get("delivery_eta_minutes"), 20),
+                        _parse_optional_datetime_utc(normalized_order.get("cancelled_at")),
+                    ),
+                )
+                item_rows = []
+                for position, item in enumerate(_coerce_list(normalized_order.get("items"))):
+                    if not isinstance(item, dict):
+                        continue
+                    item_rows.append(
+                        (
+                            order_id,
+                            position,
+                            _coerce_int(item.get("id"), 0),
+                            _coerce_text(item.get("name")),
+                            _coerce_int(item.get("price"), 0),
+                            _coerce_int(item.get("qty"), 0),
+                            _coerce_text(item.get("photo")) or None,
+                        )
+                    )
+                if item_rows:
+                    cur.executemany(
+                        """
+                        INSERT INTO order_items (
+                            order_id, position, item_id, name, price, qty, photo
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        item_rows,
+                    )
+                return normalized_order
+
+    return _run_db_operation(operation)
+
+
+def apply_user_balance_delta(user_id: int, delta: int):
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        normalized_user_id = int(user_id)
+        normalized_delta = int(delta)
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE users
+                    SET balance = GREATEST(0, COALESCE(balance, 0) + %s)
+                    WHERE id = %s
+                    RETURNING id, name, phone, password_hash, balance, created_at
+                    """,
+                    (normalized_delta, normalized_user_id),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                cards_by_user = _load_user_cards_by_user_ids(cur, [normalized_user_id])
+        return _user_row_to_dict(row, cards_by_user)
 
     return _run_db_operation(operation)
 
@@ -1527,6 +2503,7 @@ def sync_menu_items_from_disk():
         return {
             "scanned": len(rows),
             "synced": len(rows),
+            "disabled": deleted_count,
             "deleted": deleted_count,
         }
 
@@ -1545,6 +2522,9 @@ def load_promotions():
                     slug,
                     name,
                     lore,
+                    class_name,
+                    text,
+                    link,
                     active,
                     priority,
                     condition,
@@ -1557,7 +2537,7 @@ def load_promotions():
                     end_at,
                     photo_path
                 FROM promotions
-                WHERE class_name = 'akciya'
+                WHERE class_name IN ('akciya', 'reklama')
                 ORDER BY priority DESC, id ASC
                 """
             )
@@ -1566,20 +2546,22 @@ def load_promotions():
             {
                 "id": row[0],
                 "slug": _coerce_text(row[1]),
-                "class": "akciya",
+                "class": _coerce_text(row[4], "akciya") or "akciya",
                 "name": _coerce_text(row[2]),
                 "lore": _coerce_text(row[3]),
-                "active": bool(row[4]),
-                "priority": _coerce_int(row[5], 100),
-                "condition": _coerce_text(row[6]),
-                "reward": _coerce_text(row[7]),
-                "notify": _coerce_text(row[8]),
-                "reward_mode": _coerce_text(row[9], "once") or "once",
-                "limit_per_order": "" if row[10] is None else str(row[10]),
-                "limit_per_user_per_day": "" if row[11] is None else str(row[11]),
-                "start_at": row[12].isoformat() if isinstance(row[12], datetime) else _coerce_text(row[12]),
-                "end_at": row[13].isoformat() if isinstance(row[13], datetime) else _coerce_text(row[13]),
-                "photo": _coerce_text(row[14]) or None,
+                "text": _coerce_text(row[5]),
+                "link": _coerce_text(row[6]),
+                "active": bool(row[7]),
+                "priority": _coerce_int(row[8], 100),
+                "condition": _coerce_text(row[9]),
+                "reward": _coerce_text(row[10]),
+                "notify": _coerce_text(row[11]),
+                "reward_mode": _coerce_text(row[12], "once") or "once",
+                "limit_per_order": "" if row[13] is None else str(row[13]),
+                "limit_per_user_per_day": "" if row[14] is None else str(row[14]),
+                "start_at": row[15].isoformat() if isinstance(row[15], datetime) else _coerce_text(row[15]),
+                "end_at": row[16].isoformat() if isinstance(row[16], datetime) else _coerce_text(row[16]),
+                "photo": _coerce_text(row[17]) or None,
             }
             for row in rows
         ]
@@ -1629,6 +2611,7 @@ def sync_promotions_from_disk():
         return {
             "scanned": len(rows),
             "synced": len(rows),
+            "disabled": deleted_count,
             "deleted": deleted_count,
         }
 

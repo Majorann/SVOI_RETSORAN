@@ -1,3 +1,4 @@
+import importlib
 from datetime import datetime
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from conftest import write_json
 from services.auth_session import AuthSessionService
 from services.menu_content import MenuContentService
 from services.admin_service import AdminService
+from services.order_status import apply_persisted_status_fields_value
 
 
 def seed_logged_in_session(client, user_id=1, user_name="Админ"):
@@ -81,9 +83,9 @@ def test_admin_api_runs_content_autosync(app_module, client, monkeypatch):
         "sync_content_from_host",
         lambda admin_user_id, reason: {
             "menu_items_synced": 12,
-            "menu_items_deleted": 5,
+            "menu_items_disabled": 5,
             "promotions_synced": 4,
-            "promotions_deleted": 1,
+            "promotions_disabled": 1,
             "reklama_found": 2,
         },
     )
@@ -98,14 +100,21 @@ def test_admin_api_runs_content_autosync(app_module, client, monkeypatch):
     assert response.status_code == 200
     assert payload["ok"] is True
     assert "меню 12" in payload["toast"]
-    assert "удалено 5" in payload["toast"]
+    assert "отключено 5" in payload["toast"]
 
 
 def test_admin_orders_filter_renders_all_status_options(app_module, client, monkeypatch):
     seed_logged_in_session(client)
     app_module.admin_service.active_storage = "postgres"
     monkeypatch.setattr(app_module.admin_service, "is_admin_user", lambda user_id: True)
-    monkeypatch.setattr(app_module.admin_service, "list_orders", lambda filters: [])
+    monkeypatch.setattr(
+        app_module.admin_service,
+        "paginate_orders",
+        lambda filters, page=1, per_page=25: (
+            [],
+            {"page": 1, "per_page": per_page, "total": 0, "total_pages": 1, "has_prev": False, "has_next": False, "prev_page": 1, "next_page": 1, "offset": 0},
+        ),
+    )
 
     response = client.get("/admin/orders")
 
@@ -118,6 +127,40 @@ def test_admin_orders_filter_renders_all_status_options(app_module, client, monk
     assert "Выдача" in html
     assert "Завершён" in html
     assert "Отменён" in html
+
+
+def test_admin_delivery_route_renders_pagination(app_module, client, monkeypatch):
+    seed_logged_in_session(client)
+    app_module.admin_service.active_storage = "postgres"
+    monkeypatch.setattr(app_module.admin_service, "is_admin_user", lambda user_id: True)
+    monkeypatch.setattr(
+        app_module.admin_service,
+        "paginate_delivery_orders",
+        lambda filters, page=1, per_page=25: (
+            [
+                {
+                    "id": 7,
+                    "delivery_name": "Иван",
+                    "delivery_phone": "+7999",
+                    "delivery_address": "ул. Тестовая, 1",
+                    "status": "cooking",
+                    "status_label": "Готовится",
+                    "delivery_eta_minutes": 20,
+                    "totals": {"payable_total": 900},
+                    "created_at": "2026-03-20T10:00:00",
+                    "delivery_overdue": False,
+                }
+            ],
+            {"page": 2, "per_page": 25, "total": 60, "total_pages": 3, "has_prev": True, "has_next": True, "prev_page": 1, "next_page": 3, "offset": 25},
+        ),
+    )
+
+    response = client.get("/admin/delivery?page=2")
+
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "Страница 2 из 3" in html
+    assert "Иван" in html
 
 
 def test_admin_menu_route_reads_admin_menu_items_once(app_module, client, monkeypatch):
@@ -246,13 +289,16 @@ def test_admin_service_marks_completed_delivery_as_served_instead_of_overdue(mon
     assert service.is_delivery_overdue(order) is False
 
 
-def test_admin_list_orders_uses_effective_status_from_timeline(monkeypatch):
+def test_admin_list_orders_uses_persisted_effective_status(monkeypatch):
     service = AdminService(active_storage="postgres", menu_content=None)
     order = {
         "id": 15,
         "user_id": 1,
         "order_type": "dine_in",
         "status": "preparing",
+        "effective_status": "served",
+        "effective_status_updated_at": "2026-03-20T10:30:00",
+        "is_delivery_overdue": False,
         "created_at": "2026-03-20T09:00:00",
         "booking_table_id": 4,
         "items_total": 1000,
@@ -263,7 +309,7 @@ def test_admin_list_orders_uses_effective_status_from_timeline(monkeypatch):
         "booking_time": "09:30:00",
     }
 
-    monkeypatch.setattr("services.admin_service.current_time_value", lambda: datetime(2026, 3, 20, 10, 30, 0))
+    monkeypatch.setattr(service, "_refresh_persisted_order_fields", lambda **kwargs: 0)
     monkeypatch.setattr(service, "_fetch_all", lambda query, params=(): [dict(order)])
 
     orders = service.list_orders({})
@@ -271,6 +317,24 @@ def test_admin_list_orders_uses_effective_status_from_timeline(monkeypatch):
     assert len(orders) == 1
     assert orders[0]["status"] == "served"
     assert orders[0]["status_label"] == "Выдан"
+
+
+def test_apply_persisted_status_fields_preserves_updated_at_without_status_change():
+    now = datetime(2026, 3, 20, 10, 30, 0)
+    order = {
+        "id": 15,
+        "user_id": 1,
+        "order_type": "dine_in",
+        "status": "served",
+        "effective_status": "served",
+        "effective_status_updated_at": "2026-03-20T09:45:00",
+        "created_at": "2026-03-20T09:00:00",
+    }
+
+    normalized = apply_persisted_status_fields_value(dict(order), now)
+
+    assert normalized["effective_status"] == "served"
+    assert normalized["effective_status_updated_at"] == "2026-03-20T09:45:00"
 
 
 def test_admin_analytics_uses_sql_aggregates(monkeypatch):
@@ -386,7 +450,7 @@ def test_menu_content_admin_and_promo_use_memory_cache(tmp_path, monkeypatch):
 def test_auth_session_caches_users_and_bookings_within_request():
     app = Flask(__name__)
     app.secret_key = "test-secret"
-    calls = {"users": 0, "bookings": 0}
+    calls = {"users": 0, "bookings": 0, "user_by_id": 0, "user_bookings": 0}
 
     def load_users():
         calls["users"] += 1
@@ -395,6 +459,18 @@ def test_auth_session_caches_users_and_bookings_within_request():
     def load_bookings():
         calls["bookings"] += 1
         return [{"id": 1, "user_id": 7}, {"id": 2, "user_id": 99}]
+
+    def get_user_by_id(user_id):
+        calls["user_by_id"] += 1
+        if user_id == 7:
+            return {"id": 7, "name": "Тест"}
+        return None
+
+    def list_user_bookings(user_id):
+        calls["user_bookings"] += 1
+        if user_id == 7:
+            return [{"id": 1, "user_id": 7}]
+        return []
 
     service = AuthSessionService(
         app=app,
@@ -411,6 +487,8 @@ def test_auth_session_caches_users_and_bookings_within_request():
         session_debug_lock=None,
         load_users=load_users,
         load_bookings=load_bookings,
+        get_user_by_id=get_user_by_id,
+        list_user_bookings=list_user_bookings,
         get_user_preparing_orders=lambda user_id: [{"id": 10, "user_id": user_id}],
     )
 
@@ -425,8 +503,10 @@ def test_auth_session_caches_users_and_bookings_within_request():
     assert preparing == [{"id": 10, "user_id": 7}]
     assert bookings_again == bookings
     assert preparing_again == preparing
-    assert calls["users"] == 1
-    assert calls["bookings"] == 1
+    assert calls["users"] == 0
+    assert calls["bookings"] == 0
+    assert calls["user_by_id"] == 1
+    assert calls["user_bookings"] == 1
 
 
 def test_admin_audit_filter_options_are_cached():
@@ -662,11 +742,11 @@ def test_menu_content_syncs_host_content_to_postgres(monkeypatch):
     class PgStoreStub:
         @staticmethod
         def sync_menu_items_from_disk():
-            return {"synced": 7, "deleted": 2}
+            return {"synced": 7, "disabled": 2}
 
         @staticmethod
         def sync_promotions_from_disk():
-            return {"synced": 3, "deleted": 1}
+            return {"synced": 3, "disabled": 1}
 
     monkeypatch.setattr(
         service,
@@ -684,8 +764,10 @@ def test_menu_content_syncs_host_content_to_postgres(monkeypatch):
     assert summary == {
         "storage": "postgres",
         "menu_items_synced": 7,
+        "menu_items_disabled": 2,
         "menu_items_deleted": 2,
         "promotions_synced": 3,
+        "promotions_disabled": 1,
         "promotions_deleted": 1,
         "reklama_found": 2,
     }
@@ -754,6 +836,64 @@ def test_admin_service_allows_info_only_akciya_without_dsl(tmp_path, monkeypatch
     assert captured["payload"]["condition"] == ""
     assert captured["payload"]["reward"] == ""
     assert captured["payload"]["reward_mode"] == ""
+    assert service.menu_content.invalidated == 1
+
+
+def test_admin_service_save_reklama_item_stores_in_postgres(tmp_path, monkeypatch):
+    promo_root = tmp_path / "promo_items"
+    captured = {}
+
+    class MenuContentStub:
+        def __init__(self):
+            self.invalidated = 0
+
+        def load_promo_items(self, include_inactive=True):
+            return []
+
+        def parse_menu_meta(self, path):
+            return {}
+
+        def invalidate_local_cache(self):
+            self.invalidated += 1
+
+        def get_redis_client(self):
+            return None
+
+    service = AdminService(active_storage="postgres", menu_content=MenuContentStub())
+    monkeypatch.setattr("services.admin_service.PROMO_ITEMS_PATH", promo_root)
+    monkeypatch.setattr(service, "log_admin_action", lambda **kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "_pg_store",
+        lambda: type(
+            "PgStoreStub",
+            (),
+            {
+                "upsert_promotion": staticmethod(
+                    lambda payload: (captured.setdefault("payload", dict(payload)), 21)[1]
+                )
+            },
+        )(),
+    )
+
+    service.save_promo_item(
+        form={
+            "class_name": "reklama",
+            "slug": "spring-ad",
+            "text": "Весенний баннер",
+            "link": "https://example.com/ad",
+            "priority": "90",
+            "reason": "test",
+            "active": "1",
+        },
+        photo=None,
+        admin_user_id=1,
+    )
+
+    assert captured["payload"]["class"] == "reklama"
+    assert captured["payload"]["text"] == "Весенний баннер"
+    assert captured["payload"]["link"] == "https://example.com/ad"
+    assert captured["payload"]["slug"] == "spring-ad"
     assert service.menu_content.invalidated == 1
 
 
@@ -858,3 +998,240 @@ def test_admin_service_deletes_promo_from_postgres(tmp_path, monkeypatch):
 
     assert deleted == [77]
     assert service.menu_content.invalidated == 1
+
+
+def test_menu_content_loads_reklama_items_from_postgres(monkeypatch):
+    service = MenuContentService(
+        active_storage="postgres",
+        menu_cache_enabled=False,
+        menu_cache_key="menu:test",
+        menu_cache_ttl_seconds=60,
+        redis_module=None,
+        redis_url="",
+    )
+
+    class PgStoreStub:
+        @staticmethod
+        def load_promotions():
+            return [
+                {
+                    "id": 12,
+                    "slug": "spring-ad",
+                    "class": "reklama",
+                    "name": "reklama-12",
+                    "lore": "",
+                    "text": "Весенний баннер",
+                    "link": "https://example.com/ad",
+                    "active": True,
+                    "priority": 90,
+                    "condition": "",
+                    "reward": "",
+                    "notify": "",
+                    "reward_mode": "",
+                    "limit_per_order": "",
+                    "limit_per_user_per_day": "",
+                    "start_at": "",
+                    "end_at": "",
+                    "photo": "promo_items/reklama/spring-ad/photo.webp",
+                }
+            ]
+
+    monkeypatch.setattr(
+        "services.menu_content.importlib.import_module",
+        lambda name: PgStoreStub if name == "storage.pg_store" else None,
+    )
+    monkeypatch.setattr(
+        service,
+        "_load_disk_promo_items",
+        lambda include_inactive, allowed_classes: pytest.fail("disk promo loading should not be used in postgres mode"),
+    )
+
+    items = service.load_promo_items()
+
+    assert len(items) == 1
+    assert items[0]["class"] == "reklama"
+    assert items[0]["text"] == "Весенний баннер"
+    assert items[0]["link"] == "https://example.com/ad"
+
+
+def test_pg_schema_normalizes_user_cards_created_at_text_column(app_module):
+    pg_store = importlib.import_module("storage.pg_store")
+
+    class CursorStub:
+        def __init__(self):
+            self.calls = []
+            self._last_sql = ""
+
+        def execute(self, sql, params=None):
+            self._last_sql = sql
+            self.calls.append((sql, params))
+
+        def fetchone(self):
+            sql = self._last_sql
+            if "FROM information_schema.tables" in sql:
+                return (True,)
+            if "SELECT EXISTS" in sql and "FROM information_schema.columns" in sql:
+                return (True,)
+            if "SELECT data_type, udt_name" in sql:
+                return ("text", "text")
+            return None
+
+    cur = CursorStub()
+
+    pg_store._normalize_timestamptz_column(
+        cur,
+        "user_cards",
+        "created_at",
+        nullable=False,
+        default_sql="NOW()",
+    )
+
+    alter_statements = [sql for sql, _ in cur.calls if "ALTER TABLE user_cards" in sql]
+    assert alter_statements[0].strip() == "ALTER TABLE user_cards ALTER COLUMN created_at DROP DEFAULT"
+    assert any("ALTER COLUMN created_at TYPE TIMESTAMPTZ" in sql for sql in alter_statements)
+    assert any("ALTER COLUMN created_at SET DEFAULT NOW()" in sql for sql in alter_statements)
+    assert any("ALTER COLUMN created_at SET NOT NULL" in sql for sql in alter_statements)
+
+
+def test_pg_schema_skips_user_cards_created_at_when_already_timestamptz(app_module):
+    pg_store = importlib.import_module("storage.pg_store")
+
+    class CursorStub:
+        def __init__(self):
+            self.calls = []
+            self._last_sql = ""
+
+        def execute(self, sql, params=None):
+            self._last_sql = sql
+            self.calls.append((sql, params))
+
+        def fetchone(self):
+            sql = self._last_sql
+            if "FROM information_schema.tables" in sql:
+                return (True,)
+            if "SELECT EXISTS" in sql and "FROM information_schema.columns" in sql:
+                return (True,)
+            if "SELECT data_type, udt_name" in sql:
+                return ("timestamp with time zone", "timestamptz")
+            return None
+
+    cur = CursorStub()
+
+    pg_store._normalize_timestamptz_column(
+        cur,
+        "user_cards",
+        "created_at",
+        nullable=False,
+        default_sql="NOW()",
+    )
+
+    alter_statements = [sql for sql, _ in cur.calls if "ALTER TABLE user_cards" in sql]
+    assert any("ALTER COLUMN created_at SET DEFAULT NOW()" in sql for sql in alter_statements)
+    assert any("ALTER COLUMN created_at SET NOT NULL" in sql for sql in alter_statements)
+
+
+def test_pg_schema_normalizes_multiple_legacy_timestamp_columns(app_module):
+    pg_store = importlib.import_module("storage.pg_store")
+
+    type_map = {
+        ("users", "created_at"): ("text", "text"),
+        ("user_cards", "created_at"): ("timestamp without time zone", "timestamp"),
+        ("orders", "cancelled_at"): ("text", "text"),
+    }
+
+    class CursorStub:
+        def __init__(self):
+            self.calls = []
+            self._last_sql = ""
+            self._last_params = None
+
+        def execute(self, sql, params=None):
+            self._last_sql = sql
+            self._last_params = params
+            self.calls.append((sql, params))
+
+        def fetchone(self):
+            sql = self._last_sql
+            params = self._last_params
+            if "FROM information_schema.tables" in sql:
+                return (params[0] in {"users", "user_cards", "orders"},)
+            if "SELECT EXISTS" in sql and "FROM information_schema.columns" in sql:
+                return (params in type_map,)
+            if "SELECT data_type, udt_name" in sql:
+                return type_map.get(params)
+            return None
+
+    cur = CursorStub()
+
+    pg_store._normalize_legacy_temporal_columns(cur)
+
+    statements = [sql for sql, _ in cur.calls]
+    assert any("ALTER TABLE users" in sql and "ALTER COLUMN created_at TYPE TIMESTAMPTZ" in sql for sql in statements)
+    assert any("ALTER TABLE user_cards" in sql and "USING created_at AT TIME ZONE 'UTC'" in sql for sql in statements)
+    assert any("ALTER TABLE orders" in sql and "ALTER COLUMN cancelled_at TYPE TIMESTAMPTZ" in sql for sql in statements)
+    assert any("ALTER TABLE orders ALTER COLUMN cancelled_at DROP DEFAULT" in sql for sql in statements)
+    assert any("ALTER TABLE orders ALTER COLUMN cancelled_at DROP NOT NULL" in sql for sql in statements)
+
+
+def test_menu_content_db_read_failure_does_not_fallback_to_disk(monkeypatch):
+    service = MenuContentService(
+        active_storage="postgres",
+        menu_cache_enabled=False,
+        menu_cache_key="menu:test",
+        menu_cache_ttl_seconds=60,
+        redis_module=None,
+        redis_url="",
+    )
+    disk_calls = {"count": 0}
+
+    class PgStoreStub:
+        @staticmethod
+        def load_menu_items(include_inactive=False):
+            raise RuntimeError("db offline")
+
+    monkeypatch.setattr(
+        "services.menu_content.importlib.import_module",
+        lambda name: PgStoreStub if name == "storage.pg_store" else None,
+    )
+    monkeypatch.setattr(
+        service,
+        "load_menu_items_from_disk",
+        lambda include_inactive=False: disk_calls.__setitem__("count", disk_calls["count"] + 1),
+    )
+
+    with pytest.raises(RuntimeError, match="Postgres menu read failed"):
+        service.load_menu_items_from_db()
+
+    assert disk_calls["count"] == 0
+
+
+def test_promo_content_db_read_failure_does_not_fallback_to_disk(monkeypatch):
+    service = MenuContentService(
+        active_storage="postgres",
+        menu_cache_enabled=False,
+        menu_cache_key="menu:test",
+        menu_cache_ttl_seconds=60,
+        redis_module=None,
+        redis_url="",
+    )
+    disk_calls = {"count": 0}
+
+    class PgStoreStub:
+        @staticmethod
+        def load_promotions():
+            raise RuntimeError("db offline")
+
+    monkeypatch.setattr(
+        "services.menu_content.importlib.import_module",
+        lambda name: PgStoreStub if name == "storage.pg_store" else None,
+    )
+    monkeypatch.setattr(
+        service,
+        "_load_disk_promo_items",
+        lambda **kwargs: disk_calls.__setitem__("count", disk_calls["count"] + 1),
+    )
+
+    with pytest.raises(RuntimeError, match="Postgres promotions read failed"):
+        service.load_promotions_from_db()
+
+    assert disk_calls["count"] == 0

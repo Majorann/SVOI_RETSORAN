@@ -9,4 +9,4 @@ reward_mode=once
 limit_per_order=1
 limit_per_user_per_day=10
 priority=100
-active=false
+active=true

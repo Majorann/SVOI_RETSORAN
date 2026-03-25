@@ -1,5 +1,8 @@
 ﻿{% extends "base.html" %}
 {% block body_class %}page-delivery-menu{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/menu-page.css') }}" />
+{% endblock %}
 {% block content %}
 <header class="top menu-top">
   <a class="icon-button menu-top__back" href="{{ url_for('index') }}" aria-label="Назад на главную">←</a>
@@ -20,8 +23,17 @@
     </div>
     <div class="menu">
       {% for item in items %}
-      <article class="menu-card menu-card--delivery" style="--dish-photo: url('{{ url_for('static', filename=item.photo) }}');">
-        <div class="menu-card__media" style="background-image: var(--dish-photo);"></div>
+      <article class="menu-card menu-card--delivery">
+        <div class="menu-card__media">
+          <img
+            class="menu-card__image"
+            src="{{ url_for('static', filename=item.photo) }}"
+            alt="{{ item.name }}"
+            loading="{% if loop.index <= 4 %}eager{% else %}lazy{% endif %}"
+            decoding="async"
+            {% if loop.index <= 4 %}fetchpriority="high"{% endif %}
+          />
+        </div>
         <div class="menu-card__content">
           <div class="menu-card__title-row">
             <h3>{{ item.name }}</h3>

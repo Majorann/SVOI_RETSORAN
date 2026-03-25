@@ -91,14 +91,14 @@ def delivery_menu_route(load_menu_items):
     return render_template("menu.html", items=load_menu_items(), delivery_mode=True)
 
 
-def delivery_checkout_route(load_users):
+def delivery_checkout_route(get_user_by_id):
     user_id = session.get("user_id")
     if not user_id:
         return redirect(url_for("login", error="Войдите, чтобы оформить доставку."))
 
     user = getattr(g, "current_user", None)
     if not user or user.get("id") != user_id:
-        user = next((u for u in load_users() if u.get("id") == user_id), None)
+        user = get_user_by_id(user_id)
     user = user or {}
     error = request.args.get("error", "")
     return render_template(
@@ -111,7 +111,7 @@ def delivery_checkout_route(load_users):
 
 def delivery_payment_route(
     resolve_order_items,
-    load_orders,
+    list_user_orders,
     load_promo_application_counts,
     load_promo_items,
     load_menu_items,
@@ -167,7 +167,7 @@ def delivery_payment_route(
         items=items,
         service_fee=DELIVERY_SERVICE_FEE,
         user_id=user_id,
-        load_orders_fn=load_orders,
+        load_orders_fn=lambda: list_user_orders(user_id),
         load_promo_application_counts_fn=load_promo_application_counts,
         promo_items=_delivery_pricing_promo_items(load_promo_items()),
         menu_items=load_menu_items(),
@@ -235,19 +235,14 @@ def delivery_payment_page_route(verify_checkout_preview_token):
 
 
 def delivery_confirm_route(
-    json_file_lock,
-    orders_path,
-    load_orders,
-    next_order_id,
-    save_orders,
-    users_path,
-    load_users,
-    save_users,
+    create_order,
+    apply_user_balance_delta,
     verify_checkout_preview_token,
     load_promo_application_counts,
     save_promotion_applications,
     load_promo_items,
     load_menu_items,
+    list_user_orders,
 ):
     user_id = session.get("user_id")
     if not user_id:
@@ -280,7 +275,7 @@ def delivery_confirm_route(
         items=items,
         service_fee=DELIVERY_SERVICE_FEE,
         user_id=user_id,
-        load_orders_fn=load_orders,
+        load_orders_fn=lambda: list_user_orders(user_id),
         load_promo_application_counts_fn=load_promo_application_counts,
         promo_items=_delivery_pricing_promo_items(load_promo_items()),
         menu_items=load_menu_items(),
@@ -289,11 +284,8 @@ def delivery_confirm_route(
     priced_items = pricing["items"]
     eta_minutes = int(preview.get("delivery_eta_minutes", 20) or 20)
 
-    with json_file_lock(orders_path):
-        orders = load_orders()
-        order_id = next_order_id(orders)
-        new_order = {
-            "id": order_id,
+    new_order = create_order(
+        {
             "user_id": user_id,
             "order_type": "delivery",
             "status": "cooking",
@@ -324,24 +316,20 @@ def delivery_confirm_route(
             "delivery_address": preview.get("delivery_address", ""),
             "delivery_eta_minutes": eta_minutes,
         }
-        orders.append(new_order)
-        save_orders(orders)
-        save_promotion_applications(
-            order_id=order_id,
-            user_id=user_id,
-            applied_promotions=pricing["promotions_applied"],
-            applied_at=datetime.fromisoformat(new_order["created_at"]),
-        )
+    )
+    order_id = int(new_order["id"])
+    save_promotion_applications(
+        order_id=order_id,
+        user_id=user_id,
+        applied_promotions=pricing["promotions_applied"],
+        applied_at=datetime.fromisoformat(new_order["created_at"]),
+    )
 
-    with json_file_lock(users_path):
-        users = load_users()
-        user = next((entry for entry in users if int(entry.get("id", 0) or 0) == int(user_id)), None)
-        if user is not None:
-            user["balance"] = int(user.get("balance", 0) or 0) + totals["bonus_earned"] + pricing["promo_points"]
-            save_users(users)
-            g.current_user = user
-            g.current_user_id = user_id
-            g.current_user_loaded = True
+    user = apply_user_balance_delta(user_id, totals["bonus_earned"] + pricing["promo_points"])
+    if user is not None:
+        g.current_user = user
+        g.current_user_id = user_id
+        g.current_user_loaded = True
 
     session.pop("delivery_checkout_preview", None)
     order_url = url_for("order_detail", order_id=order_id, paid="1", delivery="1")

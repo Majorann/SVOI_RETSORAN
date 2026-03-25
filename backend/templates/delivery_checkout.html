@@ -1,5 +1,8 @@
 ﻿{% extends "base.html" %}
 {% block body_class %}page-delivery-checkout{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/payments.css') }}" />
+{% endblock %}
 {% block content %}
 <header class="top checkout-head">
   <div class="brand">

@@ -51,14 +51,14 @@ def _pick_random_items(items, limit):
 
 
 def index_route(
-    load_bookings,
+    list_user_bookings,
     load_promo_items,
     promo_items_to_news_cards,
     news_cards_fallback,
     load_menu_items,
     get_user_preparing_orders,
     list_active_order_statuses,
-    load_users,
+    get_user_by_id,
     popular_menu_limit,
 ):
     user_id = session.get("user_id")
@@ -77,13 +77,13 @@ def index_route(
     if not popular_menu:
         popular_menu = _pick_popular_items(all_menu_items, limit)
     if user_id:
-        bookings = [b for b in load_bookings() if b.get("user_id") == user_id]
+        bookings = list_user_bookings(user_id)
         preparing_orders = get_user_preparing_orders(user_id)
         order_statuses = list_active_order_statuses(user_id)
         order_status = order_statuses[0] if order_statuses else None
         user = getattr(g, "current_user", None)
         if not user or user.get("id") != user_id:
-            user = next((u for u in load_users() if u.get("id") == user_id), None)
+            user = get_user_by_id(user_id)
         points_balance = int((user or {}).get("balance", 0) or 0)
     else:
         bookings = []
@@ -114,12 +114,12 @@ def delivery_route():
     return render_template("placeholder.html", title="Доставка")
 
 
-def notifications_route(load_bookings, get_user_preparing_orders, load_promo_items, booking_duration_minutes):
+def notifications_route(list_user_bookings, get_user_preparing_orders, load_promo_items, booking_duration_minutes):
     user_id = session.get("user_id")
     bookings = []
     preparing_orders = []
     if user_id:
-        bookings = [b for b in load_bookings() if b.get("user_id") == user_id]
+        bookings = list_user_bookings(user_id)
         preparing_orders = get_user_preparing_orders(user_id)
     bookings_sorted = sorted(
         bookings,

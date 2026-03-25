@@ -53,7 +53,7 @@ def normalize_and_validate_expiry(value: str):
     return f"{month:02d}/{year:02d}", None
 
 
-def profile_route(load_users, load_bookings, booking_duration_minutes, is_admin_user_fn=None):
+def profile_route(get_user_by_id, list_user_bookings, booking_duration_minutes, is_admin_user_fn=None):
     user_id = session.get("user_id")
     if not user_id:
         return redirect(url_for("login", error="Войдите в аккаунт, чтобы открыть профиль."))
@@ -63,7 +63,7 @@ def profile_route(load_users, load_bookings, booking_duration_minutes, is_admin_
     card_added = (request.args.get("card_added") or "") == "1"
     user_record = getattr(g, "current_user", None)
     if not user_record or user_record.get("id") != user_id:
-        user_record = next((u for u in load_users() if u.get("id") == user_id), None)
+        user_record = get_user_by_id(user_id)
     if not user_record:
         # Avoid hard logout on a transient storage miss (e.g. temporary DB hiccup).
         if not user_name:
@@ -94,8 +94,7 @@ def profile_route(load_users, load_bookings, booking_duration_minutes, is_admin_
             is_admin = bool(is_admin_user_fn(user_id))
         except Exception:
             is_admin = False
-    bookings = load_bookings()
-    bookings = [b for b in bookings if b.get("user_id") == user_id]
+    bookings = list_user_bookings(user_id)
     return render_template(
         "profile.html",
         user=user,
@@ -109,7 +108,7 @@ def profile_route(load_users, load_bookings, booking_duration_minutes, is_admin_
     )
 
 
-def add_card_route(load_users, save_users, json_file_lock, users_path):
+def add_card_route(add_user_card):
     user_id = session.get("user_id")
     if not user_id:
         return redirect(url_for("login"))
@@ -131,35 +130,27 @@ def add_card_route(load_users, save_users, json_file_lock, users_path):
 
     brand = "MIR"
 
-    with json_file_lock(users_path):
-        users = load_users()
-        user_record = next((u for u in users if u.get("id") == user_id), None)
-        if not user_record:
-            session.clear()
-            return redirect(url_for("login", error="Сессия устарела. Войдите снова."))
-
-        cards = user_record.get("cards", [])
-        for card in cards:
-            card["active"] = False
-        cards.append(
-            {
-                "brand": brand,
-                "last4": digits[-4:],
-                "active": True,
-                "holder": holder,
-                "expiry": expiry or None,
-                "created_at": current_timestamp_value(),
-            }
-        )
-        user_record["cards"] = cards
-        save_users(users)
-        g.current_user = user_record
-        g.current_user_id = user_id
-        g.current_user_loaded = True
+    user_record = add_user_card(
+        user_id,
+        {
+            "brand": brand,
+            "last4": digits[-4:],
+            "active": True,
+            "holder": holder,
+            "expiry": expiry or None,
+            "created_at": current_timestamp_value(),
+        },
+    )
+    if not user_record:
+        session.clear()
+        return redirect(url_for("login", error="Сессия устарела. Войдите снова."))
+    g.current_user = user_record
+    g.current_user_id = user_id
+    g.current_user_loaded = True
     return redirect(url_for("profile", card_added="1"))
 
 
-def delete_card_route(load_users, save_users, json_file_lock, users_path):
+def delete_card_route(remove_user_card):
     user_id = session.get("user_id")
     if not user_id:
         return redirect(url_for("login"))
@@ -169,35 +160,14 @@ def delete_card_route(load_users, save_users, json_file_lock, users_path):
     if not created_at and not last4:
         return redirect(url_for("profile", error="Failed to identify card to delete."))
 
-    with json_file_lock(users_path):
-        users = load_users()
-        user_record = next((u for u in users if u.get("id") == user_id), None)
-        if not user_record:
-            session.clear()
-            return redirect(url_for("login", error="Сессия устарела. Войдите снова."))
-
-        cards = list(user_record.get("cards", []))
-        removed_index = None
-        for idx, card in enumerate(cards):
-            if created_at and card.get("created_at") == created_at:
-                removed_index = idx
-                break
-        if removed_index is None and last4:
-            for idx, card in enumerate(cards):
-                if card.get("last4") == last4:
-                    removed_index = idx
-                    break
-
-        if removed_index is None:
-            return redirect(url_for("profile", error="Карта не найдена."))
-
-        removed_card = cards.pop(removed_index)
-        if removed_card.get("active") and cards and not any(card.get("active") for card in cards):
-            cards[-1]["active"] = True
-
-        user_record["cards"] = cards
-        save_users(users)
-        g.current_user = user_record
-        g.current_user_id = user_id
-        g.current_user_loaded = True
+    removal_result = remove_user_card(user_id, created_at=created_at, last4=last4)
+    user_record = (removal_result or {}).get("user")
+    if user_record is None:
+        session.clear()
+        return redirect(url_for("login", error="Сессия устарела. Войдите снова."))
+    if not bool((removal_result or {}).get("removed")):
+        return redirect(url_for("profile", error="Карта не найдена."))
+    g.current_user = user_record
+    g.current_user_id = user_id
+    g.current_user_loaded = True
     return redirect(url_for("profile"))

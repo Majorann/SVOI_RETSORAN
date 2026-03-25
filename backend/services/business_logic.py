@@ -312,14 +312,12 @@ def build_order_status_timeline_value(order, now, order_status_steps, parse_iso_
     }
 
 
-def get_user_preparing_orders_value(user_id, load_orders_fn, build_timeline_fn):
-    orders = [
-        o for o in load_orders_fn()
-        if o.get("user_id") == user_id and not is_cancelled_order(o)
-    ]
+def get_user_preparing_orders_from_orders_value(orders, build_timeline_fn):
     now = current_time_value()
     active_orders = []
     for order in orders:
+        if not isinstance(order, dict) or is_cancelled_order(order):
+            continue
         timeline = build_timeline_fn(order, now)
         if timeline is None:
             continue
@@ -377,12 +375,13 @@ def get_user_preparing_orders_value(user_id, load_orders_fn, build_timeline_fn):
     return active_orders
 
 
-def list_active_order_statuses_value(user_id, load_orders_fn, build_timeline_fn):
+def get_user_preparing_orders_value(user_id, load_orders_fn, build_timeline_fn):
+    orders = [o for o in load_orders_fn() if o.get("user_id") == user_id]
+    return get_user_preparing_orders_from_orders_value(orders, build_timeline_fn)
+
+
+def list_active_order_statuses_from_orders_value(orders, build_timeline_fn):
     now = current_time_value()
-    orders = [
-        o for o in load_orders_fn()
-        if o.get("user_id") == user_id and not is_cancelled_order(o)
-    ]
     active = []
     phase_priority = {
         "served": 0,
@@ -395,6 +394,8 @@ def list_active_order_statuses_value(user_id, load_orders_fn, build_timeline_fn)
     }
 
     for order in orders:
+        if not isinstance(order, dict) or is_cancelled_order(order):
+            continue
         timeline = build_timeline_fn(order, now)
         if timeline is None:
             continue
@@ -415,13 +416,17 @@ def list_active_order_statuses_value(user_id, load_orders_fn, build_timeline_fn)
     return active
 
 
+def list_active_order_statuses_value(user_id, load_orders_fn, build_timeline_fn):
+    orders = [o for o in load_orders_fn() if o.get("user_id") == user_id]
+    return list_active_order_statuses_from_orders_value(orders, build_timeline_fn)
+
+
 def latest_active_order_status_value(user_id, list_active_order_statuses_fn):
     active = list_active_order_statuses_fn(user_id)
     return active[0] if active else None
 
 
-def latest_user_booking_status_value(user_id, load_bookings_raw_fn, parse_datetime_fn, booking_duration_minutes):
-    bookings = [b for b in load_bookings_raw_fn() if b.get("user_id") == user_id]
+def latest_user_booking_status_from_bookings_value(bookings, parse_datetime_fn, booking_duration_minutes):
     if not bookings:
         return {"state": "no_booking", "booking": None}
     bookings.sort(
@@ -436,6 +441,11 @@ def latest_user_booking_status_value(user_id, load_bookings_raw_fn, parse_dateti
     if current_dt is not None and booking_dt + timedelta(minutes=booking_duration_minutes) <= current_dt:
         return {"state": "expired_booking", "booking": booking}
     return {"state": "active", "booking": booking}
+
+
+def latest_user_booking_status_value(user_id, load_bookings_raw_fn, parse_datetime_fn, booking_duration_minutes):
+    bookings = [b for b in load_bookings_raw_fn() if b.get("user_id") == user_id]
+    return latest_user_booking_status_from_bookings_value(bookings, parse_datetime_fn, booking_duration_minutes)
 
 
 def resolve_order_items_value(raw_items_json, load_menu_items_fn):

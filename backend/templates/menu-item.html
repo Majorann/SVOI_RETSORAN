@@ -1,8 +1,18 @@
 ﻿{% extends "base.html" %}
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/menu-page.css') }}" />
+{% endblock %}
 {% block content %}
 <section class="detail">
   <a class="back" href="{{ url_for('index') }}">← Назад</a>
-  <div class="detail__media" style="background-image: url('{{ url_for('static', filename=item.photo) }}');">
+  <div class="detail__media">
+    <img
+      class="detail__image"
+      src="{{ url_for('static', filename=item.photo) }}"
+      alt="{{ item.name }}"
+      decoding="async"
+      fetchpriority="high"
+    />
     <span class="badge">{{ item.type }}</span>
   </div>
   <div class="detail__content">

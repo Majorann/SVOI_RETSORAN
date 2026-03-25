@@ -4,7 +4,7 @@ Restaurant demo app (Flask).
 - Bookings/users stored in JSON files
 """
 
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, send_from_directory, url_for
 from datetime import datetime, timedelta
 from pathlib import Path
 import os
@@ -82,10 +82,13 @@ from services.business_logic import (
     build_order_status_timeline_value,
     compute_serve_datetime_value,
     current_time_value,
+    get_user_preparing_orders_from_orders_value,
     get_user_preparing_orders_value,
     latest_active_order_status_value,
     latest_user_booking_entry,
+    latest_user_booking_status_from_bookings_value,
     latest_user_booking_status_value,
+    list_active_order_statuses_from_orders_value,
     list_active_order_statuses_value,
     order_cooking_window_value,
     overlaps_booking_window,
@@ -135,10 +138,14 @@ def _env_int_early(name: str, default: int) -> int:
         return default
 
 
-POSTGRES_STARTUP_RETRIES = max(1, _env_int_early("POSTGRES_STARTUP_RETRIES", 4))
+_IS_HF_SPACE_EARLY = bool(os.getenv("SPACE_ID") or os.getenv("HF_SPACE_ID"))
+POSTGRES_STARTUP_RETRIES = max(
+    1,
+    _env_int_early("POSTGRES_STARTUP_RETRIES", 2 if _IS_HF_SPACE_EARLY else 4),
+)
 POSTGRES_STARTUP_RETRY_DELAY_SECONDS = max(
     1,
-    _env_int_early("POSTGRES_STARTUP_RETRY_DELAY_SECONDS", 3),
+    _env_int_early("POSTGRES_STARTUP_RETRY_DELAY_SECONDS", 2 if _IS_HF_SPACE_EARLY else 3),
 )
 
 
@@ -161,6 +168,13 @@ def _activate_postgres_storage():
         raise RuntimeError("DATABASE_URL is set, but postgres storage is unavailable")
 
     last_error = None
+    print(
+        "[startup] initializing postgres storage retries={0} delay={1}s".format(
+            POSTGRES_STARTUP_RETRIES,
+            POSTGRES_STARTUP_RETRY_DELAY_SECONDS,
+        ),
+        flush=True,
+    )
     for attempt in range(POSTGRES_STARTUP_RETRIES):
         try:
             # Neon may need a few seconds to wake up on a cold start.
@@ -183,6 +197,8 @@ def _activate_postgres_storage():
 
     if last_error is not None:
         raise RuntimeError(f"Postgres connect failed during startup: {last_error}") from last_error
+
+    print("[startup] postgres storage initialized", flush=True)
 
     store_load_bookings = _pg_store_module.load_bookings
     store_load_bookings_raw = _pg_store_module.load_bookings_raw
@@ -328,7 +344,7 @@ SESSION_DEBUG_LOG_PATH = Path(
     env_str("SESSION_DEBUG_LOG_PATH", str(DATA_DIR / "session_debug.jsonl"))
 )
 _SESSION_DEBUG_LOCK = threading.RLock()
-DB_KEEPALIVE_ENABLED = env_bool("DB_KEEPALIVE_ENABLED", True)
+DB_KEEPALIVE_ENABLED = env_bool("DB_KEEPALIVE_ENABLED", not is_hf_space)
 DB_KEEPALIVE_INTERVAL_SECONDS = max(60, env_int("DB_KEEPALIVE_INTERVAL_SECONDS", 600))
 _DB_KEEPALIVE_STARTED = False
 _DB_KEEPALIVE_LOCK = threading.Lock()
@@ -336,6 +352,7 @@ DEBUG_STORAGE_ENABLED = env_bool("DEBUG_STORAGE_ENABLED", False)
 MENU_CACHE_ENABLED = env_bool("MENU_CACHE_ENABLED", True)
 MENU_CACHE_TTL_SECONDS = max(30, env_int("MENU_CACHE_TTL_SECONDS", 600))
 MENU_CACHE_KEY = env_str("MENU_CACHE_KEY", "menu:items:v1")
+CONTENT_AUTOSYNC_ON_STARTUP = env_bool("CONTENT_AUTOSYNC_ON_STARTUP", not is_hf_space)
 
 print(
     "[storage] backend={0} users={1} bookings={2} orders={3} cookie_secure={4} cookie_samesite={5} cookie_partitioned={6} login_debug={7} session_debug={8} auth_session_cookie={9}".format(
@@ -392,19 +409,23 @@ menu_content = MenuContentService(
     redis_url=_REDIS_URL,
 )
 if ACTIVE_STORAGE == "postgres":
+    menu_content.verify_storage_readiness()
+if ACTIVE_STORAGE == "postgres" and CONTENT_AUTOSYNC_ON_STARTUP:
     try:
         sync_summary = menu_content.sync_host_content_to_storage()
         print(
-            "[storage] host autosync menu={0} deleted_menu={1} promotions={2} deleted_promotions={3} reklama={4}".format(
+            "[storage] host autosync menu={0} disabled_menu={1} promotions={2} disabled_promotions={3} reklama={4}".format(
                 sync_summary.get("menu_items_synced", 0),
-                sync_summary.get("menu_items_deleted", 0),
+                sync_summary.get("menu_items_disabled", 0),
                 sync_summary.get("promotions_synced", 0),
-                sync_summary.get("promotions_deleted", 0),
+                sync_summary.get("promotions_disabled", 0),
                 sync_summary.get("reklama_found", 0),
             )
         )
     except Exception as exc:
         print(f"[storage] host autosync failed ({exc})")
+elif ACTIVE_STORAGE == "postgres":
+    print("[storage] host autosync skipped on startup")
 admin_service = None
 if AdminService is not None and create_admin_blueprint is not None:
     admin_service = AdminService(
@@ -422,6 +443,22 @@ load_orders = storage.load_orders
 save_orders = storage.save_orders
 load_users = storage.load_users
 save_users = storage.save_users
+get_user_by_id = storage.get_user_by_id
+get_user_by_phone = storage.get_user_by_phone
+list_user_orders = storage.list_user_orders
+get_user_order = storage.get_user_order
+list_user_bookings = storage.list_user_bookings
+get_latest_user_booking = storage.get_latest_user_booking
+create_user = storage.create_user
+update_user_password_hash = storage.update_user_password_hash
+add_user_card = storage.add_user_card
+remove_user_card = storage.remove_user_card
+list_reserved_table_ids = storage.list_reserved_table_ids
+create_booking_if_available = storage.create_booking_if_available
+cancel_user_booking = storage.cancel_user_booking
+cancel_booking_with_orders = storage.cancel_booking_with_orders
+create_order = storage.create_order
+apply_user_balance_delta = storage.apply_user_balance_delta
 next_user_id = storage.next_user_id
 next_order_id = storage.next_order_id
 json_file_lock = storage.json_file_lock
@@ -465,17 +502,31 @@ def start_db_keepalive():
         )
 
 
+@app.route("/robots.txt")
+def robots_txt():
+    return send_from_directory(app.static_folder, "robots.txt")
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory(
+        Path(app.static_folder) / "img",
+        "bell.png",
+        mimetype="image/png",
+    )
+
+
 @app.route("/")
 def index():
     return index_route(
-        load_bookings,
+        list_user_bookings,
         load_promo_items,
         promo_items_to_news_cards,
         NEWS_CARDS,
         load_menu_items,
         get_user_preparing_orders,
         list_active_order_statuses,
-        load_users,
+        get_user_by_id,
         POPULAR_MENU_LIMIT,
     )
 
@@ -590,12 +641,12 @@ def debug_session():
 
 @app.route("/reserve")
 def reserve():
-    return reserve_route(load_bookings, parse_datetime, overlaps_booking, TABLES, WALLS)
+    return reserve_route(list_reserved_table_ids, TABLES, WALLS)
 
 
 @app.get("/availability")
 def availability():
-    return availability_route(load_bookings, parse_datetime, overlaps_booking)
+    return availability_route(list_reserved_table_ids, parse_datetime)
 
 
 @app.route("/points")
@@ -606,8 +657,8 @@ def points():
 @app.route("/profile")
 def profile():
     return profile_route(
-        load_users,
-        load_bookings,
+        get_user_by_id,
+        list_user_bookings,
         BOOKING_DURATION_MINUTES,
         is_admin_user_fn=(admin_service.is_admin_user if admin_service is not None else None),
     )
@@ -620,25 +671,20 @@ def delivery():
 
 @app.get("/delivery/checkout")
 def delivery_checkout():
-    return delivery_checkout_route(load_users)
+    return delivery_checkout_route(get_user_by_id)
 
 
 @app.post("/delivery/confirm")
 def delivery_confirm():
     return delivery_confirm_route(
-        storage_write_lock,
-        ORDERS_PATH,
-        load_orders,
-        next_order_id,
-        save_orders,
-        USERS_PATH,
-        load_users,
-        save_users,
+        create_order,
+        apply_user_balance_delta,
         verify_checkout_preview_token,
         load_promo_application_counts,
         save_promotion_applications,
         load_promo_items,
         load_menu_items,
+        list_user_orders,
     )
 
 
@@ -646,7 +692,7 @@ def delivery_confirm():
 def delivery_payment():
     return delivery_payment_route(
         resolve_order_items,
-        load_orders,
+        list_user_orders,
         load_promo_application_counts,
         load_promo_items,
         load_menu_items,
@@ -661,17 +707,15 @@ def delivery_payment_page():
 
 @app.route("/notifications")
 def notifications():
-    return notifications_route(load_bookings, get_user_preparing_orders, load_promo_items, BOOKING_DURATION_MINUTES)
+    return notifications_route(list_user_bookings, get_user_preparing_orders, load_promo_items, BOOKING_DURATION_MINUTES)
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     return login_route(
-        load_users,
-        save_users,
+        get_user_by_phone,
+        update_user_password_hash,
         verify_and_upgrade_password,
-        storage_write_lock,
-        USERS_PATH,
         debug_login_failure,
         log_session_debug,
     )
@@ -680,12 +724,9 @@ def login():
 @app.route("/register", methods=["GET", "POST"])
 def register():
     return register_route(
-        load_users,
-        save_users,
-        next_user_id,
+        get_user_by_phone,
+        create_user,
         hash_password,
-        storage_write_lock,
-        USERS_PATH,
     )
 
 @app.route("/logout")
@@ -714,12 +755,12 @@ def inject_notifications_count():
 
 @app.route("/orders")
 def orders():
-    return orders_route(load_orders)
+    return orders_route(list_user_orders)
 
 
 @app.route("/orders/<int:order_id>")
 def order_detail(order_id: int):
-    return order_detail_route(order_id, load_orders)
+    return order_detail_route(order_id, get_user_order)
 
 
 @app.route("/reviews")
@@ -741,9 +782,8 @@ def menu():
 def checkout():
     return checkout_route(
         latest_user_booking_status,
-        parse_datetime,
         BOOKING_DURATION_MINUTES,
-        load_users,
+        get_user_by_id,
         load_menu_items,
     )
 
@@ -751,11 +791,11 @@ def checkout():
 @app.post("/payment")
 def payment():
     return payment_route(
-        load_users,
+        get_user_by_id,
         latest_user_booking_status,
         resolve_order_items,
         parse_serving_option,
-        load_orders,
+        list_user_orders,
         load_promo_application_counts,
         load_promo_items,
         load_menu_items,
@@ -766,9 +806,9 @@ def payment():
 @app.post("/api/checkout/promo-preview")
 def checkout_promo_preview():
     return checkout_promo_preview_route(
-        load_users,
+        get_user_by_id,
         resolve_order_items,
-        load_orders,
+        list_user_orders,
         load_promo_application_counts,
         load_promo_items,
         load_menu_items,
@@ -779,19 +819,15 @@ def checkout_promo_preview():
 def payment_confirm():
     return payment_confirm_route(
         latest_user_booking_status,
-        load_users,
-        storage_write_lock,
-        ORDERS_PATH,
-        load_orders,
-        next_order_id,
-        save_orders,
-        USERS_PATH,
-        save_users,
+        get_user_by_id,
+        create_order,
+        apply_user_balance_delta,
         verify_checkout_preview_token,
         load_promo_application_counts,
         save_promotion_applications,
         load_promo_items,
         load_menu_items,
+        list_user_orders,
     )
 
 
@@ -799,12 +835,8 @@ def payment_confirm():
 @app.post("/book")
 def book_table():
     return book_table_route(
-        load_bookings,
-        save_bookings,
-        overlaps_booking,
+        create_booking_if_available,
         parse_datetime,
-        storage_write_lock,
-        BOOKINGS_PATH,
     )
 
 
@@ -817,10 +849,17 @@ def overlaps_booking(booking, selected_dt):
 
 
 def latest_user_booking(user_id):
+    if ACTIVE_STORAGE == "postgres":
+        return get_latest_user_booking(user_id)
     return latest_user_booking_entry(user_id, load_bookings)
 
 
 def get_user_preparing_orders(user_id):
+    if ACTIVE_STORAGE == "postgres":
+        return get_user_preparing_orders_from_orders_value(
+            list_user_orders(user_id),
+            build_order_status_timeline,
+        )
     return get_user_preparing_orders_value(user_id, load_orders, build_order_status_timeline)
 
 
@@ -851,10 +890,21 @@ def latest_active_order_status(user_id):
 
 
 def list_active_order_statuses(user_id):
+    if ACTIVE_STORAGE == "postgres":
+        return list_active_order_statuses_from_orders_value(
+            list_user_orders(user_id),
+            build_order_status_timeline,
+        )
     return list_active_order_statuses_value(user_id, load_orders, build_order_status_timeline)
 
 
 def latest_user_booking_status(user_id):
+    if ACTIVE_STORAGE == "postgres":
+        return latest_user_booking_status_from_bookings_value(
+            list_user_bookings(user_id, include_expired=True),
+            parse_datetime,
+            BOOKING_DURATION_MINUTES,
+        )
     return latest_user_booking_status_value(
         user_id,
         load_bookings_raw,
@@ -904,6 +954,8 @@ auth_session = AuthSessionService(
     session_debug_lock=_SESSION_DEBUG_LOCK,
     load_users=load_users,
     load_bookings=load_bookings,
+    get_user_by_id=get_user_by_id,
+    list_user_bookings=list_user_bookings,
     get_user_preparing_orders=get_user_preparing_orders,
 )
 debug_login_failure = auth_session.debug_login_failure
@@ -925,25 +977,17 @@ def release_table():
 
 @app.post("/bookings/cancel")
 def cancel_booking():
-    return cancel_booking_with_orders_route(
-        load_bookings,
-        save_bookings,
-        storage_write_lock,
-        BOOKINGS_PATH,
-        load_orders,
-        save_orders,
-        ORDERS_PATH,
-    )
+    return cancel_booking_with_orders_route(cancel_booking_with_orders)
 
 
 @app.post("/cards/add")
 def add_card():
-    return add_card_route(load_users, save_users, storage_write_lock, USERS_PATH)
+    return add_card_route(add_user_card)
 
 
 @app.post("/cards/delete")
 def delete_card():
-    return delete_card_route(load_users, save_users, storage_write_lock, USERS_PATH)
+    return delete_card_route(remove_user_card)
 
 
 start_db_keepalive()

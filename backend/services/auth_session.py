@@ -24,6 +24,8 @@ class AuthSessionService:
         session_debug_lock,
         load_users,
         load_bookings,
+        get_user_by_id=None,
+        list_user_bookings=None,
         get_user_preparing_orders,
     ):
         self.app = app
@@ -40,6 +42,8 @@ class AuthSessionService:
         self.session_debug_lock = session_debug_lock
         self.load_users = load_users
         self.load_bookings = load_bookings
+        self.get_user_by_id = get_user_by_id
+        self.list_user_bookings = list_user_bookings
         self.get_user_preparing_orders = get_user_preparing_orders
 
     def _load_users_cached(self):
@@ -278,6 +282,15 @@ class AuthSessionService:
         if getattr(g, "current_user_loaded", False) and getattr(g, "current_user_id", None) == normalized_user_id:
             return getattr(g, "current_user", None)
 
+        if callable(self.get_user_by_id):
+            cache_key = f"_auth_user_{normalized_user_id}"
+            if hasattr(g, cache_key):
+                user = getattr(g, cache_key)
+            else:
+                user = self.get_user_by_id(normalized_user_id)
+                setattr(g, cache_key, user)
+            self._set_request_user(user)
+            return user
         user = next((u for u in self._load_users_cached() if u.get("id") == normalized_user_id), None)
         self._set_request_user(user)
         return user
@@ -293,7 +306,10 @@ class AuthSessionService:
             g.notification_preparing_orders = []
             return g.notification_bookings, g.notification_preparing_orders
 
-        bookings = [b for b in self._load_bookings_cached() if b.get("user_id") == user_id]
+        if callable(self.list_user_bookings):
+            bookings = self.list_user_bookings(user_id)
+        else:
+            bookings = [b for b in self._load_bookings_cached() if b.get("user_id") == user_id]
         preparing_orders = self.get_user_preparing_orders(user_id)
         g.notifications_loaded = True
         g.notification_bookings = bookings

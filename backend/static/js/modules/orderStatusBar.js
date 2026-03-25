@@ -152,6 +152,8 @@ const PROGRESS_RANGES = {
 const TABLO_CHARS = "АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ#_";
 const PHRASE_HOLD_MIN_MS = 9000;
 const PHRASE_HOLD_MAX_MS = 14000;
+const ORDER_STATUS_POLL_INTERVAL_MS = 5000;
+const ORDER_STATUS_POLL_BACKOFF_MAX_MS = 30000;
 
 const randomInt = (min, max) =>
   Math.floor(Math.random() * (max - min + 1)) + min;
@@ -242,6 +244,7 @@ const setupOrderStatusBar = () => {
   let timerId = null;
   let pollId = null;
   let pollInFlight = false;
+  let pollDelayMs = ORDER_STATUS_POLL_INTERVAL_MS;
   let statusesSnapshotAtMs = Date.now();
   let lastPrimarySignature = "";
   let statusAnimationToken = 0;
@@ -534,7 +537,7 @@ const setupOrderStatusBar = () => {
       timerId = null;
     }
     if (pollId) {
-      window.clearInterval(pollId);
+      window.clearTimeout(pollId);
       pollId = null;
     }
     clearStatusTypingTimeout();
@@ -553,25 +556,74 @@ const setupOrderStatusBar = () => {
       .join("");
   };
 
+  const stopRenderTimer = () => {
+    if (timerId) {
+      window.clearInterval(timerId);
+      timerId = null;
+    }
+  };
+
+  const ensureRenderTimer = () => {
+    if (timerId || document.hidden) return;
+    timerId = window.setInterval(() => {
+      render();
+    }, 1000);
+  };
+
+  const stopPolling = () => {
+    if (pollId) {
+      window.clearTimeout(pollId);
+      pollId = null;
+    }
+  };
+
+  const scheduleNextPoll = (delayMs = pollDelayMs) => {
+    stopPolling();
+    if (document.hidden) return;
+    pollId = window.setTimeout(() => {
+      void fetchOrderStatuses();
+    }, delayMs);
+  };
+
   const fetchOrderStatuses = async () => {
-    if (pollInFlight) return;
+    if (document.hidden) {
+      stopPolling();
+      return;
+    }
+    if (pollInFlight) {
+      scheduleNextPoll();
+      return;
+    }
     pollInFlight = true;
+    let nextDelayMs = ORDER_STATUS_POLL_INTERVAL_MS;
     try {
       const response = await fetch("/api/order-statuses", {
         method: "GET",
         headers: { "X-Requested-With": "XMLHttpRequest" },
         cache: "no-store",
       });
-      if (!response.ok) return;
+      if (!response.ok) {
+        nextDelayMs = Math.min(pollDelayMs * 2, ORDER_STATUS_POLL_BACKOFF_MAX_MS);
+        return;
+      }
       const payload = await response.json().catch(() => null);
-      if (!payload || !Array.isArray(payload.order_statuses)) return;
+      if (!payload || !Array.isArray(payload.order_statuses)) {
+        nextDelayMs = Math.min(pollDelayMs * 2, ORDER_STATUS_POLL_BACKOFF_MAX_MS);
+        return;
+      }
       initialOrders = payload.order_statuses;
       statusesSnapshotAtMs = Date.now();
+      pollDelayMs = ORDER_STATUS_POLL_INTERVAL_MS;
       render();
     } catch {
+      nextDelayMs = Math.min(pollDelayMs * 2, ORDER_STATUS_POLL_BACKOFF_MAX_MS);
       // Ignore transient polling errors; next tick will retry.
     } finally {
       pollInFlight = false;
+      pollDelayMs = nextDelayMs;
+      if (!document.hidden) {
+        scheduleNextPoll(nextDelayMs);
+      }
     }
   };
 
@@ -668,20 +720,19 @@ const setupOrderStatusBar = () => {
   if (!render()) return;
 
   setExpanded(false);
-  timerId = window.setInterval(() => {
-    render();
-  }, 1000);
-
-  // Keep status timeline in sync with backend without page reload.
-  pollId = window.setInterval(() => {
-    void fetchOrderStatuses();
-  }, 5000);
+  ensureRenderTimer();
+  scheduleNextPoll(ORDER_STATUS_POLL_INTERVAL_MS);
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) {
-      render();
-      void fetchOrderStatuses();
+    if (document.hidden) {
+      stopRenderTimer();
+      stopPolling();
+      return;
     }
+    render();
+    ensureRenderTimer();
+    pollDelayMs = ORDER_STATUS_POLL_INTERVAL_MS;
+    void fetchOrderStatuses();
   });
 };
 

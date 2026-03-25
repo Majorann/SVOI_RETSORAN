@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block body_class %}{% if delivery_mode %}page-menu page-delivery-menu{% else %}page-menu{% endif %}{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/menu-page.css') }}" />
+{% endblock %}
 {% block content %}
 <div class="menu-shell">
 <header class="top menu-top">
@@ -86,8 +89,16 @@
   <div class="menu-viewport" id="menuViewport">
   <div class="menu" id="menuList">
     {% for item in items %}
-      <article class="menu-card menu-card--menu" data-type="{{ item.type }}" data-price="{{ item.price }}" data-popularity="{{ item.popularity or item.orders_count or 0 }}" style="--dish-photo: url('{{ url_for('static', filename=item.photo) }}');">
-        <div class="menu-card__media" style="background-image: var(--dish-photo);">
+      <article class="menu-card menu-card--menu" data-type="{{ item.type }}" data-price="{{ item.price }}" data-popularity="{{ item.popularity or item.orders_count or 0 }}">
+        <div class="menu-card__media">
+          <img
+            class="menu-card__image"
+            src="{{ url_for('static', filename=item.photo) }}"
+            alt="{{ item.name }}"
+            loading="{% if loop.index <= 4 %}eager{% else %}lazy{% endif %}"
+            decoding="async"
+            {% if loop.index <= 4 %}fetchpriority="high"{% endif %}
+          />
           {% if item.portion_label %}
           <span class="menu-card__portion menu-card__portion--media"{% if item.portion_tone_rgb %} style="--portion-dot-rgb: {{ item.portion_tone_rgb }};"{% endif %}>{{ item.portion_label }}</span>
           {% endif %}
