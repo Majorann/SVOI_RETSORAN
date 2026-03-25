@@ -195,7 +195,15 @@
   <div class="menu">
     {% for dish in menu %}
       <a class="menu-card" href="{{ url_for('menu_item', item_id=dish.id) }}">
-        <div class="menu-card__media" style='background-image: url("{{ url_for("static", filename=dish.photo) }}");'></div>
+        <div class="menu-card__media">
+          <img
+            class="menu-card__image"
+            src="{{ url_for('static', filename=dish.photo) }}"
+            alt="{{ dish.name }}"
+            loading="lazy"
+            decoding="async"
+          />
+        </div>
         <div class="menu-card__content">
           <div class="menu-card__title-row">
             <h3>{{ dish.name }}</h3>

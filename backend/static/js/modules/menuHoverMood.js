@@ -4,7 +4,7 @@ const setupMenuHoverMood = () => {
   if (!cards.length) return;
   const body = document.body;
   const colorCache = new Map();
-  const fallbackRgb = "112, 238, 255";
+  const fallbackRgb = "218, 119, 86";
   let activeMoodId = 0;
   let clearMoodTimer = null;
 
@@ -86,8 +86,9 @@ const setupMenuHoverMood = () => {
   const activateMood = async (card) => {
     activeMoodId += 1;
     const moodId = activeMoodId;
-    const photo = getComputedStyle(card).getPropertyValue("--dish-photo").trim();
-    const photoUrl = extractUrl(photo);
+    const imageNode = card.querySelector(".menu-card__image");
+    const inlinePhoto = getComputedStyle(card).getPropertyValue("--dish-photo").trim();
+    const photoUrl = imageNode?.currentSrc || imageNode?.getAttribute("src") || extractUrl(inlinePhoto);
     const rgb = await colorFromImage(photoUrl);
     if (moodId !== activeMoodId) return;
     applyMood(rgb);
@@ -118,4 +119,3 @@ const setupMenuHoverMood = () => {
 };
 
 export { setupMenuHoverMood };
-

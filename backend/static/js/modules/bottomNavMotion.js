@@ -74,15 +74,9 @@
     item.addEventListener("click", (event) => {
       const isMainClick = event.button === 0;
       const hasModifier = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
-      const href = item.getAttribute("href");
-      if (!isMainClick || hasModifier || !href) return;
-      event.preventDefault();
+      if (!isMainClick || hasModifier) return;
       setActive(item);
       pulseNavItem(item);
-      // Keep a short pulse without making navigation feel delayed.
-      window.setTimeout(() => {
-        window.location.href = href;
-      }, 120);
     });
   });
 

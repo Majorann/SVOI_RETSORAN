@@ -81,6 +81,7 @@ const setupTableTooltip = () => {
 
   let selectedTableId = null;
   let selectedTableLabel = "";
+  let selectedTableNode = null;
   let isDateValid = true;
 
   const clearHoveredTables = (exceptTable = null) => {
@@ -213,23 +214,61 @@ const setupTableTooltip = () => {
   const closeBookingPanel = () => {
     bookingPanel?.classList.remove("is-open");
     bookingPanel?.setAttribute("aria-hidden", "true");
+    bookingPanel?.style.removeProperty("left");
+    bookingPanel?.style.removeProperty("top");
+    bookingPanel?.style.removeProperty("right");
+    bookingPanel?.style.removeProperty("bottom");
+    bookingPanel?.style.removeProperty("transform");
     hallMap?.classList.remove("is-blurred-strong");
+    hallMap?.classList.remove("is-blurred");
     hallMap?.classList.remove("is-booking");
     hallMap?.classList.remove("is-typing");
+    neon?.classList.remove("is-visible");
+    neon?.classList.remove("is-red");
     clearHoveredTables();
     if (!dateTimeSheet?.classList.contains("is-open")) setBackdropVisible(false);
     selectedTableId = null;
     selectedTableLabel = "";
+    selectedTableNode = null;
     syncBookingSummary();
   };
 
-  const openBookingPanel = () => {
+  const positionNeonUnderTable = (tableNode, isFree = true) => {
+    if (!neon || !hallMap || !tableNode || !isFree) {
+      neon?.classList.remove("is-visible");
+      neon?.classList.remove("is-red");
+      return;
+    }
+
+    const neonRect = neon.getBoundingClientRect();
+    const rect = tableNode.getBoundingClientRect();
+    const x = ((rect.left + rect.width / 2 - neonRect.left) / neonRect.width) * 100;
+    const y = ((rect.top + rect.height / 2 - neonRect.top) / neonRect.height) * 100;
+    neon.style.setProperty("--neon-x", `${x}%`);
+    neon.style.setProperty("--neon-y", `${y}%`);
+    neon.classList.remove("is-red");
+    neon.classList.add("is-visible");
+  };
+
+  const positionBookingPanel = (tableNode = selectedTableNode) => {
+    if (!bookingPanel) return;
+    bookingPanel.style.removeProperty("left");
+    bookingPanel.style.removeProperty("top");
+    bookingPanel.style.removeProperty("right");
+    bookingPanel.style.removeProperty("bottom");
+    bookingPanel.style.removeProperty("transform");
+  };
+
+  const openBookingPanel = (tableNode = selectedTableNode) => {
     closeDateTimeSheet();
     bookingPanel?.classList.add("is-open");
     bookingPanel?.setAttribute("aria-hidden", "false");
+    hallMap?.classList.add("is-blurred");
     hallMap?.classList.add("is-blurred-strong");
     hallMap?.classList.add("is-booking");
     setBackdropVisible(isMobileViewport());
+    selectedTableNode = tableNode || selectedTableNode;
+    positionBookingPanel(selectedTableNode);
   };
 
   const updateDateTimeLimits = () => {
@@ -408,19 +447,10 @@ const setupTableTooltip = () => {
     const windowSide = table.dataset.window;
     const isFreeNow = () => table.classList.contains("table--free");
 
-    table.addEventListener("mouseenter", () => {
+    const handleHoverEnter = () => {
       if (isMobileViewport()) return;
       const isFree = isFreeNow();
-      if (neon && hallMap) {
-        const mapRect = hallMap.getBoundingClientRect();
-        const rect = table.getBoundingClientRect();
-        const x = ((rect.left + rect.width / 2 - mapRect.left) / mapRect.width) * 100;
-        const y = ((rect.top + rect.height / 2 - mapRect.top) / mapRect.height) * 100;
-        neon.style.setProperty("--neon-x", `${x}%`);
-        neon.style.setProperty("--neon-y", `${y}%`);
-        neon.classList.toggle("is-red", !isFree);
-        neon.classList.add("is-visible");
-      }
+      positionNeonUnderTable(table, isFree);
       tooltip.innerHTML = `
         <strong>${label}</strong><br />
         Мест: ${seats}<br />
@@ -431,7 +461,23 @@ const setupTableTooltip = () => {
         hallMap?.classList.add("is-blurred");
         table.classList.add("table--hovered");
       }
-    });
+    };
+
+    const handleHoverLeave = () => {
+      if (isMobileViewport()) return;
+      tooltip.classList.remove("is-visible");
+      if (!bookingPanel?.classList.contains("is-open")) {
+        hallMap?.classList.remove("is-blurred");
+      }
+      table.classList.remove("table--hovered");
+      if (selectedTableNode !== table || !bookingPanel?.classList.contains("is-open")) {
+        neon?.classList.remove("is-visible");
+        neon?.classList.remove("is-red");
+      }
+    };
+
+    table.addEventListener("mouseenter", handleHoverEnter);
+    table.addEventListener("pointerenter", handleHoverEnter);
 
     table.addEventListener("mousemove", (event) => {
       if (isMobileViewport()) return;
@@ -439,25 +485,22 @@ const setupTableTooltip = () => {
       tooltip.style.top = `${event.clientY - 18}px`;
     });
 
-    table.addEventListener("mouseleave", () => {
-      if (isMobileViewport()) return;
-      tooltip.classList.remove("is-visible");
-      hallMap?.classList.remove("is-blurred");
-      table.classList.remove("table--hovered");
-      neon?.classList.remove("is-visible");
-    });
+    table.addEventListener("mouseleave", handleHoverLeave);
+    table.addEventListener("pointerleave", handleHoverLeave);
 
     table.addEventListener("click", () => {
       if (!isFreeNow()) return;
       clearHoveredTables(table);
       selectedTableId = table.dataset.id;
       selectedTableLabel = table.dataset.label || table.dataset.id;
+      selectedTableNode = table;
       bookingTableId.textContent = table.querySelector(".table__top")?.textContent || "";
       bookingTableSeats.textContent = `${seats} места`;
       bookingInfo.textContent = `Столик у окна: ${windowSide}`;
-      openBookingPanel();
+      openBookingPanel(table);
       tooltip.classList.remove("is-visible");
       table.classList.add("table--hovered");
+      positionNeonUnderTable(table, true);
       updateDateTimeLimits();
       syncBookingSummary();
       refreshAvailability();
@@ -643,7 +686,11 @@ const setupTableTooltip = () => {
     if (!isMobileViewport()) {
       closeDateTimeSheet();
       setBackdropVisible(false);
+      if (bookingPanel?.classList.contains("is-open")) {
+        window.requestAnimationFrame(() => positionBookingPanel(selectedTableNode));
+      }
     } else if (bookingPanel?.classList.contains("is-open") || dateTimeSheet?.classList.contains("is-open")) {
+      positionBookingPanel(null);
       setBackdropVisible(true);
     }
   });
