@@ -28,16 +28,6 @@ const setupCheckoutPage = ({
   }
 
   const commentStorageKey = "checkout_comment";
-  const menuCatalogNode = document.getElementById("menuCatalogJson");
-  const menuCatalog = (() => {
-    try {
-      const parsed = JSON.parse(menuCatalogNode?.textContent || "[]");
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  })();
-  const menuById = new Map(menuCatalog.map((item) => [Number(item.id), item]));
   const goToPaymentDefaultText = goToPayment?.textContent?.trim() || "Перейти к оплате";
   const goToPaymentInitiallyDisabled = Boolean(goToPayment?.disabled);
   let promoPreviewAbortController = null;
@@ -160,14 +150,13 @@ const setupCheckoutPage = ({
 
   const normalizeCheckoutItem = (item) => {
     const id = Number(item.id);
-    const fromCatalog = menuById.get(id) || {};
     return {
       ...item,
       id,
-      name: item.name || fromCatalog.name || "Позиция",
-      price: Number(item.price) || Number(fromCatalog.price) || 0,
+      name: item.name || "Позиция",
+      price: Number(item.price) || 0,
       qty: Number(item.qty) || 0,
-      photo: item.photo || fromCatalog.photo || "",
+      photo: item.photo || "",
     };
   };
 

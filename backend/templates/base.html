@@ -22,7 +22,7 @@
     <script>
       window.__SESSION_USER_ID = {{ current_user_id|tojson }};
     </script>
-    <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='js/base.js') }}"></script>
     {% block extra_scripts %}{% endblock %}
   </body>
 </html>

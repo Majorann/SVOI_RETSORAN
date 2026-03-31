@@ -744,9 +744,8 @@ def post_login():
 @app.context_processor
 def inject_notifications_count():
     # Бейдж уведомлений в нижнем меню
-    bookings, preparing_orders = get_request_notification_data()
     return {
-        "notifications_count": len(bookings) + len(preparing_orders),
+        "notifications_count": get_request_notifications_count(),
         "current_user_name": session.get("user_name"),
         "current_user_id": session.get("user_id"),
         "csrf_token": session.get("csrf_token", ""),
@@ -958,6 +957,7 @@ auth_session = AuthSessionService(
     list_user_bookings=list_user_bookings,
     get_user_preparing_orders=get_user_preparing_orders,
 )
+auth_session.list_active_order_statuses = list_active_order_statuses
 debug_login_failure = auth_session.debug_login_failure
 log_session_debug = auth_session.log_session_debug
 issue_auth_session_cookie = auth_session.issue_auth_session_cookie
@@ -966,6 +966,14 @@ issue_checkout_preview_token = auth_session.issue_checkout_preview_token
 verify_checkout_preview_token = auth_session.verify_checkout_preview_token
 get_request_user = auth_session.get_request_user
 get_request_notification_data = auth_session.get_request_notification_data
+
+def get_request_notifications_count():
+    handler = getattr(auth_session, "get_request_notifications_count", None)
+    if callable(handler):
+        return handler()
+    bookings, preparing_orders = get_request_notification_data()
+    return len(bookings) + len(preparing_orders)
+
 auth_session.register_hooks()
 
 

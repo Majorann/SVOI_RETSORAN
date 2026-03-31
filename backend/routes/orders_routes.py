@@ -97,15 +97,6 @@ def checkout_route(
     cards = list((user or {}).get("cards", []))
     active_card = next((card for card in cards if card.get("active")), None)
     checkout_error = request.args.get("error")
-    menu_catalog = [
-        {
-            "id": item.get("id"),
-            "name": item.get("name"),
-            "price": item.get("price"),
-            "photo": item.get("photo"),
-        }
-        for item in load_menu_items()
-    ]
     user_balance = int((user or {}).get("balance", 0) or 0)
     return render_template(
         "checkout.html",
@@ -116,7 +107,6 @@ def checkout_route(
         active_card=active_card,
         user_balance=user_balance,
         checkout_error=checkout_error,
-        menu_catalog=menu_catalog,
     )
 
 def payment_route(

@@ -24,12 +24,66 @@ const setupCartDrawer = ({
   const isMenuMobile = () => Boolean(menuMobileQuery.matches && menuList && cartDrawer);
   const dragCloseRatio = 0.3;
   const mobileCartHintMinGap = 88;
+  const desktopCloseDurationMs = 360;
   let mobileCartOpen = false;
   let mobileDragActive = false;
   let mobileDragStartY = 0;
   let mobileDragY = 0;
   let mobileDrawerHeight = 0;
   let mobileCartHintHideTimer = null;
+  let desktopOpenRafId = 0;
+  let desktopDrawerHeightTimer = null;
+  let desktopDrawerFinalizeTimer = null;
+
+  const clearDesktopOpenFrame = () => {
+    if (!desktopOpenRafId) return;
+    window.cancelAnimationFrame(desktopOpenRafId);
+    desktopOpenRafId = 0;
+  };
+
+  const clearDesktopDrawerTimers = () => {
+    if (desktopDrawerHeightTimer) {
+      window.clearTimeout(desktopDrawerHeightTimer);
+      desktopDrawerHeightTimer = null;
+    }
+    if (desktopDrawerFinalizeTimer) {
+      window.clearTimeout(desktopDrawerFinalizeTimer);
+      desktopDrawerFinalizeTimer = null;
+    }
+  };
+
+  const resetDesktopDrawerHeight = () => {
+    if (!cartDrawer) return;
+    clearDesktopDrawerTimers();
+    cartDrawer.style.removeProperty("height");
+  };
+
+  const animateDesktopDrawerHeight = (fromHeight) => {
+    if (isMenuMobile() || !cartDrawer || cartDrawer.hidden || !cartDrawer.classList.contains("is-open")) {
+      resetDesktopDrawerHeight();
+      return;
+    }
+    const safeFromHeight = Number(fromHeight) || 0;
+    if (safeFromHeight <= 0) {
+      resetDesktopDrawerHeight();
+      return;
+    }
+
+    const toHeight = cartDrawer.getBoundingClientRect().height;
+    if (Math.abs(toHeight - safeFromHeight) < 2) {
+      resetDesktopDrawerHeight();
+      return;
+    }
+
+    clearDesktopDrawerTimers();
+    cartDrawer.style.height = `${safeFromHeight}px`;
+    void cartDrawer.offsetHeight;
+    cartDrawer.style.height = `${toHeight}px`;
+    desktopDrawerHeightTimer = window.setTimeout(() => {
+      cartDrawer.style.removeProperty("height");
+      desktopDrawerHeightTimer = null;
+    }, 260);
+  };
 
   const hideMobileCartHint = () => {
     if (!cartOverlayHint) return;
@@ -136,6 +190,7 @@ const setupCartDrawer = ({
   const setDrawerState = (hasItems) => {
     if (!cartDrawer || !menuList) return;
     if (isMenuMobile()) {
+      clearDesktopOpenFrame();
       if (mobileCartOpen) {
         cartDrawer.hidden = false;
       } else {
@@ -153,6 +208,8 @@ const setupCartDrawer = ({
     mobileCartOpen = false;
     mobileDragActive = false;
     mobileDragY = 0;
+    clearDesktopOpenFrame();
+    clearDesktopDrawerTimers();
     if (menuCartFab) {
       menuCartFab.setAttribute("aria-expanded", "false");
       menuCartFab.classList.remove("is-hidden");
@@ -161,37 +218,57 @@ const setupCartDrawer = ({
     if (cartOverlay) cartOverlay.hidden = true;
     hideMobileCartHint();
 
-    const closeDurationMs = 360;
     if (hasItems) {
       if (cartDrawer._hideTimer) {
         window.clearTimeout(cartDrawer._hideTimer);
         cartDrawer._hideTimer = null;
       }
+      const wasHidden = cartDrawer.hidden || !cartDrawer.classList.contains("is-open");
       cartDrawer.hidden = false;
       cartDrawer.setAttribute("aria-hidden", "false");
-      cartDrawer.classList.remove("is-closing");
+      cartDrawer.style.removeProperty("height");
+      cartDrawer.classList.remove("is-closing", "is-settle");
       if (!cartDrawer.classList.contains("is-open")) {
-        cartDrawer.classList.add("is-open", "is-settle");
-        window.setTimeout(() => cartDrawer.classList.remove("is-settle"), 140);
+        if (wasHidden) {
+          cartDrawer.classList.remove("is-open");
+          void cartDrawer.offsetWidth;
+          desktopOpenRafId = window.requestAnimationFrame(() => {
+            desktopOpenRafId = window.requestAnimationFrame(() => {
+              desktopOpenRafId = 0;
+              document.body.classList.add("menu-cart-open");
+              cartDrawer.classList.add("is-open", "is-settle");
+              window.setTimeout(() => cartDrawer.classList.remove("is-settle"), 140);
+            });
+          });
+        } else {
+          document.body.classList.add("menu-cart-open");
+          cartDrawer.classList.add("is-open", "is-settle");
+          window.setTimeout(() => cartDrawer.classList.remove("is-settle"), 140);
+        }
+      } else {
+        document.body.classList.add("menu-cart-open");
       }
-      document.body.classList.add("menu-cart-open");
       return;
     }
     if (!cartDrawer.classList.contains("is-open")) {
       cartDrawer.hidden = true;
       cartDrawer.setAttribute("aria-hidden", "true");
+      cartDrawer.style.removeProperty("height");
       document.body.classList.remove("menu-cart-open");
       return;
     }
+    cartDrawer.style.height = `${cartDrawer.getBoundingClientRect().height}px`;
+    void cartDrawer.offsetHeight;
     cartDrawer.classList.remove("is-open", "is-settle");
     cartDrawer.classList.add("is-closing");
     cartDrawer._hideTimer = window.setTimeout(() => {
       cartDrawer.hidden = true;
       cartDrawer.setAttribute("aria-hidden", "true");
       cartDrawer.classList.remove("is-closing");
+      cartDrawer.style.removeProperty("height");
       document.body.classList.remove("menu-cart-open");
       cartDrawer._hideTimer = null;
-    }, closeDurationMs);
+    }, desktopCloseDurationMs);
   };
 
   const updateMenuButtons = (currentCart = null) => {
@@ -223,9 +300,34 @@ const setupCartDrawer = ({
     const previousRows = Array.from(cartList.querySelectorAll(".cart-item"));
     const previousQtyById = new Map(previousRows.map((row) => [Number(row.dataset.id), Number(row.dataset.qty)]));
     const previousTotal = Number(cartTotal.textContent || 0);
+    const previousDrawerHeight = !isMenuMobile() && cartDrawer && !cartDrawer.hidden
+      ? cartDrawer.getBoundingClientRect().height
+      : 0;
     const cart = normalizeCart(loadCart());
     const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
     const totalPrice = cart.reduce((sum, item) => sum + item.qty * item.price, 0);
+    const shouldAnimateDesktopClose =
+      !isMenuMobile() &&
+      Boolean(cartDrawer?.classList.contains("is-open")) &&
+      previousRows.length > 0 &&
+      cart.length === 0;
+
+    clearDesktopDrawerTimers();
+
+    if (shouldAnimateDesktopClose && cartDrawer) {
+      syncFabState(cartCount);
+      updateMenuButtons(cart);
+      setDrawerState(false);
+      desktopDrawerFinalizeTimer = window.setTimeout(() => {
+        cartList.innerHTML = "";
+        if (cartEmpty) cartEmpty.hidden = false;
+        if (cartCheckout) cartCheckout.disabled = true;
+        cartTotal.textContent = "0";
+        cartDrawer.style.removeProperty("height");
+        desktopDrawerFinalizeTimer = null;
+      }, desktopCloseDurationMs);
+      return;
+    }
 
     cartList.innerHTML = "";
     cart.forEach((item, index) => {
@@ -266,9 +368,15 @@ const setupCartDrawer = ({
       }, 280);
     }
     syncFabState(cartCount);
-    setDrawerState(cart.length > 0);
-    updateMobileCartHint();
     updateMenuButtons(cart);
+
+    setDrawerState(cart.length > 0);
+    if (cart.length > 0) {
+      animateDesktopDrawerHeight(previousDrawerHeight);
+    } else {
+      resetDesktopDrawerHeight();
+    }
+    updateMobileCartHint();
   };
 
   const animateQtyChange = (qtyNode, prev, next) => {

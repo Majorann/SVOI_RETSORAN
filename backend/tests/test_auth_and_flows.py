@@ -142,6 +142,8 @@ def test_booking_payment_and_delivery_flows(app_module, client):
 
     checkout_response = client.get("/checkout")
     assert checkout_response.status_code == 200
+    checkout_html = checkout_response.get_data(as_text=True)
+    assert 'id="menuCatalogJson"' not in checkout_html
 
     items_json = json.dumps([{"id": menu_item["id"], "qty": 2}], ensure_ascii=False)
     payment_response = client.post(

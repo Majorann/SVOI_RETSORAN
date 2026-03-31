@@ -1,5 +1,95 @@
 /* Extracted page-specific checkout, payment, and card styles */
 
+.profile-card {
+  background: var(--surface-card);
+  border-radius: 22px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.profile-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.1));
+  display: grid;
+  place-items: center;
+  flex: 0 0 72px;
+}
+
+.profile-avatar__img {
+  display: block;
+  width: 88%;
+  height: 88%;
+  object-fit: contain;
+}
+
+.profile-card__content {
+  min-width: 0;
+}
+
+.profile-name {
+  margin: 0;
+  font-size: 41px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transform: scaleX(1.06);
+  transform-origin: left center;
+  max-width: 100%;
+  white-space: nowrap;
+  background: linear-gradient(180deg, #ffffff, #d8d8d8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.payments {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-top-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.icon-button--admin {
+  min-width: 92px;
+  min-height: 36px;
+  padding: 0 14px;
+  width: auto;
+  height: 36px;
+  border-radius: 12px;
+  border-color: rgba(184, 106, 71, 0.44);
+  background: rgba(58, 42, 35, 0.42);
+  color: #eadfd5;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: none;
+}
+
+.icon-button--admin:hover,
+.icon-button--admin:focus-visible {
+  border-color: rgba(184, 106, 71, 0.8);
+  background: rgba(77, 55, 45, 0.58);
+  color: #f3e7dc;
+  box-shadow: 0 0 10px rgba(184, 106, 71, 0.22), 0 0 20px rgba(184, 106, 71, 0.14);
+}
+
+.icon-button--admin:active {
+  transform: translateY(1px);
+  box-shadow: 0 0 8px rgba(184, 106, 71, 0.18);
+}
+
 .delivery-checkout-layout {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -330,6 +420,39 @@ body.page-payment-center #payNowButton {
   padding: 8px 10px;
   font-size: 12px;
   outline: none;
+}
+
+.payment-form__field input:focus {
+  outline: 2px solid #c58b6c;
+  outline-offset: 1px;
+}
+
+.payment-form__field input.is-card-valid {
+  border-color: rgba(94, 127, 99, 0.78);
+  box-shadow:
+    0 0 0 1px rgba(94, 127, 99, 0.32),
+    0 0 10px rgba(94, 127, 99, 0.22);
+}
+
+.payment-form__field input.is-card-valid:focus {
+  outline-color: rgba(94, 127, 99, 0.82);
+  box-shadow:
+    0 0 0 1px rgba(94, 127, 99, 0.4),
+    0 0 14px rgba(94, 127, 99, 0.28);
+}
+
+.payment-form__field input.is-card-invalid {
+  border-color: rgba(180, 72, 72, 0.82);
+  box-shadow:
+    0 0 0 1px rgba(180, 72, 72, 0.34),
+    0 0 10px rgba(180, 72, 72, 0.22);
+}
+
+.payment-form__field input.is-card-invalid:focus {
+  outline-color: rgba(180, 72, 72, 0.84);
+  box-shadow:
+    0 0 0 1px rgba(180, 72, 72, 0.4),
+    0 0 14px rgba(180, 72, 72, 0.28);
 }
 
 .payment-form__field input::placeholder {

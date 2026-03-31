@@ -31,8 +31,6 @@
 </section>
 {% endif %}
 
-<script type="application/json" id="menuCatalogJson">{{ menu_catalog | tojson }}</script>
-
 {% if checkout_state != "active" %}
 <section class="section checkout-state-card">
   {% if checkout_state == "expired_booking" %}
@@ -183,5 +181,8 @@
     <span>Профиль</span>
   </a>
 </nav>
+{% endblock %}
+{% block extra_scripts %}
+<script type="module" src="{{ url_for('static', filename='js/pages/checkout.js') }}"></script>
 {% endblock %}
 

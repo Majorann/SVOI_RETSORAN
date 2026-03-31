@@ -27,6 +27,7 @@ class AuthSessionService:
         get_user_by_id=None,
         list_user_bookings=None,
         get_user_preparing_orders,
+        list_active_order_statuses=None,
     ):
         self.app = app
         self.auth_session_cookie_name = auth_session_cookie_name
@@ -45,6 +46,7 @@ class AuthSessionService:
         self.get_user_by_id = get_user_by_id
         self.list_user_bookings = list_user_bookings
         self.get_user_preparing_orders = get_user_preparing_orders
+        self.list_active_order_statuses = list_active_order_statuses
 
     def _load_users_cached(self):
         if getattr(g, "_auth_users_loaded", False):
@@ -314,7 +316,46 @@ class AuthSessionService:
         g.notifications_loaded = True
         g.notification_bookings = bookings
         g.notification_preparing_orders = preparing_orders
+        g.notifications_count_loaded = True
+        g.notification_bookings_count = len(bookings)
+        g.notification_preparing_orders_count = len(preparing_orders)
         return bookings, preparing_orders
+
+    def get_request_notifications_count(self):
+        if getattr(g, "notifications_count_loaded", False):
+            return int(getattr(g, "notification_bookings_count", 0) or 0) + int(
+                getattr(g, "notification_preparing_orders_count", 0) or 0
+            )
+
+        if getattr(g, "notifications_loaded", False):
+            bookings = getattr(g, "notification_bookings", [])
+            preparing_orders = getattr(g, "notification_preparing_orders", [])
+            g.notifications_count_loaded = True
+            g.notification_bookings_count = len(bookings)
+            g.notification_preparing_orders_count = len(preparing_orders)
+            return len(bookings) + len(preparing_orders)
+
+        user_id = session.get("user_id")
+        if not user_id:
+            g.notifications_count_loaded = True
+            g.notification_bookings_count = 0
+            g.notification_preparing_orders_count = 0
+            return 0
+
+        if callable(self.list_user_bookings):
+            bookings_count = len(self.list_user_bookings(user_id))
+        else:
+            bookings_count = len([b for b in self._load_bookings_cached() if b.get("user_id") == user_id])
+
+        if callable(self.list_active_order_statuses):
+            preparing_orders_count = len(self.list_active_order_statuses(user_id))
+        else:
+            preparing_orders_count = len(self.get_user_preparing_orders(user_id))
+
+        g.notifications_count_loaded = True
+        g.notification_bookings_count = bookings_count
+        g.notification_preparing_orders_count = preparing_orders_count
+        return bookings_count + preparing_orders_count
 
     def register_hooks(self):
         @self.app.before_request
