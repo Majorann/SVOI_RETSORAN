@@ -1,80 +1,331 @@
 {% extends "admin/base.html" %}
 {% block admin_content %}
-<section class="admin-card admin-toolbar">
-  <form class="admin-filters admin-filters--analytics" method="get">
-    <select class="admin-select" name="period">
-      <option value="today" {% if filters.period == 'today' %}selected{% endif %}>Сегодня</option>
-      <option value="7d" {% if filters.period == '7d' %}selected{% endif %}>7 дней</option>
-      <option value="30d" {% if filters.period == '30d' %}selected{% endif %}>30 дней</option>
-      <option value="month" {% if filters.period == 'month' %}selected{% endif %}>Месяц</option>
-    </select>
-    <select class="admin-select" name="mode">
-      <option value="all" {% if filters.mode == 'all' %}selected{% endif %}>Все</option>
-      <option value="dine_in" {% if filters.mode == 'dine_in' %}selected{% endif %}>Зал</option>
-      <option value="delivery" {% if filters.mode == 'delivery' %}selected{% endif %}>Доставка</option>
-    </select>
-    <button class="admin-button" type="submit">Обновить</button>
+<section class="admin-card analytics-hero">
+  <div class="analytics-hero__content">
+    <p class="analytics-hero__eyebrow">Аналитика ресторана</p>
+    <h2>Аналитика</h2>
+    <p class="analytics-hero__lead">Ключевые показатели ресторана за выбранный период. Экран собран так, чтобы быстро видеть рост, провалы и вклад меню в выручку.</p>
+  </div>
+  <div class="analytics-hero__meta">
+    <div class="analytics-hero__meta-card">
+      <span>Текущий период</span>
+      <strong>{{ analytics.range_label }}</strong>
+    </div>
+    <div class="analytics-hero__meta-card">
+      <span>Сравнение</span>
+      <strong>{{ analytics.previous_range_label }}</strong>
+    </div>
+  </div>
+</section>
+
+<section class="admin-card analytics-filters-panel">
+  <form class="analytics-filters" method="get" data-auto-submit="instant">
+    <input type="hidden" name="period" value="{{ filters.period }}" />
+    <input type="hidden" name="mode" value="{{ filters.mode }}" />
+
+    <div class="analytics-filter-group">
+      <span class="analytics-filter-group__label">Период</span>
+      <div class="analytics-segmented" data-filter-group>
+        <button type="button" class="analytics-segmented__item {% if filters.period == 'today' %}is-active{% endif %}" data-filter-target="period" data-filter-value="today">Сегодня</button>
+        <button type="button" class="analytics-segmented__item {% if filters.period == '7d' %}is-active{% endif %}" data-filter-target="period" data-filter-value="7d">7 дней</button>
+        <button type="button" class="analytics-segmented__item {% if filters.period == '30d' %}is-active{% endif %}" data-filter-target="period" data-filter-value="30d">30 дней</button>
+      </div>
+    </div>
+
+    <div class="analytics-filter-group">
+      <span class="analytics-filter-group__label">Канал</span>
+      <div class="analytics-segmented" data-filter-group>
+        <button type="button" class="analytics-segmented__item {% if filters.mode == 'all' %}is-active{% endif %}" data-filter-target="mode" data-filter-value="all">Все</button>
+        <button type="button" class="analytics-segmented__item {% if filters.mode == 'dine_in' %}is-active{% endif %}" data-filter-target="mode" data-filter-value="dine_in">Зал</button>
+        <button type="button" class="analytics-segmented__item {% if filters.mode == 'delivery' %}is-active{% endif %}" data-filter-target="mode" data-filter-value="delivery">Доставка</button>
+      </div>
+    </div>
+
+    <div class="analytics-filters__summary">
+      <span class="admin-badge admin-badge--accent">{{ analytics.range_label }}</span>
+      <span class="admin-badge">Автообновление при смене фильтра</span>
+    </div>
   </form>
 </section>
 
-<section class="admin-grid admin-grid--kpi">
-  <article class="admin-card admin-kpi"><span class="admin-kpi__label">Выручка</span><strong>{{ analytics.metrics.revenue }} ₽</strong></article>
-  <article class="admin-card admin-kpi"><span class="admin-kpi__label">Заказы</span><strong>{{ analytics.metrics.orders_count }}</strong></article>
-  <article class="admin-card admin-kpi"><span class="admin-kpi__label">Средний чек</span><strong>{{ analytics.metrics.average_check }} ₽</strong></article>
-  <article class="admin-card admin-kpi"><span class="admin-kpi__label">Брони</span><strong>{{ analytics.metrics.bookings_count }}</strong></article>
-  <article class="admin-card admin-kpi"><span class="admin-kpi__label">Отмены</span><strong>{{ analytics.metrics.cancellations }}</strong></article>
-  <article class="admin-card admin-kpi"><span class="admin-kpi__label">Баллы / бонусы</span><strong>{{ analytics.metrics.points_applied }} / {{ analytics.metrics.bonus_earned }}</strong></article>
-</section>
-
-<section class="admin-grid admin-grid--charts">
-  <article class="admin-card admin-chart-card"><h2>Выручка по дням</h2><div class="admin-chart" data-chart-kind="line" data-axis-label="Выручка, ₽" data-chart='{{ analytics.charts.revenue_by_day|tojson }}'></div></article>
-  <article class="admin-card admin-chart-card"><h2>Заказы по дням</h2><div class="admin-chart" data-chart-kind="line" data-axis-label="Заказы, шт." data-chart='{{ analytics.charts.orders_by_day|tojson }}'></div></article>
-  <article class="admin-card admin-chart-card"><h2>Использование доставки и зала</h2><div class="admin-chart" data-chart-kind="grouped-bar" data-axis-label="Заказы, шт." data-chart='{{ analytics.charts.channels_by_day|tojson }}'></div></article>
-  <article class="admin-card admin-chart-card"><h2>Зал / доставка</h2><div class="admin-chart" data-chart-kind="donut" data-chart='{{ analytics.charts.split|tojson }}'></div></article>
-  <article class="admin-card admin-chart-card"><h2>Отмены</h2><div class="admin-chart" data-chart-kind="bar" data-chart='{{ analytics.charts.cancels_by_day|tojson }}'></div></article>
-</section>
-
-<section class="admin-grid admin-grid--two">
-  <article class="admin-card">
-    <div class="admin-section-head"><h2>Топ блюд по количеству</h2></div>
-    <div class="admin-chart" data-chart-kind="bar" data-chart='{{ analytics.charts.top_qty|tojson }}'></div>
-  </article>
-  <article class="admin-card">
-    <div class="admin-section-head"><h2>Топ блюд по выручке</h2></div>
-    <div class="admin-chart" data-chart-kind="bar" data-chart='{{ analytics.charts.top_revenue|tojson }}'></div>
-  </article>
-</section>
-
-<section class="admin-grid admin-grid--two">
-  <article class="admin-card">
-    <div class="admin-section-head"><h2>Все блюда за период</h2></div>
-    {% if analytics.top_items %}
-      <div class="admin-table-wrap">
-        <table class="admin-table">
-          <thead><tr><th>Блюдо</th><th>Количество</th><th>Выручка</th></tr></thead>
-          <tbody>
-            {% for item in analytics.top_items %}
-              <tr><td>{{ item.name }}</td><td>{{ item.qty_total }}</td><td>{{ item.revenue_total }} ₽</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
+<section class="admin-grid analytics-kpi-grid">
+  {% for kpi in analytics.kpis %}
+    <article class="admin-card analytics-kpi analytics-kpi--{{ kpi.accent }}">
+      <div class="analytics-kpi__top">
+        <span class="analytics-kpi__label">{{ kpi.label }}</span>
+        <strong class="analytics-kpi__value">{{ kpi.display_value }}</strong>
       </div>
-    {% else %}
-      <div class="admin-empty">Недостаточно данных для топа блюд.</div>
-    {% endif %}
+      <div class="analytics-kpi__bottom">
+        <span class="analytics-kpi__change analytics-kpi__change--{{ kpi.comparison.tone }}" data-direction="{{ kpi.comparison.direction }}">{{ kpi.comparison.text }}</span>
+        {% if kpi.hint %}
+          <span class="analytics-kpi__hint">{{ kpi.hint }}</span>
+        {% endif %}
+      </div>
+    </article>
+  {% endfor %}
+</section>
+
+<section class="analytics-main-grid">
+  <article class="admin-card analytics-trend-card">
+    <div class="analytics-section-head">
+      <div>
+        <p class="analytics-section-head__eyebrow">Главная динамика</p>
+        <h2>Как меняются ключевые показатели</h2>
+      </div>
+      <div class="analytics-segmented analytics-segmented--compact" data-chart-switcher>
+        <button type="button" class="analytics-segmented__item is-active" data-chart-metric="revenue">Выручка</button>
+        <button type="button" class="analytics-segmented__item" data-chart-metric="orders">Заказы</button>
+        <button type="button" class="analytics-segmented__item" data-chart-metric="average_check">Средний чек</button>
+      </div>
+    </div>
+    <div
+      class="admin-chart analytics-trend-chart"
+      data-chart-kind="trend"
+      data-default-metric="revenue"
+      data-summary='{{ {"revenue": analytics.metrics.revenue, "orders": analytics.metrics.orders_count, "average_check": analytics.metrics.average_check}|tojson }}'
+      data-period-label="{{ analytics.range_label }}"
+      data-chart='{{ analytics.charts.trend|tojson }}'
+    ></div>
   </article>
 
-  <article class="admin-card">
-    <div class="admin-section-head"><h2>Блюда без продаж</h2></div>
-    {% if analytics.no_sales_items %}
-      <div class="admin-list">
-        {% for item in analytics.no_sales_items %}
-          <div class="admin-list__item"><strong>{{ item.name }}</strong><span>{{ item.type }} · {{ item.price }} ₽</span></div>
+  <div class="analytics-side-stack">
+    <article class="admin-card analytics-channel-overview">
+      <div class="analytics-section-head analytics-section-head--tight">
+        <div>
+          <p class="analytics-section-head__eyebrow">Зал / доставка</p>
+          <h2>Распределение каналов</h2>
+        </div>
+      </div>
+      <div class="analytics-channel-overview__layout">
+        <div
+          class="admin-chart analytics-channel-overview__donut"
+          data-chart-kind="donut"
+          data-chart='{{ analytics.charts.split|tojson }}'
+        ></div>
+        <div class="analytics-channel-overview__cards">
+          {% for channel in analytics.channel_cards %}
+            <div class="analytics-channel-card">
+              <div class="analytics-channel-card__head">
+                <strong>{{ channel.label }}</strong>
+                <span>{{ "%.0f"|format(channel.revenue_share) }}% выручки</span>
+              </div>
+              <dl class="analytics-channel-card__stats">
+                <div><dt>Заказы</dt><dd>{{ channel.display_orders }}</dd></div>
+                <div><dt>Выручка</dt><dd>{{ channel.display_revenue }}</dd></div>
+                <div><dt>Средний чек</dt><dd>{{ channel.display_average_check }}</dd></div>
+              </dl>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </article>
+
+    <article class="admin-card analytics-alert-card">
+      <div class="analytics-section-head analytics-section-head--tight">
+        <div>
+          <p class="analytics-section-head__eyebrow">Операционный фокус</p>
+          <h2>Отмены и сигналы</h2>
+        </div>
+      </div>
+      <div class="analytics-alert-card__stats">
+        <div class="analytics-alert-card__metric">
+          <span>Отмены</span>
+          <strong>{{ analytics.cancellation_summary.count }}</strong>
+        </div>
+        <div class="analytics-alert-card__metric">
+          <span>Доля отмен</span>
+          <strong>{{ analytics.cancellation_summary.rate }}%</strong>
+        </div>
+        <div class="analytics-alert-card__metric">
+          <span>Прошлый период</span>
+          <strong>{{ analytics.cancellation_summary.previous_count }}</strong>
+        </div>
+      </div>
+      <span class="analytics-alert-card__delta analytics-kpi__change analytics-kpi__change--{{ analytics.cancellation_summary.comparison.tone }}" data-direction="{{ analytics.cancellation_summary.comparison.direction }}">
+        {{ analytics.cancellation_summary.comparison.text }}
+      </span>
+      <div class="admin-chart analytics-alert-card__chart" data-chart-kind="bar" data-chart='{{ analytics.charts.cancels_by_day|tojson }}'></div>
+    </article>
+  </div>
+</section>
+
+<section class="admin-card analytics-insights">
+  <div class="analytics-section-head">
+    <div>
+      <p class="analytics-section-head__eyebrow">Что происходит</p>
+      <h2>Инсайты за период</h2>
+    </div>
+  </div>
+  <div class="analytics-insights__grid">
+    {% for insight in analytics.insights %}
+      <article class="analytics-insight analytics-insight--{{ insight.tone }}">
+        <strong>{{ insight.title }}</strong>
+        <p>{{ insight.text }}</p>
+        <span>{{ insight.meta }}</span>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="analytics-products-grid">
+  <article class="admin-card analytics-ranking">
+    <div class="analytics-section-head">
+      <div>
+        <p class="analytics-section-head__eyebrow">Популярные блюда</p>
+        <h2>Топ по количеству</h2>
+      </div>
+    </div>
+    {% if analytics.top_qty_items %}
+      <div class="analytics-ranking__list">
+        {% for item in analytics.top_qty_items %}
+          <div class="analytics-ranking__item">
+            <div class="analytics-ranking__meta">
+              <span class="analytics-ranking__rank">#{{ item.rank }}</span>
+              <div>
+                <strong>{{ item.name }}</strong>
+                <span>{{ item.category }}</span>
+              </div>
+            </div>
+            <div class="analytics-ranking__value">
+              <strong>{{ item.display_value }}</strong>
+              <div class="analytics-ranking__bar"><span style="width: {{ item.bar }}%"></span></div>
+            </div>
+          </div>
         {% endfor %}
       </div>
     {% else %}
-      <div class="admin-empty">Все блюда продавались в выбранный период.</div>
+      <div class="admin-empty">Недостаточно данных для рейтинга.</div>
     {% endif %}
   </article>
+
+  <article class="admin-card analytics-ranking">
+    <div class="analytics-section-head">
+      <div>
+        <p class="analytics-section-head__eyebrow">Популярные блюда</p>
+        <h2>Топ по выручке</h2>
+      </div>
+    </div>
+    {% if analytics.top_revenue_items %}
+      <div class="analytics-ranking__list">
+        {% for item in analytics.top_revenue_items %}
+          <div class="analytics-ranking__item">
+            <div class="analytics-ranking__meta">
+              <span class="analytics-ranking__rank">#{{ item.rank }}</span>
+              <div>
+                <strong>{{ item.name }}</strong>
+                <span>{{ item.category }}</span>
+              </div>
+            </div>
+            <div class="analytics-ranking__value">
+              <strong>{{ item.display_value }}</strong>
+              <div class="analytics-ranking__bar"><span style="width: {{ item.bar }}%"></span></div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="admin-empty">Недостаточно данных для рейтинга.</div>
+    {% endif %}
+  </article>
+
+  <article class="admin-card analytics-problem-card">
+    <div class="analytics-section-head">
+      <div>
+        <p class="analytics-section-head__eyebrow">Проблемные позиции</p>
+        <h2>Без продаж и слабые блюда</h2>
+      </div>
+    </div>
+    <div class="analytics-problem-card__section">
+      <h3>Блюда без продаж</h3>
+      {% if analytics.no_sales_items %}
+        <div class="analytics-problem-list">
+          {% for item in analytics.no_sales_items %}
+            <div class="analytics-problem-list__item">
+              <div>
+                <strong>{{ item.name }}</strong>
+                <span>{{ item.category }} · {{ item.price }} ₽</span>
+              </div>
+              <div class="analytics-problem-list__meta">
+                <span class="admin-badge admin-badge--warning">Без продаж за период</span>
+                <small>Последняя продажа: {{ item.last_sold_label }}</small>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="admin-empty">Все блюда продавались в выбранный период.</div>
+      {% endif %}
+    </div>
+
+    <div class="analytics-problem-card__section">
+      <h3>Слабые по выручке</h3>
+      {% if analytics.weak_items %}
+        <div class="analytics-weak-list">
+          {% for item in analytics.weak_items %}
+            <div class="analytics-weak-list__item">
+              <div>
+                <strong>{{ item.name }}</strong>
+                <span>{{ item.category }}</span>
+              </div>
+              <div>
+                <strong>{{ "{:,}".format(item.revenue_total).replace(",", " ") }} ₽</strong>
+                <span>{{ item.qty_total }} шт.</span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="admin-empty">Все продаваемые блюда держат нормальный темп.</div>
+      {% endif %}
+    </div>
+  </article>
+</section>
+
+<section class="admin-card analytics-table-card">
+  <div class="analytics-section-head">
+    <div>
+      <p class="analytics-section-head__eyebrow">Полная детализация</p>
+      <h2>Все блюда за период</h2>
+    </div>
+  </div>
+  {% if analytics.full_items %}
+    <div class="admin-table-wrap analytics-table-wrap">
+      <table class="admin-table analytics-table">
+        <thead>
+          <tr>
+            <th>Блюдо</th>
+            <th>Категория</th>
+            <th class="analytics-table__numeric">Количество продаж</th>
+            <th class="analytics-table__numeric">Выручка</th>
+            <th class="analytics-table__numeric">Средняя цена</th>
+            <th class="analytics-table__numeric">Доля выручки</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in analytics.full_items %}
+            <tr class="{% if item.qty_total == 0 %}analytics-table__row--muted{% endif %}">
+              <td>
+                <div class="analytics-table__dish">
+                  <strong>{{ item.name }}</strong>
+                  {% if item.qty_total == 0 %}
+                    <span class="admin-badge admin-badge--warning">Без продаж</span>
+                  {% else %}
+                    <small>Последняя продажа: {{ item.last_sold_label }}</small>
+                  {% endif %}
+                </div>
+              </td>
+              <td>{{ item.category }}</td>
+              <td class="analytics-table__numeric">{{ item.qty_total }}</td>
+              <td class="analytics-table__numeric">{{ "{:,}".format(item.revenue_total).replace(",", " ") }} ₽</td>
+              <td class="analytics-table__numeric">{{ "{:,}".format(item.average_price).replace(",", " ") }} ₽</td>
+              <td class="analytics-table__numeric">{{ item.share_revenue }}%</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="admin-empty">За выбранный период данных по блюдам пока нет.</div>
+  {% endif %}
 </section>
 {% endblock %}

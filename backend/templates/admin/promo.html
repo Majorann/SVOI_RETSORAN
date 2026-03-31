@@ -1,6 +1,6 @@
 {% extends "admin/base.html" %}
 {% block admin_content %}
-<section class="admin-grid admin-grid--two">
+<section class="admin-grid admin-grid--promo">
   <article class="admin-card">
     <div class="admin-section-head"><h2>Сохранить промо</h2></div>
     <form class="admin-form" id="adminPromoForm" method="post" action="{{ url_for('admin.promo_save') }}" enctype="multipart/form-data">
@@ -45,12 +45,13 @@
       <div class="admin-actions-row">
         <button class="admin-button admin-button--ghost" type="button" id="adminPromoValidateButton">Проверить DSL</button>
         <button class="admin-button" type="submit">Сохранить промо</button>
+        <a class="admin-button admin-button--ghost" href="#adminPromoBuilder">Конструктор промо</a>
       </div>
         <div class="admin-note" id="adminPromoValidateResult">Проверка DSL ещё не запускалась.</div>
     </form>
   </article>
 
-  <article class="admin-card admin-promo-preview-panel">
+  <article class="admin-card admin-promo-preview-panel" id="adminPromoBuilder">
     <div class="admin-section-head"><h2>Конструктор промо</h2></div>
     <div class="admin-promo-preview">
       <section class="admin-helper-panel" id="adminPromoDslHelper">

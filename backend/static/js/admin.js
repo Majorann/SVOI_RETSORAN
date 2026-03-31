@@ -8,8 +8,228 @@ const modalConfirm = document.getElementById("adminModalConfirm");
 const drawer = document.getElementById("adminDetailDrawer");
 const drawerTitle = document.getElementById("adminDrawerTitle");
 const drawerBody = document.getElementById("adminDrawerBody");
+const networkLoader = document.getElementById("adminNetworkLoader");
+const networkLoaderText = document.getElementById("adminNetworkLoaderText");
 
 let currentAction = null;
+
+const adminNetworkActivity = (() => {
+  if (!(networkLoader instanceof HTMLElement)) {
+    return {
+      begin: () => null,
+      end: () => {},
+      beginNavigation: () => {},
+      restoreNavigation: () => {},
+    };
+  }
+
+  const persistedNavigationKey = "adminLoaderNavigation";
+  const minVisibleMs = 960;
+  const resolveMs = 560;
+  const restoredNavigationMaxAgeMs = 4000;
+  const restoreVisibleMs = 320;
+  let pendingCount = 0;
+  let visibleSince = 0;
+  let resolveTimer = 0;
+  let hideTimer = 0;
+  let currentLabel = "раздел";
+
+  const formatLoadingLabel = (label) => {
+    const normalized = String(label || "раздел").trim();
+    if (!normalized) {
+      return "Грузим раздел";
+    }
+    return `Грузим ${normalized}`;
+  };
+
+  const syncLabel = (label) => {
+    currentLabel = String(label || currentLabel || "раздел").trim() || "раздел";
+    if (networkLoaderText) {
+      networkLoaderText.textContent = formatLoadingLabel(currentLabel);
+    }
+  };
+
+  const applyState = (state, label) => {
+    networkLoader.dataset.state = state;
+    networkLoader.setAttribute("aria-hidden", state === "idle" ? "true" : "false");
+    syncLabel(label);
+  };
+
+  const clearTimers = () => {
+    window.clearTimeout(resolveTimer);
+    window.clearTimeout(hideTimer);
+  };
+
+  const open = (label) => {
+    clearTimers();
+    visibleSince = Date.now();
+    applyState("loading", label);
+  };
+
+  const resolve = (label = "") => {
+    clearTimers();
+    applyState("resolve", label || currentLabel);
+    hideTimer = window.setTimeout(() => {
+      applyState("idle", "");
+    }, resolveMs);
+  };
+
+  const scheduleClose = (label) => {
+    const elapsed = Date.now() - visibleSince;
+    const wait = Math.max(0, minVisibleMs - elapsed);
+    clearTimers();
+    resolveTimer = window.setTimeout(() => resolve(label), wait);
+  };
+
+  const begin = (label = "данные") => {
+    pendingCount += 1;
+    if (pendingCount === 1) {
+      open(label);
+    } else {
+      syncLabel(label);
+    }
+    return Symbol("admin-network-activity");
+  };
+
+  const end = (_token, label = "") => {
+    pendingCount = Math.max(0, pendingCount - 1);
+    if (pendingCount === 0) {
+      scheduleClose(label);
+    }
+  };
+
+  const beginNavigation = (label = "раздел") => {
+    try {
+      sessionStorage.setItem(
+        persistedNavigationKey,
+        JSON.stringify({ label, at: Date.now() })
+      );
+    } catch (error) {
+      // Ignore session storage errors, navigation hint is optional.
+    }
+    open(label);
+  };
+
+  const restoreNavigation = () => {
+    let payload = null;
+    try {
+      payload = JSON.parse(sessionStorage.getItem(persistedNavigationKey) || "null");
+      sessionStorage.removeItem(persistedNavigationKey);
+    } catch (error) {
+      payload = null;
+    }
+    if (!payload || Date.now() - Number(payload.at || 0) > restoredNavigationMaxAgeMs) {
+      return;
+    }
+    open(payload.label || "раздел");
+    const finalizeRestore = () => {
+      window.setTimeout(() => {
+        scheduleClose("");
+      }, restoreVisibleMs);
+    };
+    if (document.readyState === "complete") {
+      finalizeRestore();
+      return;
+    }
+    window.addEventListener("load", finalizeRestore, { once: true });
+  };
+
+  return { begin, end, beginNavigation, restoreNavigation };
+})();
+
+window.adminLoaderDebug = {
+  loading(label = "раздел") {
+    if (networkLoader instanceof HTMLElement) {
+      networkLoader.dataset.state = "loading";
+      networkLoader.setAttribute("aria-hidden", "false");
+      if (networkLoaderText) networkLoaderText.textContent = `Грузим ${String(label || "раздел").trim() || "раздел"}`;
+    }
+  },
+  resolve(label = "раздел") {
+    if (networkLoader instanceof HTMLElement) {
+      networkLoader.dataset.state = "resolve";
+      networkLoader.setAttribute("aria-hidden", "false");
+      if (networkLoaderText) networkLoaderText.textContent = `Грузим ${String(label || "раздел").trim() || "раздел"}`;
+    }
+  },
+  idle() {
+    if (networkLoader instanceof HTMLElement) {
+      networkLoader.dataset.state = "idle";
+      networkLoader.setAttribute("aria-hidden", "true");
+    }
+  },
+};
+
+adminNetworkActivity.restoreNavigation();
+
+document.querySelectorAll("[data-admin-loader-nav]").forEach((link) => {
+  link.addEventListener("click", (event) => {
+    if (!(link instanceof HTMLAnchorElement)) return;
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      link.target === "_blank" ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    const href = link.getAttribute("href") || "";
+    if (!href || href.startsWith("#")) return;
+    const nextUrl = new URL(link.href, window.location.href);
+    if (
+      nextUrl.pathname === window.location.pathname &&
+      nextUrl.search === window.location.search &&
+      nextUrl.hash === window.location.hash
+    ) {
+      return;
+    }
+    adminNetworkActivity.beginNavigation(link.dataset.adminLoaderLabel || link.textContent?.trim() || "раздел");
+  });
+});
+
+document.querySelectorAll("form").forEach((form) => {
+  form.addEventListener("submit", (event) => {
+    if (!(form instanceof HTMLFormElement) || event.defaultPrevented) return;
+    if ((form.target || "").toLowerCase() === "_blank") return;
+    adminNetworkActivity.beginNavigation(
+      form.dataset.adminLoaderLabel ||
+        (String(form.method || "get").toLowerCase() === "get" ? "раздел" : "форму")
+    );
+  });
+});
+
+if (typeof window.fetch === "function") {
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const [resource, init] = args;
+    const url =
+      typeof resource === "string"
+        ? resource
+        : resource instanceof Request
+          ? resource.url
+          : "";
+    const method =
+      String(
+        (init && typeof init === "object" && "method" in init ? init.method : null) ||
+        (resource instanceof Request ? resource.method : "GET")
+      ).toUpperCase();
+    const label =
+      url.includes("/promo/validate")
+        ? "акцию"
+        : method === "GET"
+          ? "данные"
+          : "изменения";
+    const ticket = adminNetworkActivity.begin(label);
+    try {
+      return await nativeFetch(...args);
+    } finally {
+      adminNetworkActivity.end(ticket, "");
+    }
+  };
+}
 
 const showToast = (message, kind = "info") => {
   if (!toastStack || !message) return;
@@ -191,6 +411,26 @@ document.addEventListener("keydown", (event) => {
 
 enhanceAdminSelects();
 
+document.querySelectorAll("[data-filter-target]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const form = button.closest("form");
+    if (!(form instanceof HTMLFormElement)) return;
+    const target = button.dataset.filterTarget;
+    const value = button.dataset.filterValue || "";
+    const input = form.querySelector(`input[name="${target}"]`);
+    if (!(input instanceof HTMLInputElement)) return;
+    if (input.value === value) return;
+    input.value = value;
+    button.closest("[data-filter-group]")?.querySelectorAll(".analytics-segmented__item").forEach((item) => item.classList.remove("is-active"));
+    button.classList.add("is-active");
+    if (typeof form.requestSubmit === "function") {
+      form.requestSubmit();
+      return;
+    }
+    form.submit();
+  });
+});
+
 const sampleDateLabels = (items, maxLabels = 8) => {
   const step = Math.max(1, Math.ceil(items.length / maxLabels));
   return items.map((item, index) => {
@@ -202,6 +442,14 @@ const sampleDateLabels = (items, maxLabels = 8) => {
 
 const formatAxisTick = (value) => {
   return new Intl.NumberFormat("ru-RU").format(Number(value) || 0);
+};
+
+const formatMetricValue = (metric, value) => {
+  const normalized = Number(value) || 0;
+  if (metric === "revenue" || metric === "average_check") {
+    return `${formatAxisTick(normalized)} ₽`;
+  }
+  return formatAxisTick(normalized);
 };
 
 const buildAxisTicks = (max) =>
@@ -368,10 +616,175 @@ const renderGroupedBarChart = (container, items) => {
   `;
 };
 
+const renderTrendChart = (container, chartData) => {
+  const metricMeta = {
+    revenue: { label: "Выручка", note: "Сумма оплаченных заказов за период" },
+    orders: { label: "Заказы", note: "Количество неотменённых заказов" },
+    average_check: { label: "Средний чек", note: "Среднее значение по дням" },
+  };
+  const summary = JSON.parse(container.dataset.summary || "{}");
+  const periodLabel = container.dataset.periodLabel || "";
+  const switcher = container.closest(".analytics-trend-card")?.querySelector("[data-chart-switcher]");
+
+  const setActiveMetric = (metric) => {
+    switcher?.querySelectorAll("[data-chart-metric]").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.chartMetric === metric);
+    });
+  };
+
+  const drawMetric = (metric) => {
+    const items = Array.isArray(chartData?.[metric]) ? chartData[metric] : [];
+    if (!items.length) {
+      container.innerHTML = '<div class="admin-empty">Недостаточно данных.</div>';
+      return;
+    }
+    const barMode = items.length <= 3;
+    const width = Math.max(620, items.length * (barMode ? 140 : 42) + 80);
+    const height = 280;
+    const margin = { top: 16, right: 20, bottom: 20, left: 10 };
+    const plotWidth = width - margin.left - margin.right;
+    const plotHeight = height - margin.top - margin.bottom;
+    const values = items.map((item) => Number(item.value) || 0);
+    const max = Math.max(...values, 1);
+    const ticks = buildAxisTicks(max);
+    const labels = sampleDateLabels(items, barMode ? items.length : 8);
+    const meta = metricMeta[metric] || metricMeta.revenue;
+    const summaryValue = Object.prototype.hasOwnProperty.call(summary, metric)
+      ? summary[metric]
+      : values.reduce((acc, value) => acc + value, 0);
+
+    let geometry = "";
+    if (barMode) {
+      const gap = 18;
+      const barWidth = Math.max(40, (plotWidth - gap * Math.max(items.length - 1, 0)) / Math.max(items.length, 1));
+      geometry = items
+        .map((item, index) => {
+          const value = Number(item.value) || 0;
+          const x = margin.left + index * (barWidth + gap);
+          const barHeight = max ? (value / max) * plotHeight : 0;
+          const y = margin.top + plotHeight - barHeight;
+          return `
+            <rect x="${x}" y="${y}" width="${barWidth}" height="${Math.max(barHeight, 4)}" rx="14" fill="rgba(218,119,86,0.92)"></rect>
+            <rect data-point-index="${index}" data-x="${x + barWidth / 2}" data-y="${y}" x="${x}" y="${margin.top}" width="${barWidth}" height="${plotHeight}" fill="transparent"></rect>
+          `;
+        })
+        .join("");
+    } else {
+      const step = items.length > 1 ? plotWidth / (items.length - 1) : plotWidth;
+      const points = values
+        .map((value, index) => {
+          const x = margin.left + index * step;
+          const y = margin.top + (plotHeight - (value / max) * plotHeight);
+          return { x, y, value, index };
+        });
+      const polyline = points.map((point) => `${point.x},${point.y}`).join(" ");
+      geometry = `
+        <polyline fill="rgba(218,119,86,0.16)" stroke="transparent" points="${margin.left},${height - 4} ${polyline} ${width - margin.right},${height - 4}"></polyline>
+        <polyline fill="none" stroke="rgba(241,179,108,0.92)" stroke-width="2.5" points="${polyline}"></polyline>
+        ${points
+          .map(
+            (point) => `
+              <circle cx="${point.x}" cy="${point.y}" r="5" fill="#f8f5f3" stroke="rgba(218,119,86,0.96)" stroke-width="3"></circle>
+              <rect data-point-index="${point.index}" data-x="${point.x}" data-y="${point.y}" x="${point.x - step / 2}" y="${margin.top}" width="${Math.max(step, 24)}" height="${plotHeight}" fill="transparent"></rect>
+            `
+          )
+          .join("")}
+      `;
+    }
+
+    container.innerHTML = `
+      <div class="analytics-trend-shell">
+        <div class="analytics-trend-headline">
+          <div>
+            <span>${meta.label}</span>
+            <strong>${formatMetricValue(metric, summaryValue)}</strong>
+          </div>
+          <div class="analytics-trend-legend">
+            <i></i>
+            <span>${periodLabel || meta.note}</span>
+          </div>
+        </div>
+        <div class="analytics-trend-viewport">
+          <div class="analytics-trend-tooltip"></div>
+          <div class="analytics-trend-axis">
+            <div class="analytics-trend-y" style="height:${plotHeight}px;">
+              ${ticks
+                .map(
+                  (tick) => `
+                    <span style="top:${tick.ratio * plotHeight}px;">${formatAxisTick(tick.value)}</span>
+                  `
+                )
+                .join("")}
+            </div>
+            <div class="admin-chart-scroll">
+              <svg class="analytics-trend-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMinYMin meet" width="${width}" height="${height}" style="width:${width}px;height:${height}px;">
+                ${ticks
+                  .map(
+                    (tick) => `
+                      <line
+                        x1="${margin.left}"
+                        y1="${margin.top + plotHeight * tick.ratio}"
+                        x2="${width - margin.right}"
+                        y2="${margin.top + plotHeight * tick.ratio}"
+                        stroke="rgba(255,255,255,0.08)"
+                        stroke-dasharray="4 6"
+                      ></line>
+                    `
+                  )
+                  .join("")}
+                ${geometry}
+              </svg>
+              <div class="analytics-trend-x">
+                <div class="analytics-trend-x__labels" style="width:${width}px;grid-template-columns:repeat(${items.length}, minmax(24px, 1fr));">
+                  ${labels.map((label) => `<span>${label}</span>`).join("")}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const viewport = container.querySelector(".analytics-trend-viewport");
+    const tooltip = container.querySelector(".analytics-trend-tooltip");
+    container.querySelectorAll("[data-point-index]").forEach((target) => {
+      const showTooltip = (event) => {
+        if (!(tooltip instanceof HTMLElement) || !(viewport instanceof HTMLElement)) return;
+        const index = Number(target.getAttribute("data-point-index")) || 0;
+        const item = items[index];
+        if (!item) return;
+        const rect = viewport.getBoundingClientRect();
+        const clientX = event instanceof MouseEvent ? event.clientX : rect.left + Number(target.getAttribute("data-x"));
+        const clientY = event instanceof MouseEvent ? event.clientY : rect.top + Number(target.getAttribute("data-y"));
+        tooltip.innerHTML = `
+          <span>${item.label}</span>
+          <strong>${formatMetricValue(metric, item.value)}</strong>
+        `;
+        tooltip.style.left = `${clientX - rect.left}px`;
+        tooltip.style.top = `${clientY - rect.top}px`;
+        tooltip.classList.add("is-visible");
+      };
+      target.addEventListener("mouseenter", showTooltip);
+      target.addEventListener("mousemove", showTooltip);
+      target.addEventListener("mouseleave", () => tooltip?.classList.remove("is-visible"));
+    });
+
+    setActiveMetric(metric);
+  };
+
+  const initialMetric = container.dataset.defaultMetric || "revenue";
+  switcher?.querySelectorAll("[data-chart-metric]").forEach((button) => {
+    button.addEventListener("click", () => drawMetric(button.dataset.chartMetric || initialMetric));
+  });
+  drawMetric(initialMetric);
+};
+
 document.querySelectorAll(".admin-chart").forEach((node) => {
   const chart = JSON.parse(node.dataset.chart || "[]");
   const kind = node.dataset.chartKind;
-  if (kind === "line") {
+  if (kind === "trend") {
+    renderTrendChart(node, chart);
+  } else if (kind === "line") {
     renderLineChart(node, chart);
   } else if (kind === "grouped-bar") {
     renderGroupedBarChart(node, chart);

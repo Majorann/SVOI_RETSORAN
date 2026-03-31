@@ -9,7 +9,7 @@
   data-toast="{{ request.args.get('toast', '') }}"
 >
   <aside class="admin-sidebar">
-    <a class="admin-brand" href="{{ url_for('admin.dashboard') }}">
+    <a class="admin-brand" href="{{ url_for('admin.dashboard') }}" data-admin-loader-nav data-admin-loader-label="панель">
       <span class="admin-brand__mark"></span>
       <span class="admin-brand__text">
         <strong>Свои Admin</strong>
@@ -17,19 +17,19 @@
       </span>
     </a>
     <nav class="admin-nav">
-      <a class="admin-nav__link {% if admin_section == 'dashboard' %}is-active{% endif %}" href="{{ url_for('admin.dashboard') }}">Панель</a>
-      <a class="admin-nav__link {% if admin_section == 'orders' %}is-active{% endif %}" href="{{ url_for('admin.orders') }}">Заказы</a>
-      <a class="admin-nav__link {% if admin_section == 'bookings' %}is-active{% endif %}" href="{{ url_for('admin.bookings') }}">Брони</a>
-      <a class="admin-nav__link {% if admin_section == 'delivery' %}is-active{% endif %}" href="{{ url_for('admin.delivery') }}">Доставка</a>
-      <a class="admin-nav__link {% if admin_section == 'menu' %}is-active{% endif %}" href="{{ url_for('admin.menu') }}">Меню</a>
-      <a class="admin-nav__link {% if admin_section == 'promo' %}is-active{% endif %}" href="{{ url_for('admin.promo') }}">Акции и реклама</a>
-      <a class="admin-nav__link {% if admin_section == 'analytics' %}is-active{% endif %}" href="{{ url_for('admin.analytics') }}">Аналитика</a>
-      <a class="admin-nav__link {% if admin_section == 'users' %}is-active{% endif %}" href="{{ url_for('admin.users') }}">Пользователи</a>
-      <a class="admin-nav__link {% if admin_section == 'content' %}is-active{% endif %}" href="{{ url_for('admin.content') }}">Контент</a>
-      <a class="admin-nav__link {% if admin_section == 'audit-log' %}is-active{% endif %}" href="{{ url_for('admin.audit_log') }}">Журнал действий</a>
+      <a class="admin-nav__link {% if admin_section == 'dashboard' %}is-active{% endif %}" href="{{ url_for('admin.dashboard') }}" data-admin-loader-nav data-admin-loader-label="панель">Панель</a>
+      <a class="admin-nav__link {% if admin_section == 'orders' %}is-active{% endif %}" href="{{ url_for('admin.orders') }}" data-admin-loader-nav data-admin-loader-label="заказы">Заказы</a>
+      <a class="admin-nav__link {% if admin_section == 'bookings' %}is-active{% endif %}" href="{{ url_for('admin.bookings') }}" data-admin-loader-nav data-admin-loader-label="брони">Брони</a>
+      <a class="admin-nav__link {% if admin_section == 'delivery' %}is-active{% endif %}" href="{{ url_for('admin.delivery') }}" data-admin-loader-nav data-admin-loader-label="доставку">Доставка</a>
+      <a class="admin-nav__link {% if admin_section == 'menu' %}is-active{% endif %}" href="{{ url_for('admin.menu') }}" data-admin-loader-nav data-admin-loader-label="меню">Меню</a>
+      <a class="admin-nav__link {% if admin_section == 'promo' %}is-active{% endif %}" href="{{ url_for('admin.promo') }}" data-admin-loader-nav data-admin-loader-label="акции">Акции и реклама</a>
+      <a class="admin-nav__link {% if admin_section == 'analytics' %}is-active{% endif %}" href="{{ url_for('admin.analytics') }}" data-admin-loader-nav data-admin-loader-label="аналитику">Аналитика</a>
+      <a class="admin-nav__link {% if admin_section == 'users' %}is-active{% endif %}" href="{{ url_for('admin.users') }}" data-admin-loader-nav data-admin-loader-label="пользователей">Пользователи</a>
+      <a class="admin-nav__link {% if admin_section == 'content' %}is-active{% endif %}" href="{{ url_for('admin.content') }}" data-admin-loader-nav data-admin-loader-label="контент">Контент</a>
+      <a class="admin-nav__link {% if admin_section == 'audit-log' %}is-active{% endif %}" href="{{ url_for('admin.audit_log') }}" data-admin-loader-nav data-admin-loader-label="журнал действий">Журнал действий</a>
     </nav>
     <div class="admin-sidebar__footer">
-      <a class="admin-nav__link" href="{{ url_for('index') }}">Вернуться на сайт</a>
+      <a class="admin-nav__link admin-nav__link--footer" href="{{ url_for('index') }}" data-admin-loader-nav data-admin-loader-label="сайт">Вернуться на сайт</a>
     </div>
   </aside>
 
@@ -49,13 +49,17 @@
   </main>
 </div>
 
+<div class="admin-loader" id="adminNetworkLoader" role="status" aria-live="polite" aria-atomic="true" aria-hidden="true" data-state="idle">
+  <span class="admin-loader__text" id="adminNetworkLoaderText">Грузим раздел</span>
+</div>
+
 <section class="admin-mobile-lock" aria-live="polite">
   <div class="admin-mobile-lock__card">
     <span class="admin-brand__mark"></span>
     <p class="admin-topbar__eyebrow">Панель администратора</p>
     <h1>Админ-панель доступна на большом экране</h1>
     <p>Откройте её с ПК или устройства с более широкой областью просмотра. Мобильную версию для админки в этой сборке не поддерживаем.</p>
-    <a class="admin-button admin-button--ghost" href="{{ url_for('index') }}">Вернуться на сайт</a>
+    <a class="admin-button admin-button--ghost" href="{{ url_for('index') }}" data-admin-loader-nav data-admin-loader-label="сайт">Вернуться на сайт</a>
   </div>
 </section>
 
