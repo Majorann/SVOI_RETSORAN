@@ -21,40 +21,10 @@
       <h2>Меню доставки</h2>
       <span class="pill">Онлайн</span>
     </div>
-    <div class="menu">
-      {% for item in items %}
-      <article class="menu-card menu-card--delivery">
-        <div class="menu-card__media">
-          <img
-            class="menu-card__image"
-            src="{{ url_for('static', filename=item.photo) }}"
-            alt="{{ item.name }}"
-            loading="{% if loop.index <= 4 %}eager{% else %}lazy{% endif %}"
-            decoding="async"
-            {% if loop.index <= 4 %}fetchpriority="high"{% endif %}
-          />
-        </div>
-        <div class="menu-card__content">
-          <div class="menu-card__title-row">
-            <h3>{{ item.name }}</h3>
-            <span class="menu-type menu-type--{{ item.type|replace(' ', '-')|lower }}">{{ item.type }}</span>
-          </div>
-          <p class="menu-card__lore">{{ item.lore }}</p>
-          <div class="menu-card__bottom">
-            <span class="price">{{ item.price }} ₽</span>
-            <button
-              class="add-button delivery-add-button"
-              type="button"
-              data-id="{{ item.id }}"
-              data-name="{{ item.name }}"
-              data-price="{{ item.price }}"
-              data-photo="{{ item.photo }}"
-            >В корзину</button>
-          </div>
-        </div>
-      </article>
-      {% endfor %}
-    </div>
+    {% set card_mode = "delivery" %}
+    {% set add_button_classes = "add-button delivery-add-button" %}
+    {% set menu_list_id = none %}
+    {% include "partials/menu/_menu_list.html" %}
   </div>
 
   <aside class="delivery-cart checkout-card" id="deliveryCartPanel">

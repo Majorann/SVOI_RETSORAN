@@ -286,6 +286,7 @@ document.querySelectorAll("[data-admin-api]").forEach((button) => {
 
 modalConfirm?.addEventListener("click", async () => {
   if (!currentAction) return;
+  const action = currentAction;
   const reason = modalReason.value.trim();
   if (!reason) {
     showToast("Причина обязательна.", "error");
@@ -293,12 +294,12 @@ modalConfirm?.addEventListener("click", async () => {
     return;
   }
   const payload = { reason };
-  if (currentAction.payloadSource && currentAction.payloadKey) {
-    const source = document.getElementById(currentAction.payloadSource);
-    payload[currentAction.payloadKey] = source ? source.value : "";
+  if (action.payloadSource && action.payloadKey) {
+    const source = document.getElementById(action.payloadSource);
+    payload[action.payloadKey] = source ? source.value : "";
   }
   try {
-    const response = await fetch(currentAction.api, {
+    const response = await fetch(action.api, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -312,7 +313,7 @@ modalConfirm?.addEventListener("click", async () => {
     }
     closeModal();
     sessionStorage.setItem("adminToast", data.toast || "Действие выполнено.");
-    const redirectUrl = currentAction.redirectUrl || data.redirect_url || "";
+    const redirectUrl = action.redirectUrl || data.redirect_url || "";
     if (redirectUrl) {
       window.location.assign(redirectUrl);
       return;

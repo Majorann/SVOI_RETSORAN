@@ -13,14 +13,13 @@ from services.order_status import apply_persisted_status_fields_value
 
 
 def seed_logged_in_session(client, user_id=1, user_name="Админ"):
-    client.get("/")
     with client.session_transaction() as session_state:
         session_state["user_id"] = user_id
         session_state["user_name"] = user_name
 
 
 def get_csrf_token(client):
-    client.get("/")
+    client.get("/login")
     with client.session_transaction() as session_state:
         return session_state["csrf_token"]
 
@@ -959,6 +958,57 @@ def test_admin_service_save_menu_item_stores_menu_in_postgres(tmp_path, monkeypa
     assert service.menu_content.invalidated == 1
 
 
+def test_admin_service_normalizes_cyrillic_menu_slug_for_postgres(tmp_path, monkeypatch):
+    menu_root = tmp_path / "menu_items"
+    captured = {}
+
+    class MenuContentStub:
+        def __init__(self):
+            self.invalidated = 0
+
+        def load_menu_items_admin(self):
+            return []
+
+        def invalidate_local_cache(self):
+            self.invalidated += 1
+
+        def get_redis_client(self):
+            return None
+
+    service = AdminService(active_storage="postgres", menu_content=MenuContentStub())
+    monkeypatch.setattr("services.admin_service.MENU_ITEMS_PATH", menu_root)
+    monkeypatch.setattr(service, "log_admin_action", lambda **kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "_pg_store",
+        lambda: type(
+            "PgStoreStub",
+            (),
+            {
+                "upsert_menu_item": staticmethod(
+                    lambda payload: (captured.setdefault("payload", dict(payload)), 34)[1]
+                )
+            },
+        )(),
+    )
+
+    service.save_menu_item(
+        form={
+            "slug": "Пирог Мина",
+            "name": "Пирог Мина",
+            "type": "Закуски",
+            "price": "450",
+            "weight": "320",
+            "lore": "Горячий",
+            "reason": "test",
+        },
+        photo=None,
+        admin_user_id=1,
+    )
+
+    assert captured["payload"]["slug"] == "pirog-mina"
+
+
 def test_admin_service_deletes_promo_from_postgres(tmp_path, monkeypatch):
     promo_root = tmp_path / "promo_items"
     deleted = []
@@ -1052,6 +1102,114 @@ def test_menu_content_loads_reklama_items_from_postgres(monkeypatch):
     assert items[0]["class"] == "reklama"
     assert items[0]["text"] == "Весенний баннер"
     assert items[0]["link"] == "https://example.com/ad"
+
+
+def test_menu_content_resolves_promo_photo_from_disk_cache(tmp_path, monkeypatch):
+    service = MenuContentService(
+        active_storage="postgres",
+        menu_cache_enabled=False,
+        menu_cache_key="menu:test",
+        menu_cache_ttl_seconds=60,
+        redis_module=None,
+        redis_url="",
+    )
+    promo_root = tmp_path / "promo_items"
+    promo_dir = promo_root / "akciya" / "Купи банку и пройди опрос"
+    promo_dir.mkdir(parents=True)
+    (promo_dir / "item.txt").write_text(
+        "\n".join(
+            [
+                "id=2",
+                "class=akciya",
+                "name=Пройди опрос",
+                "lore=Тест",
+                "condition=ID(1).QTY >= 1",
+                "reward=POINTS(10)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (promo_dir / "Web_Photo_Editor.webp").write_bytes(b"fake")
+
+    monkeypatch.setattr("services.menu_content.PROMO_ITEMS_PATH", promo_root)
+
+    item = service.parse_promo_row(
+        {
+            "id": 2,
+            "slug": "proydi-opros",
+            "class": "akciya",
+            "name": "Пройди опрос",
+            "lore": "Тест",
+            "priority": 100,
+            "active": True,
+            "condition": "ID(1).QTY >= 1",
+            "reward": "POINTS(10)",
+            "notify": "",
+            "reward_mode": "once",
+            "limit_per_order": "",
+            "limit_per_user_per_day": "",
+            "start_at": "",
+            "end_at": "",
+            "photo": "promo_items/akciya/proydi-opros/photo.webp",
+        }
+    )
+
+    assert item["photo"] == "promo_items/akciya/Купи банку и пройди опрос/Web_Photo_Editor.webp"
+
+
+def test_pg_store_legacy_menu_rows_normalize_slug_and_photo_path(tmp_path, monkeypatch, app_module):
+    pg_store = importlib.import_module("storage.pg_store")
+    menu_root = tmp_path / "menu_items"
+    item_dir = menu_root / "Пирог Мина"
+    item_dir.mkdir(parents=True)
+    (item_dir / "item.txt").write_text(
+        "\n".join(
+            [
+                "id=10",
+                "name=Пирог Мина",
+                "lore=Тест",
+                "type=Закуски",
+                "price=100",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (item_dir / "convertio.in_photo (1).webp").write_bytes(b"fake")
+
+    monkeypatch.setattr(pg_store, "MENU_ITEMS_PATH", menu_root)
+
+    rows = pg_store._legacy_menu_item_rows()
+
+    assert rows[0]["slug"] == "pirog-mina"
+    assert rows[0]["photo_path"] == "menu_items/pirog-mina/photo.webp"
+
+
+def test_pg_store_legacy_promotion_rows_normalize_slug_and_photo_path(tmp_path, monkeypatch, app_module):
+    pg_store = importlib.import_module("storage.pg_store")
+    promo_root = tmp_path / "promo_items"
+    item_dir = promo_root / "akciya" / "Купи банку и пройди опрос"
+    item_dir.mkdir(parents=True)
+    (item_dir / "item.txt").write_text(
+        "\n".join(
+            [
+                "id=2",
+                "class=akciya",
+                "name=Пройди опрос",
+                "lore=Тест",
+                "condition=ID(1).QTY >= 1",
+                "reward=POINTS(10)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (item_dir / "Web_Photo_Editor.webp").write_bytes(b"fake")
+
+    monkeypatch.setattr(pg_store, "PROMO_ITEMS_PATH", promo_root)
+
+    rows = pg_store._legacy_promotion_rows()
+
+    assert rows[0]["slug"] == "proydi-opros"
+    assert rows[0]["photo_path"] == "promo_items/akciya/proydi-opros/photo.webp"
 
 
 def test_pg_schema_normalizes_user_cards_created_at_text_column(app_module):

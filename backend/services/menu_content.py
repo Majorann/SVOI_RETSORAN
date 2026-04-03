@@ -5,7 +5,7 @@ import re
 import threading
 import time
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from config import MENU_ITEMS_PATH, MENU_META_NAME, MENU_PHOTO_NAMES, PROMO_ITEMS_PATH, PROMO_META_NAME, PROMO_PHOTO_NAMES
 from models import MenuItem, PromoItem
@@ -38,6 +38,8 @@ class MenuContentService:
         self._memory_cache_lock = threading.Lock()
         self._disk_menu_photo_cache = None
         self._disk_menu_photo_cache_lock = threading.Lock()
+        self._disk_promo_photo_cache = None
+        self._disk_promo_photo_cache_lock = threading.Lock()
 
     def _memory_cache_get(self, key: str):
         now = time.monotonic()
@@ -61,9 +63,13 @@ class MenuContentService:
         with self._memory_cache_lock:
             if not keys:
                 self._memory_cache.clear()
-                return
-            for key in keys:
-                self._memory_cache.pop(key, None)
+            else:
+                for key in keys:
+                    self._memory_cache.pop(key, None)
+        with self._disk_menu_photo_cache_lock:
+            self._disk_menu_photo_cache = None
+        with self._disk_promo_photo_cache_lock:
+            self._disk_promo_photo_cache = None
 
     def _build_disk_menu_photo_cache(self):
         cache = {}
@@ -94,14 +100,85 @@ class MenuContentService:
                 self._disk_menu_photo_cache = self._build_disk_menu_photo_cache()
             return self._disk_menu_photo_cache
 
+    def _build_disk_promo_photo_cache(self):
+        cache = {}
+        if not PROMO_ITEMS_PATH.exists():
+            return cache
+
+        for meta_path in sorted(PROMO_ITEMS_PATH.rglob(PROMO_META_NAME)):
+            item_dir = meta_path.parent
+            photo_name = self.resolve_photo_name(item_dir, PROMO_PHOTO_NAMES)
+            if not photo_name:
+                continue
+            try:
+                meta = self.parse_menu_meta(meta_path)
+                item_id = int(meta.get("id", 0))
+            except (TypeError, ValueError):
+                continue
+            if item_id <= 0:
+                continue
+            try:
+                relative_slug = item_dir.relative_to(PROMO_ITEMS_PATH).as_posix()
+            except ValueError:
+                relative_slug = item_dir.name
+            cache[item_id] = self.normalize_static_path(f"promo_items/{relative_slug}/{photo_name}")
+
+        return cache
+
+    def _get_disk_promo_photo_cache(self):
+        with self._disk_promo_photo_cache_lock:
+            if self._disk_promo_photo_cache is None:
+                self._disk_promo_photo_cache = self._build_disk_promo_photo_cache()
+            return self._disk_promo_photo_cache
+
+    def _normalize_path_component(self, value: str) -> str:
+        text = str(value or "").strip().strip("/\\")
+        if not text:
+            return ""
+        try:
+            text.encode("utf-8")
+            return text
+        except UnicodeEncodeError:
+            raw_bytes = os.fsencode(text)
+            for encoding in ("utf-8", "cp1251", "latin-1"):
+                try:
+                    decoded = raw_bytes.decode(encoding)
+                    decoded.encode("utf-8")
+                    return decoded
+                except (UnicodeDecodeError, UnicodeEncodeError):
+                    continue
+            return raw_bytes.decode("utf-8", errors="ignore")
+
+    def normalize_static_path(self, value: str) -> str:
+        text = str(value or "").strip().replace("\\", "/")
+        if not text:
+            return ""
+        parts = []
+        for part in PurePosixPath(text).parts:
+            if part in {"", ".", "/"}:
+                continue
+            normalized = self._normalize_path_component(part)
+            if normalized:
+                parts.append(normalized)
+        return "/".join(parts)
+
     def resolve_menu_photo_path(self, item_id: int, photo_path: str):
-        normalized = (photo_path or "").strip().lstrip("/")
+        normalized = self.normalize_static_path(photo_path)
         if normalized:
             candidate = MENU_ITEMS_PATH.parent / normalized
             if candidate.exists():
                 return normalized
 
         return self._get_disk_menu_photo_cache().get(item_id, normalized)
+
+    def resolve_promo_photo_path(self, item_id: int, photo_path: str):
+        normalized = self.normalize_static_path(photo_path)
+        if normalized:
+            candidate = PROMO_ITEMS_PATH.parent / normalized
+            if candidate.exists():
+                return normalized
+
+        return self._get_disk_promo_photo_cache().get(item_id, normalized)
 
     def get_redis_client(self):
         if not self.menu_cache_enabled or not self.redis_url or self.redis_module is None:
@@ -289,6 +366,10 @@ class MenuContentService:
             items = self.load_menu_items_from_db(include_inactive=True)
         else:
             items = self.load_menu_items_from_disk(include_inactive=True)
+        with self._disk_menu_photo_cache_lock:
+            self._disk_menu_photo_cache = None
+        with self._disk_promo_photo_cache_lock:
+            self._disk_promo_photo_cache = None
         return self._memory_cache_set(memory_key, items)
 
     def load_menu_items_from_db(self, include_inactive: bool = False):
@@ -465,11 +546,11 @@ class MenuContentService:
     def resolve_photo_name(self, item_dir: Path, photo_names):
         for photo_name in photo_names:
             if (item_dir / photo_name).exists():
-                return photo_name
+                return self._normalize_path_component(photo_name)
         for extension in ("*.webp", "*.png", "*.jpg", "*.jpeg"):
             candidates = sorted(item_dir.glob(extension))
             if candidates:
-                return candidates[0].name
+                return self._normalize_path_component(candidates[0].name)
         return None
 
     def normalize_portion_label(self, raw_value: str) -> str:
@@ -547,13 +628,15 @@ class MenuContentService:
         active = active_value in {"1", "true", "yes", "y", "on"}
         portion_label = self.resolve_menu_portion_label(meta)
         portion_tone_rgb = self.build_portion_tone_rgb(portion_label) if portion_label else ""
+        slug = self._normalize_path_component(slug)
+        photo_name = self._normalize_path_component(photo_name)
         item = MenuItem(
             id=item_id,
             name=name,
             lore=lore,
             type=dish_type,
             price=price,
-            photo=f"menu_items/{slug}/{photo_name}",
+            photo=self.normalize_static_path(f"menu_items/{slug}/{photo_name}"),
             portion_label=portion_label,
             portion_tone_rgb=portion_tone_rgb,
             popularity=popularity,
@@ -585,9 +668,11 @@ class MenuContentService:
             lore=lore,
             type=dish_type,
             price=price,
-            photo=self.resolve_menu_photo_path(
+            photo=self.normalize_static_path(
+                self.resolve_menu_photo_path(
                 item_id,
                 (row.get("photo") or row.get("photo_path") or "").strip(),
+                )
             ),
             portion_label=portion_label,
             portion_tone_rgb=portion_tone_rgb,
@@ -616,7 +701,9 @@ class MenuContentService:
 
         active_value = (meta.get("active", "true") or "").lower()
         active = active_value in {"1", "true", "yes", "y", "on"}
-        photo = f"promo_items/{slug}/{photo_name}" if photo_name else None
+        slug = self._normalize_path_component(slug)
+        photo_name = self._normalize_path_component(photo_name)
+        photo = self.normalize_static_path(f"promo_items/{slug}/{photo_name}") if photo_name else None
 
         if item_class == "reklama":
             text = (meta.get("text", "") or "").strip()
@@ -680,7 +767,12 @@ class MenuContentService:
         class_name = str(promotion.get("class") or promotion.get("class_name") or "akciya").strip().lower()
         priority = int(promotion.get("priority", 100) or 100)
         active = bool(promotion.get("active", True))
-        photo = promotion.get("photo")
+        photo = self.normalize_static_path(
+            self.resolve_promo_photo_path(
+                item_id,
+                promotion.get("photo") or promotion.get("photo_path") or "",
+            )
+        )
         start_at = (promotion.get("start_at", "") or "").strip()
         end_at = (promotion.get("end_at", "") or "").strip()
 

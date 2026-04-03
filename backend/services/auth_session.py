@@ -7,6 +7,18 @@ from itsdangerous import BadSignature, SignatureExpired
 
 
 class AuthSessionService:
+    _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+    _CSRF_HTML_ENDPOINTS = {
+        "checkout",
+        "delivery_checkout",
+        "delivery_payment_page",
+        "index",
+        "login",
+        "profile",
+        "register",
+        "reserve",
+    }
+
     def __init__(
         self,
         *,
@@ -47,6 +59,64 @@ class AuthSessionService:
         self.list_user_bookings = list_user_bookings
         self.get_user_preparing_orders = get_user_preparing_orders
         self.list_active_order_statuses = list_active_order_statuses
+
+    def _should_issue_csrf_token(self):
+        endpoint = request.endpoint or ""
+        if endpoint == "static":
+            return False
+
+        if request.method not in self._SAFE_METHODS:
+            return True
+
+        if request.blueprint == "admin":
+            return True
+
+        if endpoint not in self._CSRF_HTML_ENDPOINTS:
+            return False
+
+        # Keep anonymous landing/menu pages cache-friendly. Logged-in home still
+        # needs CSRF for booking cancellation, while other listed pages always
+        # render forms or POST-backed JS flows.
+        if endpoint == "index":
+            return bool(getattr(g, "current_user_id", None))
+
+        return True
+
+    def _ensure_csrf_token(self):
+        token = session.get("csrf_token")
+        if token:
+            g.csrf_token = token
+            return token
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+        g.csrf_token = token
+        return token
+
+    def _has_session_cookie(self):
+        session_cookie_name = self.app.config.get("SESSION_COOKIE_NAME", "session")
+        return bool(request.cookies.get(session_cookie_name))
+
+    def _has_auth_context_cookie(self):
+        return self._has_session_cookie() or bool(request.cookies.get(self.auth_session_cookie_name))
+
+    def _can_skip_session_handling(self):
+        endpoint = request.endpoint or ""
+        if endpoint == "static":
+            return True
+
+        if request.method not in self._SAFE_METHODS:
+            return False
+
+        if request.blueprint == "admin":
+            return False
+
+        if self._has_auth_context_cookie():
+            return False
+
+        if endpoint == "index":
+            return True
+
+        return endpoint not in self._CSRF_HTML_ENDPOINTS
 
     def _load_users_cached(self):
         if getattr(g, "_auth_users_loaded", False):
@@ -301,6 +371,15 @@ class AuthSessionService:
         if getattr(g, "notifications_loaded", False):
             return getattr(g, "notification_bookings", []), getattr(g, "notification_preparing_orders", [])
 
+        if getattr(g, "current_user_loaded", False) and not getattr(g, "current_user_id", None):
+            g.notifications_loaded = True
+            g.notification_bookings = []
+            g.notification_preparing_orders = []
+            g.notifications_count_loaded = True
+            g.notification_bookings_count = 0
+            g.notification_preparing_orders_count = 0
+            return g.notification_bookings, g.notification_preparing_orders
+
         user_id = session.get("user_id")
         if not user_id:
             g.notifications_loaded = True
@@ -326,6 +405,12 @@ class AuthSessionService:
             return int(getattr(g, "notification_bookings_count", 0) or 0) + int(
                 getattr(g, "notification_preparing_orders_count", 0) or 0
             )
+
+        if getattr(g, "current_user_loaded", False) and not getattr(g, "current_user_id", None):
+            g.notifications_count_loaded = True
+            g.notification_bookings_count = 0
+            g.notification_preparing_orders_count = 0
+            return 0
 
         if getattr(g, "notifications_loaded", False):
             bookings = getattr(g, "notification_bookings", [])
@@ -361,6 +446,9 @@ class AuthSessionService:
         @self.app.before_request
         def restore_auth_from_cookie():
             if request.endpoint == "static":
+                return
+
+            if self._can_skip_session_handling():
                 return
 
             current_user_id = session.get("user_id")
@@ -416,6 +504,10 @@ class AuthSessionService:
             if request.endpoint == "static":
                 return
 
+            if self._can_skip_session_handling():
+                self._set_request_user(None)
+                return
+
             user_id = session.get("user_id")
             if not user_id:
                 self._set_request_user(None)
@@ -426,6 +518,9 @@ class AuthSessionService:
         @self.app.before_request
         def keep_user_session():
             if request.endpoint == "static":
+                return
+
+            if self._can_skip_session_handling():
                 return
 
             if self.session_debug_enabled and request.endpoint in {"login", "profile", "index"}:
@@ -449,8 +544,9 @@ class AuthSessionService:
 
         @self.app.before_request
         def ensure_csrf_token():
-            if "csrf_token" not in session:
-                session["csrf_token"] = secrets.token_urlsafe(32)
+            if not self._should_issue_csrf_token():
+                return
+            self._ensure_csrf_token()
 
         @self.app.before_request
         def validate_csrf_token():
@@ -470,6 +566,9 @@ class AuthSessionService:
         @self.app.after_request
         def sync_auth_session_cookie_response(response):
             if request.endpoint == "static":
+                return response
+
+            if self._can_skip_session_handling() and not getattr(g, "clear_auth_session_cookie", False):
                 return response
 
             session_user_id = session.get("user_id")

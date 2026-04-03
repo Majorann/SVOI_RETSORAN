@@ -1,0 +1,45 @@
+{% set is_catalog_card = card_mode|default('menu') == 'menu' %}
+<article
+  class="menu-card {{ 'menu-card--menu' if is_catalog_card else 'menu-card--delivery' }}"
+  {% if is_catalog_card %}
+    data-type="{{ item.type }}"
+    data-price="{{ item.price }}"
+    data-popularity="{{ item.popularity or item.orders_count or 0 }}"
+  {% endif %}
+>
+  <div class="menu-card__media">
+    <img
+      class="menu-card__image"
+      src="{{ url_for('static', filename=item.photo) }}"
+      alt="{{ item.name }}"
+      loading="{% if prioritize_image %}eager{% else %}lazy{% endif %}"
+      decoding="async"
+      {% if prioritize_image %}fetchpriority="high"{% endif %}
+    />
+    {% if is_catalog_card and item.portion_label %}
+    <span class="menu-card__portion menu-card__portion--media"{% if item.portion_tone_rgb %} style="--portion-dot-rgb: {{ item.portion_tone_rgb }};"{% endif %}>{{ item.portion_label }}</span>
+    {% endif %}
+  </div>
+  <div class="menu-card__content">
+    <div class="menu-card__text">
+      <div class="menu-card__title-row">
+        <h3>{{ item.name }}</h3>
+        <span class="menu-type menu-type--{{ item.type|replace(' ', '-')|lower }}">{{ item.type }}</span>
+      </div>
+      <p class="menu-card__lore">{{ item.lore }}</p>
+      <div class="menu-card__bottom">
+        <span class="price">{{ item.price }} ₽</span>
+        <div class="menu-card__cta-group">
+          <button
+            class="{{ add_button_classes|default('add-button') }}"
+            type="button"
+            data-id="{{ item.id }}"
+            data-name="{{ item.name }}"
+            data-price="{{ item.price }}"
+            data-photo="{{ item.photo }}"
+          >В корзину</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</article>

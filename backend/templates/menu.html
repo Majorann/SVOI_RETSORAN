@@ -87,40 +87,10 @@
 
 <section class="section">
   <div class="menu-viewport" id="menuViewport">
-  <div class="menu" id="menuList">
-    {% for item in items %}
-      <article class="menu-card menu-card--menu" data-type="{{ item.type }}" data-price="{{ item.price }}" data-popularity="{{ item.popularity or item.orders_count or 0 }}">
-        <div class="menu-card__media">
-          <img
-            class="menu-card__image"
-            src="{{ url_for('static', filename=item.photo) }}"
-            alt="{{ item.name }}"
-            loading="{% if loop.index <= 4 %}eager{% else %}lazy{% endif %}"
-            decoding="async"
-            {% if loop.index <= 4 %}fetchpriority="high"{% endif %}
-          />
-          {% if item.portion_label %}
-          <span class="menu-card__portion menu-card__portion--media"{% if item.portion_tone_rgb %} style="--portion-dot-rgb: {{ item.portion_tone_rgb }};"{% endif %}>{{ item.portion_label }}</span>
-          {% endif %}
-        </div>
-        <div class="menu-card__content">
-          <div class="menu-card__text">
-            <div class="menu-card__title-row">
-              <h3>{{ item.name }}</h3>
-              <span class="menu-type menu-type--{{ item.type|replace(' ', '-')|lower }}">{{ item.type }}</span>
-            </div>
-            <p class="menu-card__lore">{{ item.lore }}</p>
-            <div class="menu-card__bottom">
-              <span class="price">{{ item.price }} ₽</span>
-              <div class="menu-card__cta-group">
-                <button class="add-button" type="button" data-id="{{ item.id }}" data-name="{{ item.name }}" data-price="{{ item.price }}" data-photo="{{ item.photo }}">В корзину</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
+  {% set card_mode = "menu" %}
+  {% set add_button_classes = "add-button" %}
+  {% set menu_list_id = "menuList" %}
+  {% include "partials/menu/_menu_list.html" %}
   </div>
   <div class="menu-empty" id="menuEmptyState" hidden>По вашему запросу блюда не найдены.</div>
 </section>

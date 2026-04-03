@@ -631,6 +631,8 @@ body.page-menu .menu-top__ghost {
   grid-template-rows: auto 1fr auto;
   gap: 8px;
   min-height: 110px;
+  height: 100%;
+  align-content: start;
 }
 
 .menu-card__title-row {
@@ -663,18 +665,25 @@ body.page-menu .menu-top__ghost {
 }
 
 .menu-card__bottom {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: flex-end;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px 12px;
+  width: 100%;
   margin-top: auto;
+  padding-top: 8px;
 }
 
 .menu-card__bottom .price {
-  align-self: flex-end;
+  align-self: end;
+  justify-self: start;
   font-size: 24px;
   line-height: 1;
+}
+
+.menu-card__cta-group {
+  justify-self: end;
+  align-self: end;
 }
 
 .menu-type {
@@ -746,6 +755,7 @@ body.page-menu .menu-top__ghost {
 
 .menu-card--menu .menu-card__content {
   padding: 14px 0 14px 10px;
+  height: 100%;
 }
 
 .add-button.is-added {

@@ -233,6 +233,7 @@ def get_analytics(service, filters: dict, *, now: datetime | None = None):
             value = _safe_int(item.get(value_key))
             ranked.append(
                 {
+                    "id": _safe_int(item.get("id")),
                     "rank": index,
                     "name": item.get("name") or "Без названия",
                     "category": item.get("category") or "Без категории",

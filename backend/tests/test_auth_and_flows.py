@@ -7,7 +7,7 @@ from conftest import write_json
 
 
 def get_csrf_token(client):
-    client.get("/")
+    client.get("/login")
     with client.session_transaction() as session_state:
         return session_state["csrf_token"]
 
@@ -31,6 +31,22 @@ def build_user(app_module, *, password="1234", legacy_hash=False, balance=0, car
         "cards": cards or [],
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
+
+
+def test_normalize_phone_converts_common_russian_formats_to_plus7(app_module):
+    from routes.auth_routes import normalize_phone
+
+    assert normalize_phone("+7 999 123-45-67") == "+79991234567"
+    assert normalize_phone("8 (999) 123-45-67") == "+79991234567"
+    assert normalize_phone("9991234567") == "+79991234567"
+
+
+def test_normalize_phone_rejects_incomplete_or_non_russian_numbers(app_module):
+    from routes.auth_routes import normalize_phone
+
+    assert normalize_phone("+7 999 123-45") is None
+    assert normalize_phone("+1 999 123 45 67") is None
+    assert normalize_phone("abcdef") is None
 
 
 def test_register_stores_modern_password_hash(app_module, client):
@@ -95,6 +111,48 @@ def test_auth_session_cookie_restores_session_for_first_load(app_module, client)
 
     profile_response = client.get("/profile")
     assert profile_response.status_code == 200
+
+
+def test_public_pages_do_not_issue_session_cookie_without_csrf_need(client):
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers.get("Set-Cookie") is None
+    assert response.headers.get("Vary") is None
+
+    delivery_response = client.get("/delivery")
+    assert delivery_response.status_code == 200
+    assert delivery_response.headers.get("Set-Cookie") is None
+    assert delivery_response.headers.get("Vary") is None
+
+
+def test_static_assets_do_not_issue_session_cookie(client):
+    response = client.get("/static/css/style.css")
+
+    assert response.status_code == 200
+    assert response.headers.get("Set-Cookie") is None
+    assert response.headers.get("Vary") is None
+
+
+def test_static_assets_do_not_refresh_logged_in_session_cookie(app_module, client):
+    user = build_user(app_module, legacy_hash=True)
+    write_json(app_module.USERS_PATH, [user])
+
+    csrf_token = get_csrf_token(client)
+    login_response = client.post(
+        "/login",
+        data={
+            "csrf_token": csrf_token,
+            "phone": user["phone"],
+            "password": "1234",
+        },
+    )
+    assert login_response.status_code == 200
+
+    response = client.get("/static/css/style.css")
+
+    assert response.status_code == 200
+    assert response.headers.get("Set-Cookie") is None
 
 
 def test_booking_payment_and_delivery_flows(app_module, client):

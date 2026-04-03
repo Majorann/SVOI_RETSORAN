@@ -1,10 +1,10 @@
 from pathlib import Path
-import re
 import shutil
 from typing import Any
 
 from werkzeug.datastructures import FileStorage
 
+from services.path_naming import ascii_slug, canonical_menu_photo_path, canonical_promo_photo_path
 from services.promotions import build_dsl_text_from_promo_item, parse_and_validate_promo_source
 from services.promotions.ast import PromotionDslError
 from services.promotions.validator import PromotionValidationError
@@ -35,10 +35,6 @@ def _normalize_reward_mode(value: Any, *, require_default: bool) -> str:
     return "once" if require_default else ""
 
 
-def _normalize_slug(value: str) -> str:
-    slug = re.sub(r'[<>:"/\\|?*]+', "_", str(value or "").strip())
-    slug = re.sub(r"\s+", " ", slug).strip(" .")
-    return slug or "item"
 def list_menu_items(service, filters: dict, items: list[dict] | None = None):
     items = list(items) if items is not None else service.menu_content.load_menu_items_admin()
     search = str(filters.get("search") or "").strip().lower()
@@ -81,7 +77,7 @@ def save_menu_item(service, *, form: dict, photo: FileStorage | None, admin_user
     name = str(form.get("name") or "").strip()
     if not name:
         raise ValueError("Название блюда обязательно.")
-    folder_name = _normalize_slug(str(form.get("slug") or name))
+    folder_name = ascii_slug(str(form.get("slug") or name))
     target_dir = menu_items_path / folder_name
     if existing and existing.get("photo"):
         target_dir = menu_items_path / Path(existing["photo"]).parts[1]
@@ -91,8 +87,7 @@ def save_menu_item(service, *, form: dict, photo: FileStorage | None, admin_user
     saved_photo = save_image(target_dir, photo)
     photo_path = str((existing or {}).get("photo") or "").strip()
     if saved_photo and photo is not None and photo.filename:
-        extension = Path(photo.filename).suffix.lower()
-        photo_path = f"menu_items/{target_dir.name}/photo{extension}"
+        photo_path = canonical_menu_photo_path(target_dir.name, photo.filename)
     menu_payload = {
         "id": item_id,
         "slug": target_dir.name,
@@ -137,7 +132,7 @@ def save_promo_item(service, *, form: dict, photo: FileStorage | None, admin_use
     if class_name not in {"akciya", "reklama"}:
         raise ValueError("Недопустимый тип промо.")
     name = str(form.get("name") or form.get("text") or "").strip()
-    folder_name = _normalize_slug(str(form.get("slug") or name or f"{class_name}-{item_id or 'new'}"))
+    folder_name = ascii_slug(str(form.get("slug") or name or f"{class_name}-{item_id or 'new'}"))
     target_dir = promo_items_path / class_name / folder_name
     if existing and existing.get("photo"):
         photo_parts = Path(existing["photo"]).parts
@@ -154,8 +149,7 @@ def save_promo_item(service, *, form: dict, photo: FileStorage | None, admin_use
         photo_path = None
         current_photo = str((existing or {}).get("photo") or "").strip()
         if saved_photo and photo is not None and photo.filename:
-            extension = Path(photo.filename).suffix.lower()
-            photo_path = f"promo_items/{class_name}/{target_dir.name}/photo{extension}"
+            photo_path = canonical_promo_photo_path(class_name, target_dir.name, photo.filename)
         elif current_photo:
             photo_path = current_photo
         promotion_payload = {
@@ -187,8 +181,7 @@ def save_promo_item(service, *, form: dict, photo: FileStorage | None, admin_use
         current_photo = str((existing or {}).get("photo") or "").strip()
         photo_path = current_photo
         if saved_photo and photo is not None and photo.filename:
-            extension = Path(photo.filename).suffix.lower()
-            photo_path = f"promo_items/{class_name}/{target_dir.name}/photo{extension}"
+            photo_path = canonical_promo_photo_path(class_name, target_dir.name, photo.filename)
         promotion_payload = {
             "id": item_id,
             "class": class_name,

@@ -1,10 +1,10 @@
 id=999
 class=akciya
 name=Тест FPV 74
-lore=За заказ FPV-Друн начисляем 100 бонусов.
+lore=Закажи себе и своей любвность по FPV-друну и получите 139 баллов!
 condition=ID(74).QTY >= 2
-reward=POINTS(100)
-notify=Начислены 100 бонусов
+reward=POINTS(139)
+notify=Начислены 139 баллов
 reward_mode=once
 limit_per_order=1
 limit_per_user_per_day=10

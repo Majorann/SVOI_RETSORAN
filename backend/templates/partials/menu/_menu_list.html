@@ -1,0 +1,6 @@
+<div class="menu"{% if menu_list_id %} id="{{ menu_list_id }}"{% endif %}>
+  {% for item in items %}
+    {% set prioritize_image = loop.index <= 4 %}
+    {% include "partials/menu/_menu_card.html" %}
+  {% endfor %}
+</div>

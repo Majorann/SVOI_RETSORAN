@@ -8,6 +8,7 @@ from pathlib import Path
 import psycopg
 from config import MENU_ITEMS_PATH, MENU_PHOTO_NAMES, PROMO_ITEMS_PATH
 from services.business_logic import current_time_value
+from services.path_naming import ascii_slug, canonical_menu_photo_path, canonical_promo_photo_path, image_extension
 from services.order_status import apply_persisted_status_fields_value
 
 
@@ -924,36 +925,20 @@ def _legacy_photo_path(item_dir: Path, root_path: Path, prefix: str, preferred_n
     for photo_name in preferred_names:
         candidate = item_dir / photo_name
         if candidate.exists():
-            try:
-                relative_path = candidate.relative_to(root_path).as_posix()
-            except ValueError:
-                relative_path = candidate.name
-            return f"{prefix}/{relative_path}"
+            return candidate.name
     for extension in ("*.webp", "*.png", "*.jpg", "*.jpeg"):
         candidates = sorted(item_dir.glob(extension))
         if not candidates:
             continue
-        candidate = candidates[0]
-        try:
-            relative_path = candidate.relative_to(root_path).as_posix()
-        except ValueError:
-            relative_path = candidate.name
-        return f"{prefix}/{relative_path}"
+        return candidates[0].name
     return ""
 
 
 def _normalize_slug(value):
     text = _coerce_text(value).strip().replace("\\", "/")
     parts = [segment for segment in text.split("/") if segment]
-    if len(parts) >= 3 and parts[0] == "promo_items" and parts[1] == "akciya":
-        return "/".join(parts[2:-1]) or parts[-2]
-    if len(parts) >= 3 and parts[0] == "menu_items":
-        return parts[-2]
-    if len(parts) >= 3 and parts[0] == "akciya":
-        return "/".join(parts[1:])
-    if parts:
-        return "/".join(parts)
-    return "promotion"
+    candidate = parts[-2] if len(parts) >= 2 else (parts[-1] if parts else text)
+    return ascii_slug(candidate, default="item")
 
 
 def _legacy_menu_item_rows():
@@ -973,16 +958,14 @@ def _legacy_menu_item_rows():
         rows.append(
             {
                 "id": item_id,
-                "slug": meta_path.parent.name,
+                "slug": ascii_slug(meta.get("slug") or name),
                 "name": name,
                 "lore": lore,
                 "type": item_type,
                 "price": _coerce_int(meta.get("price"), 0),
-                "photo_path": _legacy_photo_path(
-                    meta_path.parent,
-                    MENU_ITEMS_PATH,
-                    "menu_items",
-                    MENU_PHOTO_NAMES,
+                "photo_path": canonical_menu_photo_path(
+                    meta.get("slug") or name,
+                    _legacy_photo_path(meta_path.parent, MENU_ITEMS_PATH, "menu_items", MENU_PHOTO_NAMES),
                 ),
                 "portion_label": _coerce_text(
                     meta.get("portion")
@@ -1025,6 +1008,8 @@ def _legacy_promotion_rows():
             "promo_items",
             ("photo.png", "photo.webp", "photo.jpg", "photo.jpeg"),
         )
+        canonical_slug = ascii_slug(meta.get("slug") or meta.get("name") or meta.get("text") or meta_path.parent.name)
+        canonical_photo_path = canonical_promo_photo_path(class_name, canonical_slug, photo_path)
         if class_name == "reklama":
             text = _coerce_text(meta.get("text")).strip()
             if not text:
@@ -1032,7 +1017,7 @@ def _legacy_promotion_rows():
             rows.append(
                 {
                     "id": promo_id,
-                    "slug": "/".join(relative_parts[1:-1]),
+                    "slug": canonical_slug,
                     "name": f"reklama-{promo_id}",
                     "lore": "",
                     "class": class_name,
@@ -1048,7 +1033,7 @@ def _legacy_promotion_rows():
                     "limit_per_user_per_day": None,
                     "start_at": _parse_optional_datetime(meta.get("start_at")),
                     "end_at": _parse_optional_datetime(meta.get("end_at")),
-                    "photo_path": photo_path,
+                    "photo_path": canonical_photo_path,
                 }
             )
             continue
@@ -1059,7 +1044,7 @@ def _legacy_promotion_rows():
         rows.append(
             {
                 "id": promo_id,
-                "slug": "/".join(relative_parts[1:-1]),
+                "slug": canonical_slug,
                 "name": name,
                 "lore": lore,
                 "class": class_name,
@@ -1075,7 +1060,7 @@ def _legacy_promotion_rows():
                 "limit_per_user_per_day": _coerce_int(meta.get("limit_per_user_per_day"), 0) or None,
                 "start_at": _parse_optional_datetime(meta.get("start_at")),
                 "end_at": _parse_optional_datetime(meta.get("end_at")),
-                "photo_path": photo_path,
+                "photo_path": canonical_photo_path,
             }
         )
     return rows
@@ -1092,12 +1077,16 @@ def _upsert_menu_items_in_tx(cur, menu_items):
         rows.append(
             (
                 item_id,
-                _normalize_slug(menu_item.get("slug") or menu_item.get("photo_path") or menu_item.get("name")),
+                ascii_slug(menu_item.get("slug") or menu_item.get("name")),
                 _coerce_text(menu_item.get("name")).strip(),
                 _coerce_text(menu_item.get("lore")).strip(),
                 _coerce_text(menu_item.get("type")).strip(),
                 _coerce_int(menu_item.get("price"), 0),
-                _coerce_text(menu_item.get("photo_path")).strip(),
+                canonical_menu_photo_path(
+                    menu_item.get("slug") or menu_item.get("name"),
+                    _coerce_text(menu_item.get("photo_path")).strip(),
+                    f"photo{image_extension(_coerce_text(menu_item.get('photo_path')).strip())}",
+                ),
                 _coerce_text(menu_item.get("portion_label") or menu_item.get("weight")).strip(),
                 _coerce_int(menu_item.get("popularity"), 0),
                 _coerce_bool(menu_item.get("featured"), False),
@@ -1156,10 +1145,13 @@ def _upsert_promotions_in_tx(cur, promotions):
         if promotion_id <= 0:
             continue
         class_name = _coerce_text(promotion.get("class") or promotion.get("class_name"), "akciya").strip() or "akciya"
+        canonical_slug = ascii_slug(
+            promotion.get("slug") or promotion.get("name") or promotion.get("text") or f"{class_name}-{promotion_id}"
+        )
         rows.append(
             (
                 promotion_id,
-                _normalize_slug(promotion.get("slug") or promotion.get("photo_path") or promotion.get("name") or promotion.get("text")),
+                canonical_slug,
                 _coerce_text(promotion.get("name")).strip() or (f"reklama-{promotion_id}" if class_name == "reklama" else ""),
                 _coerce_text(promotion.get("lore")).strip(),
                 class_name,
@@ -1175,7 +1167,12 @@ def _upsert_promotions_in_tx(cur, promotions):
                 (_coerce_int(promotion.get("limit_per_user_per_day"), 0) or None),
                 _parse_optional_datetime(promotion.get("start_at")),
                 _parse_optional_datetime(promotion.get("end_at")),
-                _coerce_text(promotion.get("photo_path")).strip(),
+                canonical_promo_photo_path(
+                    class_name,
+                    canonical_slug,
+                    _coerce_text(promotion.get("photo_path")).strip(),
+                    f"photo{image_extension(_coerce_text(promotion.get('photo_path')).strip())}",
+                ),
                 promotion.get("created_by_admin_user_id"),
                 promotion.get("updated_by_admin_user_id"),
             )

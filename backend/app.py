@@ -4,7 +4,7 @@ Restaurant demo app (Flask).
 - Bookings/users stored in JSON files
 """
 
-from flask import Flask, render_template, request, jsonify, session, redirect, send_from_directory, url_for
+from flask import Flask, g, render_template, request, jsonify, session, redirect, send_from_directory, url_for
 from datetime import datetime, timedelta
 from pathlib import Path
 import os
@@ -260,6 +260,8 @@ def env_int(name: str, default: int) -> int:
 
 app = Flask(__name__)
 app.permanent_session_lifetime = timedelta(days=30)
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = max(300, env_int("STATIC_CACHE_MAX_AGE_SECONDS", 3600))
+app.config["SESSION_REFRESH_EACH_REQUEST"] = False
 # Секрет для сессий (в проде заменить)
 app.secret_key = os.getenv(
     "FLASK_SECRET_KEY",
@@ -281,6 +283,23 @@ app.config["SESSION_COOKIE_PARTITIONED"] = env_bool("SESSION_COOKIE_PARTITIONED"
 app.config["PREFERRED_URL_SCHEME"] = "https" if app.config["SESSION_COOKIE_SECURE"] else "http"
 if env_bool("TRUST_PROXY_HEADERS", True):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+
+@app.before_request
+def start_request_timer():
+    g.request_started_at = time.perf_counter()
+
+
+@app.after_request
+def append_server_timing_headers(response):
+    started_at = getattr(g, "request_started_at", None)
+    if started_at is None:
+        return response
+
+    elapsed_ms = max(0.0, (time.perf_counter() - started_at) * 1000.0)
+    response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.1f}"
+    response.headers["X-Render-Time-Ms"] = f"{elapsed_ms:.1f}"
+    return response
 
 
 def _ru_date(value):
@@ -524,6 +543,7 @@ def index():
         promo_items_to_news_cards,
         NEWS_CARDS,
         load_menu_items,
+        (admin_service.get_analytics if ACTIVE_STORAGE == "postgres" and admin_service is not None else None),
         get_user_preparing_orders,
         list_active_order_statuses,
         get_user_by_id,
@@ -744,11 +764,12 @@ def post_login():
 @app.context_processor
 def inject_notifications_count():
     # Бейдж уведомлений в нижнем меню
+    current_user = getattr(g, "current_user", None) or {}
     return {
         "notifications_count": get_request_notifications_count(),
-        "current_user_name": session.get("user_name"),
-        "current_user_id": session.get("user_id"),
-        "csrf_token": session.get("csrf_token", ""),
+        "current_user_name": current_user.get("name") or "",
+        "current_user_id": getattr(g, "current_user_id", None),
+        "csrf_token": getattr(g, "csrf_token", ""),
     }
 
 

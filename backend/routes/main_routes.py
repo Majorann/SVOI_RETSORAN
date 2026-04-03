@@ -1,4 +1,4 @@
-from flask import g, redirect, render_template, session, url_for
+from flask import g, redirect, render_template, url_for
 import secrets
 from services.order_totals import summarize_saved_order_totals
 
@@ -28,6 +28,35 @@ def _format_time_hhmm(value):
 _POPULAR_ROTATOR = secrets.SystemRandom()
 
 
+def _sanitize_static_filename(value):
+    text = str(value or "").strip().lstrip("/")
+    if not text:
+        return ""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return ""
+    return text
+
+
+def _sanitize_news_cards(cards):
+    sanitized_cards = []
+    for card in cards or []:
+        item = dict(card or {})
+        item["photo"] = _sanitize_static_filename(item.get("photo"))
+        sanitized_cards.append(item)
+    return sanitized_cards
+
+
+def _sanitize_menu_items(items):
+    sanitized_items = []
+    for item in items or []:
+        entry = dict(item or {})
+        entry["photo"] = _sanitize_static_filename(entry.get("photo"))
+        sanitized_items.append(entry)
+    return sanitized_items
+
+
 def _pick_popular_items(items, limit):
     pool = list(items or [])
     if not pool:
@@ -38,6 +67,43 @@ def _pick_popular_items(items, limit):
     if len(pool) <= 10:
         return pool[:safe_limit]
     return _POPULAR_ROTATOR.sample(pool, safe_limit)
+
+
+def _pick_popular_items_from_analytics(get_popular_analytics, items, limit):
+    if not callable(get_popular_analytics):
+        return []
+    menu_pool = list(items or [])
+    if not menu_pool:
+        return []
+    try:
+        analytics = get_popular_analytics({"period": "30d", "mode": "all"}) or {}
+    except Exception:
+        return []
+    ranked_items = analytics.get("top_qty_items") or []
+    if not ranked_items:
+        return []
+    item_index = {}
+    for item in menu_pool:
+        try:
+            item_id = int(item.get("id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if item_id > 0:
+            item_index[item_id] = item
+    selected = []
+    safe_limit = max(1, int(limit or 1))
+    for ranked in ranked_items:
+        try:
+            item_id = int(ranked.get("id") or 0)
+        except (TypeError, ValueError):
+            item_id = 0
+        item = item_index.get(item_id)
+        if not item:
+            continue
+        selected.append(item)
+        if len(selected) >= safe_limit:
+            break
+    return selected
 
 
 def _pick_random_items(items, limit):
@@ -56,12 +122,13 @@ def index_route(
     promo_items_to_news_cards,
     news_cards_fallback,
     load_menu_items,
+    get_popular_analytics,
     get_user_preparing_orders,
     list_active_order_statuses,
     get_user_by_id,
     popular_menu_limit,
 ):
-    user_id = session.get("user_id")
+    user_id = getattr(g, "current_user_id", None)
     bookings = []
     preparing_orders = []
     order_status = None
@@ -69,13 +136,21 @@ def index_route(
     points_balance = 0
     promo_items = load_promo_items()
     promo_news = promo_items_to_news_cards(promo_items)
-    news_cards = promo_news or news_cards_fallback
+    news_cards = _sanitize_news_cards(promo_news or news_cards_fallback)
     all_menu_items = load_menu_items()
     limit = max(1, int(popular_menu_limit or 3))
+    popular_menu = _pick_popular_items_from_analytics(get_popular_analytics, all_menu_items, limit)
     featured_items = [item for item in all_menu_items if item.get("featured")]
-    popular_menu = _pick_popular_items(featured_items, limit)
     if not popular_menu:
+        featured_items.sort(key=lambda item: (-int(item.get("popularity") or 0), int(item.get("id") or 0)))
+        popular_menu = _pick_popular_items(featured_items, limit)
+    if not popular_menu:
+        all_menu_items = sorted(
+            all_menu_items,
+            key=lambda item: (-int(item.get("popularity") or 0), bool(item.get("featured")) is False, int(item.get("id") or 0)),
+        )
         popular_menu = _pick_popular_items(all_menu_items, limit)
+    popular_menu = _sanitize_menu_items(popular_menu)
     if user_id:
         bookings = list_user_bookings(user_id)
         preparing_orders = get_user_preparing_orders(user_id)
@@ -115,7 +190,7 @@ def delivery_route():
 
 
 def notifications_route(list_user_bookings, get_user_preparing_orders, load_promo_items, booking_duration_minutes):
-    user_id = session.get("user_id")
+    user_id = getattr(g, "current_user_id", None)
     bookings = []
     preparing_orders = []
     if user_id:

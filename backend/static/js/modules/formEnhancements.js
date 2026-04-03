@@ -152,6 +152,8 @@ const setupFormEnhancements = ({
   }
 
   phoneInputs.forEach((input) => {
+    const field = input.closest(".field");
+
     const enforcePhoneMask = () => {
       input.value = formatPhone(input.value);
       input.setCustomValidity("");
@@ -159,8 +161,15 @@ const setupFormEnhancements = ({
 
     const syncPhoneVisualState = () => {
       const digits = input.value.replace(/\D/g, "");
+      const hasPhoneInput = digits.length > 1;
+      const isFocused = document.activeElement === input;
       const isValidPhone = digits.length === 11 && digits.startsWith("7");
+      if (field) {
+        field.classList.toggle("field--phone-partial", !isValidPhone && (isFocused || hasPhoneInput));
+        field.classList.toggle("field--phone-valid", isValidPhone);
+      }
       input.classList.toggle("is-phone-valid", isValidPhone);
+      input.classList.remove("is-card-valid", "is-card-invalid");
       return isValidPhone;
     };
 
@@ -175,7 +184,14 @@ const setupFormEnhancements = ({
       const end = input.selectionEnd ?? start;
       const touchesPrefix = start <= 2;
       const deletesAll = start === 0 && end >= input.value.length;
-      if ((event.key === "Backspace" || event.key === "Delete") && (touchesPrefix || deletesAll)) {
+      if ((event.key === "Backspace" || event.key === "Delete") && deletesAll) {
+        event.preventDefault();
+        input.value = "+7";
+        input.setSelectionRange(2, 2);
+        syncPhoneVisualState();
+        return;
+      }
+      if ((event.key === "Backspace" || event.key === "Delete") && touchesPrefix) {
         event.preventDefault();
         input.value = formatPhone(input.value);
         input.setSelectionRange(2, 2);
