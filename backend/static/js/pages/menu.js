@@ -1,6 +1,6 @@
 import { stagger } from "../modules/core.js";
 import { setupCartDrawer } from "../modules/cartDrawer.js";
-import { setupMenuCatalog } from "../modules/menuCatalog.js";
+import { setupMenuCatalog } from "../modules/menuCatalog.js?v=20260404k";
 import { setupMenuHoverMood } from "../modules/menuHoverMood.js";
 import { navigateWithAuth } from "../modules/authToken.js";
 import { bootstrapPage } from "../shared/basePage.js";
@@ -50,6 +50,17 @@ bootstrapPage(async () => {
       mobileMoreToggle: document.getElementById("mobileMoreToggle"),
       mobileMoreMenu: document.getElementById("mobileMoreMenu"),
       mobileMoreValue: document.getElementById("mobileMoreValue"),
+      priceToggle: document.getElementById("priceToggle"),
+      priceMenu: document.getElementById("priceMenu"),
+      priceOverlay: document.getElementById("priceOverlay"),
+      priceOverlayHint: document.getElementById("priceOverlayHint"),
+      priceValue: document.getElementById("priceValue"),
+      priceMinInput: document.getElementById("priceMinInput"),
+      priceMaxInput: document.getElementById("priceMaxInput"),
+      priceMinRange: document.getElementById("priceMinRange"),
+      priceMaxRange: document.getElementById("priceMaxRange"),
+      priceTrackFill: document.getElementById("priceTrackFill"),
+      priceReset: document.getElementById("priceReset"),
       sortToggle: document.getElementById("sortToggle"),
       sortMenu: document.getElementById("sortMenu"),
       sortOptions: Array.from(document.querySelectorAll(".sort-option")),

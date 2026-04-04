@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block body_class %}{% if delivery_mode %}page-menu page-delivery-menu{% else %}page-menu{% endif %}{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/menu-page.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/menu-page.css', v='20260404k') }}" />
 {% endblock %}
 {% block content %}
 <div class="menu-shell">
@@ -38,10 +38,9 @@
       <button class="menu-chip is-active" type="button" data-type="all">Все</button>
       <button class="menu-chip" type="button" data-type="Горячие блюда">Горячие блюда</button>
       <button class="menu-chip" type="button" data-type="Закуски">Закуски</button>
-      <button class="menu-chip" type="button" data-type="Салаты">Салаты</button>
       <div class="sort-control sort-control--overflow" id="overflowCategoryControl" hidden>
       <button class="sort-toggle" id="overflowCategoryToggle" type="button" aria-haspopup="listbox" aria-expanded="false">
-          <span class="sort-toggle__label">Ещё</span>
+          <span class="sort-toggle__label">Тип</span>
           <span class="sort-toggle__value" id="overflowCategoryValue" hidden></span>
           <span class="sort-toggle__arrow">▾</span>
         </button>
@@ -60,14 +59,43 @@
         </button>
         <div class="sort-menu sort-menu--filter" id="mobileMoreMenu" role="listbox" aria-hidden="true"></div>
       </div>
-      <div class="sort-control">
+      <div class="sort-control sort-control--overflow price-control">
+        <button class="sort-toggle" id="priceToggle" type="button" aria-haspopup="dialog" aria-expanded="false">
+          <span class="sort-toggle__label">Цена</span>
+          <span class="sort-toggle__value" id="priceValue" hidden></span>
+          <span class="sort-toggle__arrow">▾</span>
+        </button>
+        <div class="sort-menu sort-menu--price" id="priceMenu" role="dialog" aria-hidden="true" data-align="end" aria-label="Фильтр по цене">
+          <div class="price-menu__fields">
+            <label class="price-menu__field" for="priceMinInput">
+              <span class="price-menu__field-label">От</span>
+              <input id="priceMinInput" type="number" inputmode="numeric" min="0" step="1" />
+            </label>
+            <label class="price-menu__field" for="priceMaxInput">
+              <span class="price-menu__field-label">До</span>
+              <input id="priceMaxInput" type="number" inputmode="numeric" min="0" step="1" />
+            </label>
+          </div>
+          <div class="price-menu__slider">
+            <div class="price-menu__track"></div>
+            <div class="price-menu__track-fill" id="priceTrackFill"></div>
+            <input class="price-menu__range price-menu__range--min" id="priceMinRange" type="range" min="0" max="0" step="1" value="0" aria-label="Минимальная цена" />
+            <input class="price-menu__range price-menu__range--max" id="priceMaxRange" type="range" min="0" max="0" step="1" value="0" aria-label="Максимальная цена" />
+          </div>
+          <button class="price-menu__reset" id="priceReset" type="button">Сбросить</button>
+        </div>
+      </div>
+      <div class="sort-control sort-control--overflow sort-control--sort">
         <button class="sort-toggle" id="sortToggle" type="button" aria-haspopup="listbox" aria-expanded="false">
-          Сортировать
-          <span class="sort-toggle__value" id="sortValue">По популярности</span>
+          <span class="sort-toggle__value" id="sortValue">От А до Я</span>
           <span class="sort-toggle__arrow">▾</span>
         </button>
         <div class="sort-menu" id="sortMenu" role="listbox" aria-hidden="true">
-          <button class="sort-option is-active" type="button" data-sort="popular">
+          <button class="sort-option is-active" type="button" data-sort="alpha">
+            <span>От А до Я</span>
+            <span class="sort-option__check">✓</span>
+          </button>
+          <button class="sort-option" type="button" data-sort="popular">
             <span>По популярности</span>
             <span class="sort-option__check">✓</span>
           </button>
@@ -100,6 +128,8 @@
   <img src="{{ url_for('static', filename='img/hands.svg') }}" alt="" />
 </div>
 
+<div class="price-overlay" id="priceOverlay" hidden></div>
+<div class="cart-overlay-hint" id="priceOverlayHint" hidden>Нажмите чтобы свернуть</div>
 <button
   class="menu-cart-fab"
   id="menuCartFab"
@@ -171,5 +201,5 @@
 </nav>
 {% endblock %}
 {% block extra_scripts %}
-<script type="module" src="{{ url_for('static', filename='js/pages/menu.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='js/pages/menu.js', v='20260404n') }}"></script>
 {% endblock %}
