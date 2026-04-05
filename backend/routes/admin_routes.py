@@ -58,7 +58,22 @@ def create_admin_blueprint(admin_service):
             title="Панель",
             admin_section="dashboard",
             dashboard=admin_service.get_dashboard_data(),
+            profile_about_text=admin_service.get_profile_about_text(),
         )
+
+    @admin.post("/dashboard/profile-about")
+    def dashboard_profile_about_save():
+        blocked = guard()
+        if blocked is not None:
+            return blocked
+        try:
+            admin_service.save_profile_about_text(
+                admin_user_id=int(session["user_id"]),
+                text=request.form.get("profile_about", ""),
+            )
+        except ValueError as exc:
+            return redirect(url_for("admin.dashboard", toast=str(exc)))
+        return redirect(url_for("admin.dashboard", toast="Описание профиля сохранено."))
 
     @admin.post("/api/content/autosync")
     def api_content_autosync():

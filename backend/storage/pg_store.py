@@ -257,6 +257,15 @@ def _execute_schema(cur):
         );
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS site_content (
+            content_key TEXT PRIMARY KEY,
+            content_value TEXT NOT NULL DEFAULT '',
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """
+    )
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS serving_mode TEXT NOT NULL DEFAULT ''")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS serving_label TEXT NOT NULL DEFAULT ''")
     cur.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS serving_time TEXT NOT NULL DEFAULT ''")
@@ -1068,22 +1077,47 @@ def _legacy_promotion_rows():
 
 def _upsert_menu_items_in_tx(cur, menu_items):
     rows = []
+    reserved_slugs = {}
+
+    def reserve_unique_slug(slug_value, item_id):
+        base_slug = ascii_slug(slug_value, default=f"item-{item_id}")
+        candidate = base_slug
+        attempt = 0
+        while True:
+            owner_id = reserved_slugs.get(candidate)
+            if owner_id is None:
+                cur.execute("SELECT id FROM menu_items WHERE slug = %s LIMIT 1", (candidate,))
+                existing_row = cur.fetchone()
+                if not existing_row or _coerce_int(existing_row[0], 0) == item_id:
+                    reserved_slugs[candidate] = item_id
+                    return candidate
+                owner_id = _coerce_int(existing_row[0], 0)
+                reserved_slugs[candidate] = owner_id
+            if owner_id == item_id:
+                return candidate
+            attempt += 1
+            if attempt == 1:
+                candidate = ascii_slug(f"{base_slug}-{item_id}", default=f"item-{item_id}")
+            else:
+                candidate = ascii_slug(f"{base_slug}-{item_id}-{attempt}", default=f"item-{item_id}-{attempt}")
+
     for menu_item in _coerce_list(menu_items):
         if not isinstance(menu_item, dict):
             continue
         item_id = _coerce_int(menu_item.get("id"), 0)
         if item_id <= 0:
             continue
+        final_slug = reserve_unique_slug(menu_item.get("slug") or menu_item.get("name"), item_id)
         rows.append(
             (
                 item_id,
-                ascii_slug(menu_item.get("slug") or menu_item.get("name")),
+                final_slug,
                 _coerce_text(menu_item.get("name")).strip(),
                 _coerce_text(menu_item.get("lore")).strip(),
                 _coerce_text(menu_item.get("type")).strip(),
                 _coerce_int(menu_item.get("price"), 0),
                 canonical_menu_photo_path(
-                    menu_item.get("slug") or menu_item.get("name"),
+                    final_slug,
                     _coerce_text(menu_item.get("photo_path")).strip(),
                     f"photo{image_extension(_coerce_text(menu_item.get('photo_path')).strip())}",
                 ),
@@ -2613,6 +2647,52 @@ def sync_promotions_from_disk():
         }
 
     return _run_db_operation(operation)
+
+
+def get_site_content_value(content_key: str, default: str = "") -> str:
+    normalized_key = _coerce_text(content_key).strip()
+    if not normalized_key:
+        return _coerce_text(default)
+
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT content_value FROM site_content WHERE content_key = %s",
+                (normalized_key,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return _coerce_text(default)
+        return _coerce_text(row[0], default)
+
+    return _run_db_operation(operation)
+
+
+def set_site_content_value(content_key: str, content_value: str):
+    normalized_key = _coerce_text(content_key).strip()
+    if not normalized_key:
+        raise ValueError("content_key is required")
+
+    def operation():
+        _ensure_schema()
+        conn = _get_conn()
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO site_content (content_key, content_value, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (content_key)
+                    DO UPDATE SET
+                        content_value = EXCLUDED.content_value,
+                        updated_at = NOW()
+                    """,
+                    (normalized_key, _coerce_text(content_value)),
+                )
+
+    _run_db_operation(operation)
 
 
 def load_promotion_application_counts(*, user_id: int | None, at: datetime | None = None):

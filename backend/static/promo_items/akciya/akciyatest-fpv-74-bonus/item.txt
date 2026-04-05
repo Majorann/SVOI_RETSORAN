@@ -1,8 +1,8 @@
 id=999
 class=akciya
-name=Тест FPV 74
+name=Любовность друнность
 lore=Закажи себе и своей любвность по FPV-друну и получите 139 баллов!
-condition=ID(74).QTY >= 2
+condition=ID(2).QTY >= 2
 reward=POINTS(139)
 notify=Начислены 139 баллов
 reward_mode=once

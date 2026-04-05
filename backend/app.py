@@ -681,12 +681,16 @@ def profile():
         list_user_bookings,
         BOOKING_DURATION_MINUTES,
         is_admin_user_fn=(admin_service.is_admin_user if admin_service is not None else None),
+        get_profile_about_text_fn=(admin_service.get_profile_about_text if admin_service is not None else None),
     )
 
 
 @app.route("/delivery")
 def delivery():
-    return delivery_menu_route(load_menu_items)
+    return delivery_menu_route(
+        load_menu_items,
+        (admin_service.get_analytics if ACTIVE_STORAGE == "postgres" and admin_service is not None else None),
+    )
 
 
 @app.get("/delivery/checkout")
@@ -795,7 +799,10 @@ def menu_item(item_id: int):
 
 @app.route("/menu")
 def menu():
-    return menu_route(load_menu_items)
+    return menu_route(
+        load_menu_items,
+        (admin_service.get_analytics if ACTIVE_STORAGE == "postgres" and admin_service is not None else None),
+    )
 
 
 @app.route("/checkout")

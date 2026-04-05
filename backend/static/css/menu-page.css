@@ -11,6 +11,17 @@
   margin-top: 10px;
 }
 
+.page-menu .menu,
+.page-delivery-menu .menu {
+  align-items: start;
+}
+
+.page-menu .menu .menu-card.menu-card--menu,
+.page-delivery-menu .menu .menu-card.menu-card--menu {
+  align-self: start;
+  height: auto;
+}
+
 .menu-card--delivery {
   cursor: default;
 }
@@ -924,7 +935,8 @@ body.page-menu .menu-top__ghost {
 
 .menu-card--menu .menu-card__content {
   padding: 14px 0 14px 10px;
-  height: 100%;
+  height: auto;
+  min-height: 0;
 }
 
 .add-button.is-added {

@@ -87,8 +87,14 @@ def _build_delivery_address(data):
     return "; ".join(lines)
 
 
-def delivery_menu_route(load_menu_items):
-    return render_template("menu.html", items=load_menu_items(), delivery_mode=True)
+def delivery_menu_route(load_menu_items, get_popular_analytics=None):
+    from routes.menu_routes import _attach_menu_popularity
+
+    return render_template(
+        "menu.html",
+        items=_attach_menu_popularity(load_menu_items(), get_popular_analytics),
+        delivery_mode=True,
+    )
 
 
 def delivery_checkout_route(get_user_by_id):

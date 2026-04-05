@@ -103,6 +103,24 @@ def _pick_popular_items_from_analytics(get_popular_analytics, items, limit):
         selected.append(item)
         if len(selected) >= safe_limit:
             break
+    if len(selected) >= safe_limit:
+        return selected
+    selected_ids = {
+        int(item.get("id") or 0)
+        for item in selected
+        if int(item.get("id") or 0) > 0
+    }
+    remainder = []
+    for item in menu_pool:
+        try:
+            item_id = int(item.get("id") or 0)
+        except (TypeError, ValueError):
+            item_id = 0
+        if item_id > 0 and item_id in selected_ids:
+            continue
+        remainder.append(item)
+    if remainder:
+        selected.extend(_pick_random_items(remainder, safe_limit - len(selected)))
     return selected
 
 
@@ -125,9 +143,15 @@ def index_route(
     get_popular_analytics,
     get_user_preparing_orders,
     list_active_order_statuses,
-    get_user_by_id,
-    popular_menu_limit,
+    *compat_args,
 ):
+    get_user_by_id = None
+    popular_menu_limit = 3
+    if len(compat_args) == 1:
+        popular_menu_limit = compat_args[0]
+    elif len(compat_args) >= 2:
+        get_user_by_id = compat_args[0]
+        popular_menu_limit = compat_args[1]
     user_id = getattr(g, "current_user_id", None)
     bookings = []
     preparing_orders = []
@@ -157,7 +181,7 @@ def index_route(
         order_statuses = list_active_order_statuses(user_id)
         order_status = order_statuses[0] if order_statuses else None
         user = getattr(g, "current_user", None)
-        if not user or user.get("id") != user_id:
+        if (not user or user.get("id") != user_id) and callable(get_user_by_id):
             user = get_user_by_id(user_id)
         points_balance = int((user or {}).get("balance", 0) or 0)
     else:

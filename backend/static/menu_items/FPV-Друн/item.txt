@@ -1,4 +1,4 @@
-id=74
+﻿id=2
 name=FPV-Друн
 type=Алкоголь
 price=390

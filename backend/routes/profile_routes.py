@@ -1,6 +1,7 @@
 import re
 
 from flask import g, redirect, render_template, request, session, url_for
+from markupsafe import Markup, escape
 from services.business_logic import current_local_datetime_value, current_timestamp_value
 
 TRANSLIT_MAP = {
@@ -53,7 +54,32 @@ def normalize_and_validate_expiry(value: str):
     return f"{month:02d}/{year:02d}", None
 
 
-def profile_route(get_user_by_id, list_user_bookings, booking_duration_minutes, is_admin_user_fn=None):
+def format_profile_about_html(raw_text: str):
+    text = str(raw_text or "")
+    if not text.strip():
+        return Markup("")
+
+    chunks = re.split(r"(\*\*.*?\*\*)", text, flags=re.DOTALL)
+    rendered = []
+    for chunk in chunks:
+        if not chunk:
+            continue
+        if chunk.startswith("**") and chunk.endswith("**") and len(chunk) >= 4:
+            strong_text = chunk[2:-2]
+            rendered.append(f"<strong>{escape(strong_text)}</strong>")
+            continue
+        rendered.append(str(escape(chunk)))
+
+    return Markup("".join(rendered).replace("\n", "<br>"))
+
+
+def profile_route(
+    get_user_by_id,
+    list_user_bookings,
+    booking_duration_minutes,
+    is_admin_user_fn=None,
+    get_profile_about_text_fn=None,
+):
     user_id = session.get("user_id")
     if not user_id:
         return redirect(url_for("login", error="Войдите в аккаунт, чтобы открыть профиль."))
@@ -94,6 +120,12 @@ def profile_route(get_user_by_id, list_user_bookings, booking_duration_minutes, 
             is_admin = bool(is_admin_user_fn(user_id))
         except Exception:
             is_admin = False
+    profile_about_text = ""
+    if callable(get_profile_about_text_fn):
+        try:
+            profile_about_text = str(get_profile_about_text_fn() or "").strip()
+        except Exception:
+            profile_about_text = ""
     bookings = list_user_bookings(user_id)
     return render_template(
         "profile.html",
@@ -105,6 +137,8 @@ def profile_route(get_user_by_id, list_user_bookings, booking_duration_minutes, 
         payment_error=error,
         payment_success="Карта успешно добавлена" if card_added else "",
         booking_duration_minutes=booking_duration_minutes,
+        profile_about_text=profile_about_text,
+        profile_about_html=format_profile_about_html(profile_about_text),
     )
 
 

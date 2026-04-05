@@ -126,6 +126,63 @@ def test_public_pages_do_not_issue_session_cookie_without_csrf_need(client):
     assert delivery_response.headers.get("Vary") is None
 
 
+def test_popular_items_fill_up_to_limit_with_random_fallback(app_module):
+    from routes.main_routes import _pick_popular_items_from_analytics
+
+    items = [
+        {"id": item_id, "name": f"Блюдо {item_id}", "popularity": item_id}
+        for item_id in range(1, 13)
+    ]
+
+    def get_popular_analytics(_filters):
+        return {
+            "top_qty_items": [
+                {"id": 2},
+                {"id": 5},
+                {"id": 9},
+            ]
+        }
+
+    selected = _pick_popular_items_from_analytics(get_popular_analytics, items, 10)
+
+    assert len(selected) == 10
+    assert [item["id"] for item in selected[:3]] == [2, 5, 9]
+    assert len({item["id"] for item in selected}) == 10
+
+
+def test_menu_popularity_uses_analytics_ranking_for_all_items(app_module):
+    from routes.menu_routes import _attach_menu_popularity
+
+    items = [
+        {"id": 1, "name": "Блюдо 1", "popularity": 0},
+        {"id": 2, "name": "Блюдо 2", "popularity": 0},
+        {"id": 3, "name": "Блюдо 3", "popularity": 0},
+    ]
+
+    def get_popular_analytics(_filters):
+        return {
+            "full_items": [
+                {"id": 3, "qty_total": 17},
+                {"id": 1, "qty_total": 4},
+                {"id": 2, "qty_total": 9},
+            ]
+        }
+
+    enriched = _attach_menu_popularity(items, get_popular_analytics)
+
+    assert [item["popularity_sort"] for item in enriched] == [4, 9, 17]
+
+
+def test_menu_page_uses_default_alpha_sort(client):
+    response = client.get("/menu")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'id="sortValue">От А до Я<' in html
+    assert 'class="sort-option is-active" type="button" data-sort="alpha"' in html
+    assert 'data-sort="popular"' in html
+
+
 def test_static_assets_do_not_issue_session_cookie(client):
     response = client.get("/static/css/style.css")
 

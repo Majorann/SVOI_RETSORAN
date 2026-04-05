@@ -4,7 +4,8 @@
   {% if is_catalog_card %}
     data-type="{{ item.type }}"
     data-price="{{ item.price }}"
-    data-popularity="{{ item.popularity or item.orders_count or 0 }}"
+    data-popularity="{{ item.popularity_sort or item.popularity or item.orders_count or 0 }}"
+    data-name="{{ item.name }}"
   {% endif %}
 >
   <div class="menu-card__media">

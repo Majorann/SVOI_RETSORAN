@@ -48,6 +48,31 @@
   <article class="admin-card">
     <div class="admin-section-head">
       <div>
+        <p class="admin-topbar__eyebrow">Профиль</p>
+        <h2>Текст в профиле</h2>
+      </div>
+    </div>
+    <p class="admin-empty">Этот текст показывается в профиле пользователя под историей заказов.</p>
+    <p class="admin-empty">Поддерживается перенос строки и <strong>жирный</strong> через <code>**текст**</code>.</p>
+    <form method="post" action="{{ url_for('admin.dashboard_profile_about_save') }}" class="admin-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <label class="admin-field">
+        <span>Описание</span>
+        <textarea
+          class="admin-textarea"
+          name="profile_about"
+          rows="6"
+          maxlength="4000"
+          placeholder="Например: Мы готовим с 10:00 до 23:00, используем свежие продукты и доставляем без компромиссов по качеству."
+        >{{ profile_about_text or "" }}</textarea>
+      </label>
+      <button class="admin-button" type="submit">Сохранить текст</button>
+    </form>
+  </article>
+
+  <article class="admin-card">
+    <div class="admin-section-head">
+      <div>
         <p class="admin-topbar__eyebrow">Фокус</p>
         <h2>Требует внимания</h2>
       </div>

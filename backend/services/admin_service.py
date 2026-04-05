@@ -372,6 +372,25 @@ class AdminService:
     def get_dashboard_data(self):
         return admin_dashboard_queries.get_dashboard_data(self, now=datetime.now())
 
+    def get_profile_about_text(self) -> str:
+        if not self.postgres_ready:
+            return ""
+        return self._pg_store().get_site_content_value("profile_about", "")
+
+    def save_profile_about_text(self, *, admin_user_id: int, text: str):
+        normalized_text = str(text or "").strip()
+        if len(normalized_text) > 4000:
+            raise ValueError("Описание слишком длинное. Максимум: 4000 символов.")
+        self._pg_store().set_site_content_value("profile_about", normalized_text)
+        self.log_admin_action(
+            admin_user_id=admin_user_id,
+            action_type="profile_about_updated",
+            entity_type="content",
+            entity_id="profile_about",
+            reason="Обновление текста профиля через панель",
+            payload={"length": len(normalized_text)},
+        )
+
     def sync_content_from_host(self, *, admin_user_id: int, reason: str):
         return admin_command_ops.sync_content_from_host(self, admin_user_id=admin_user_id, reason=reason)
         normalized_reason = str(reason or "").strip()

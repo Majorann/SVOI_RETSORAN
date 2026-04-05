@@ -558,15 +558,27 @@ class MenuContentService:
         if not value:
             return ""
 
-        numeric_match = re.fullmatch(r"(\d{2,4})(?:[.,]\d+)?", value)
+        numeric_match = re.fullmatch(r"(\d{1,4})(?:[.,]\d+)?", value)
         if numeric_match:
             return f"{numeric_match.group(1)} г"
 
-        unit_match = re.fullmatch(r"(\d{2,4})(?:[.,]\d+)?\s*(г|гр|g|мл|ml)", value, re.IGNORECASE)
+        unit_match = re.fullmatch(
+            r"(\d{1,4}(?:[.,]\d+)?)\s*(г|гр|g|кг|kg|мл|ml|л|l)",
+            value,
+            re.IGNORECASE,
+        )
         if unit_match:
             unit = unit_match.group(2).lower()
-            normalized_unit = "мл" if unit in {"ml", "мл"} else "г"
-            return f"{unit_match.group(1)} {normalized_unit}"
+            amount = unit_match.group(1).replace(".", ",")
+            if unit in {"ml", "мл"}:
+                normalized_unit = "мл"
+            elif unit in {"kg", "кг"}:
+                normalized_unit = "кг"
+            elif unit in {"l", "л"}:
+                normalized_unit = "л"
+            else:
+                normalized_unit = "г"
+            return f"{amount} {normalized_unit}"
 
         return value
 
@@ -578,13 +590,23 @@ class MenuContentService:
         return ""
 
     def extract_portion_amount(self, portion_label: str) -> float | None:
-        match = re.search(r"(\d{2,4})(?:[.,]\d+)?", portion_label or "")
+        match = re.search(
+            r"(\d{1,4}(?:[.,]\d+)?)\s*(кг|kg|г|гр|g|мл|ml|л|l)?",
+            portion_label or "",
+            re.IGNORECASE,
+        )
         if not match:
             return None
         try:
-            return float(match.group(1).replace(",", "."))
+            amount = float(match.group(1).replace(",", "."))
         except ValueError:
             return None
+        unit = (match.group(2) or "").lower()
+        if unit in {"кг", "kg"}:
+            return amount * 1000.0
+        if unit in {"л", "l"}:
+            return amount * 1000.0
+        return amount
 
     def build_portion_tone_rgb(self, portion_label: str) -> str:
         amount = self.extract_portion_amount(portion_label)
