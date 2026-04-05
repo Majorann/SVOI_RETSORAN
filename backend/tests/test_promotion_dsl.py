@@ -245,3 +245,127 @@ def test_discount_priority_keeps_only_highest_priority_discount():
 
     assert state.best_discount["promotion_name"] == "High"
     assert state.best_discount["kind"] == "DISCOUNT_PERCENT"
+
+
+def test_v2_condition_supports_not_neq_and_type_selector():
+    promotion = parse_promotion(
+        """
+dsl_version=2
+condition=NOT TYPE(напитки).QTY > 0 AND ID(101).QTY != 0
+reward=POINTS(10)
+"""
+    )
+    order = build_order({"id": 101, "type": "горячее", "price": 500, "qty": 1})
+    assert evaluate_condition(promotion.condition, order) is True
+
+
+def test_v2_rejects_legacy_equals_and_legacy_type_metric():
+    with pytest.raises(ValueError, match="Unsupported operator '='"):
+        parse_promotion(
+            """
+dsl_version=2
+condition=ID(101).QTY = 1
+reward=POINTS(10)
+"""
+        )
+
+    with pytest.raises(ValueError, match="ID.<type> metric is not supported in DSL v2"):
+        parse_promotion(
+            """
+dsl_version=2
+condition=ID.закуски.QTY >= 1
+reward=POINTS(10)
+"""
+        )
+
+
+def test_v2_discount_target_group_limits_discount_to_group_sum():
+    promotion = validate_promotion(
+        """
+dsl_version=2
+condition=GROUP(101,205).QTY >= 2
+reward=DISCOUNT_PERCENT(50, TARGET=GROUP(101,205))
+reward_mode=once
+""",
+        known_item_ids={101, 205, 999},
+        active_item_ids={101, 205, 999},
+        known_types={"закуски", "горячее"},
+    )
+    order = build_order(
+        {"id": 101, "type": "закуски", "price": 200, "qty": 1},
+        {"id": 205, "type": "горячее", "price": 100, "qty": 1},
+        {"id": 999, "type": "горячее", "price": 700, "qty": 1},
+    )
+
+    evaluation = evaluate_promotion(promotion, order)
+    state = apply_reward(promotion, order, applied_count=evaluation.applied_count)
+
+    assert state.best_discount is not None
+    assert state.best_discount["amount"] == 150
+    assert state.best_discount["target_kind"] == "GROUP"
+
+
+def test_v2_cheapest_free_from_group():
+    promotion = validate_promotion(
+        """
+dsl_version=2
+condition=GROUP(10,11,12).QTY >= 2
+reward=CHEAPEST_FREE_FROM_GROUP(10,11,12)
+reward_mode=once
+""",
+        known_item_ids={10, 11, 12, 13},
+        active_item_ids={10, 11, 12, 13},
+        known_types={"закуски"},
+    )
+    order = build_order(
+        {"id": 10, "type": "закуски", "price": 350, "qty": 1},
+        {"id": 11, "type": "закуски", "price": 280, "qty": 2},
+        {"id": 12, "type": "закуски", "price": 280, "qty": 1},
+        {"id": 13, "type": "закуски", "price": 500, "qty": 1},
+    )
+
+    evaluation = evaluate_promotion(promotion, order)
+    state = apply_reward(promotion, order, applied_count=evaluation.applied_count)
+
+    assert state.best_discount is not None
+    assert state.best_discount["kind"] == "CHEAPEST_FREE_FROM_GROUP"
+    assert state.best_discount["amount"] == 280
+
+
+def test_v2_unique_qty_metric_and_order_subtotal_alias():
+    promotion = parse_promotion(
+        """
+dsl_version=2
+condition=GROUP(1,2,3).UNIQUE_QTY >= 2 AND ORDER.SUM == 900
+reward=POINTS(5)
+"""
+    )
+    order = build_order(
+        {"id": 1, "type": "закуски", "price": 200, "qty": 2},
+        {"id": 2, "type": "закуски", "price": 500, "qty": 1},
+    )
+    assert evaluate_condition(promotion.condition, order) is True
+
+
+def test_v1_backward_compatibility_is_preserved():
+    promotion = parse_promotion(
+        """
+condition=ID.закуски.QTY >= 2 AND ORDER.SUM >= 900
+reward=DISCOUNT_RUB(100)
+"""
+    )
+    order = build_order(
+        {"id": 1, "type": "закуски", "price": 300, "qty": 2},
+        {"id": 2, "type": "горячее", "price": 500, "qty": 1},
+    )
+    assert evaluate_condition(promotion.condition, order) is True
+
+
+def test_v1_rejects_not_operator():
+    with pytest.raises(ValueError, match="NOT operator is supported only in DSL v2"):
+        parse_promotion(
+            """
+condition=NOT ID.QTY >= 1
+reward=POINTS(10)
+"""
+        )

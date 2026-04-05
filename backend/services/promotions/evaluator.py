@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from .ast import ConditionGroup, MetricRef, PromotionDefinition
+from .ast import ConditionGroup, ConditionNot, MetricRef, PromotionDefinition
 
 
 @dataclass(frozen=True)
@@ -20,11 +20,17 @@ def evaluate_condition(node, order: dict) -> bool:
         if node.operator == "AND":
             return evaluate_condition(node.left, order) and evaluate_condition(node.right, order)
         return evaluate_condition(node.left, order) or evaluate_condition(node.right, order)
+    if isinstance(node, ConditionNot):
+        return not evaluate_condition(node.operand, order)
 
     metric_value = resolve_metric_value(node.metric, order)
     target_value = node.value
     if node.operator == "=":
         return metric_value == target_value
+    if node.operator == "==":
+        return metric_value == target_value
+    if node.operator == "!=":
+        return metric_value != target_value
     if node.operator == ">":
         return metric_value > target_value
     if node.operator == "<":
@@ -124,11 +130,13 @@ def resolve_metric_value(metric: MetricRef, order: dict) -> int:
 
     if metric.field == "QTY":
         return sum(max(0, _safe_int(item.get("qty"))) for item in matched_items)
+    if metric.field == "UNIQUE_QTY":
+        return len({max(0, _safe_int(item.get("id"))) for item in matched_items if max(0, _safe_int(item.get("qty"))) > 0})
     return sum(max(0, _safe_int(item.get("price"))) * max(0, _safe_int(item.get("qty"))) for item in matched_items)
 
 
 def order_user_items_total(order: dict) -> int:
-    return resolve_metric_value(MetricRef(target="order", field="SUM"), order)
+    return resolve_metric_value(MetricRef(target="order", field="SUBTOTAL"), order)
 
 
 def _safe_int(value) -> int:

@@ -869,6 +869,7 @@ if (promoForm) {
   const promoText = field("text");
   const promoLink = field("link");
   const promoLore = field("lore");
+  const promoDslVersion = field("dsl_version");
   const promoCondition = field("condition");
   const promoReward = field("reward");
   const promoNotify = field("notify");
@@ -914,6 +915,10 @@ if (promoForm) {
   const promoRewardGiftId = document.getElementById("promoRewardGiftId");
   const promoRewardGiftQtyField = document.getElementById("promoRewardGiftQtyField");
   const promoRewardGiftQty = document.getElementById("promoRewardGiftQty");
+  const promoRewardTargetField = document.getElementById("promoRewardTargetField");
+  const promoRewardTarget = document.getElementById("promoRewardTarget");
+  const promoRewardTargetGroupField = document.getElementById("promoRewardTargetGroupField");
+  const promoRewardTargetGroupIds = document.getElementById("promoRewardTargetGroupIds");
   const promoRewardSet = document.getElementById("promoRewardSet");
   const promoRewardPreview = document.getElementById("promoRewardPreview");
 
@@ -928,33 +933,61 @@ if (promoForm) {
     }
   };
 
+  const getDslVersion = () => ((promoDslVersion?.value || "").trim() === "2" ? 2 : 1);
+
   const buildConditionFragment = () => {
+    const dslVersion = getDslVersion();
     const source = promoConditionSource?.value || "item";
     const metric = promoConditionMetric?.value || "QTY";
-    const operator = promoConditionOperator?.value || ">=";
+    let operator = promoConditionOperator?.value || ">=";
     const rawValue = promoConditionValue?.value?.trim() || "1";
     let left = "ID.QTY";
+    if (dslVersion === 2 && operator === "=") {
+      operator = "==";
+    }
+    if (dslVersion === 1 && operator === "==") {
+      operator = "=";
+    }
+    if (dslVersion === 1 && operator === "!=") {
+      operator = "=";
+    }
     if (source === "item") {
       const itemId = promoConditionItemId?.value?.trim() || "0";
       left = `ID(${itemId}).${metric}`;
     } else if (source === "type") {
       const itemType = promoConditionType?.value?.trim() || "тип";
-      left = `ID.${itemType}.${metric}`;
+      left = dslVersion === 2 ? `TYPE(${itemType}).${metric}` : `ID.${itemType}.${metric}`;
     } else if (source === "group") {
       const groupIds = promoConditionGroupIds?.value?.trim() || "101,205";
       left = `GROUP(${groupIds}).${metric}`;
     } else if (source === "order") {
-      left = "ORDER.SUM";
+      left = dslVersion === 2 ? "ORDER.SUBTOTAL" : "ORDER.SUM";
     }
     return `${left} ${operator} ${rawValue}`;
   };
 
   const buildRewardFragment = () => {
+    const dslVersion = getDslVersion();
     const rewardKind = promoRewardKind?.value || "POINTS";
+    const target = promoRewardTarget?.value || "ORDER";
+    const targetGroupIds = promoRewardTargetGroupIds?.value?.trim() || "101,205";
+    if (rewardKind === "CHEAPEST_FREE_FROM_GROUP") {
+      return `CHEAPEST_FREE_FROM_GROUP(${targetGroupIds})`;
+    }
     if (rewardKind === "GIFT") {
       const giftId = promoRewardGiftId?.value?.trim() || "0";
       const giftQty = promoRewardGiftQty?.value?.trim() || "1";
       return `GIFT(${giftId}, ${giftQty})`;
+    }
+    if (rewardKind === "DISCOUNT_PERCENT" || rewardKind === "DISCOUNT_RUB") {
+      const rewardValue = promoRewardValue?.value?.trim() || "100";
+      if (dslVersion === 2) {
+        if (target === "GROUP") {
+          return `${rewardKind}(${rewardValue}, TARGET=GROUP(${targetGroupIds}))`;
+        }
+        return `${rewardKind}(${rewardValue}, TARGET=ORDER)`;
+      }
+      return `${rewardKind}(${rewardValue})`;
     }
     return `${rewardKind}(${promoRewardValue?.value?.trim() || "100"})`;
   };
@@ -970,22 +1003,45 @@ if (promoForm) {
   };
 
   const syncConditionBuilder = () => {
+    const dslVersion = getDslVersion();
     const source = promoConditionSource?.value || "item";
     if (promoConditionItemField) promoConditionItemField.hidden = source !== "item";
     if (promoConditionTypeField) promoConditionTypeField.hidden = source !== "type";
     if (promoConditionGroupField) promoConditionGroupField.hidden = source !== "group";
-    if (promoConditionMetric) promoConditionMetric.value = source === "order" ? "SUM" : promoConditionMetric.value || "QTY";
+    if (promoConditionMetric && source === "order") {
+      promoConditionMetric.value = dslVersion === 2 ? "SUBTOTAL" : "SUM";
+    }
+    if (promoConditionMetric && dslVersion === 1 && promoConditionMetric.value === "UNIQUE_QTY") {
+      promoConditionMetric.value = "QTY";
+    }
+    if (promoConditionOperator && dslVersion === 2 && promoConditionOperator.value === "=") {
+      promoConditionOperator.value = "==";
+    }
+    if (promoConditionOperator && dslVersion === 1 && promoConditionOperator.value === "==") {
+      promoConditionOperator.value = "=";
+    }
+    if (promoConditionOperator && dslVersion === 1 && promoConditionOperator.value === "!=") {
+      promoConditionOperator.value = "=";
+    }
     if (promoConditionMetric) promoConditionMetric.disabled = source === "order";
     const fragment = buildConditionFragment();
     if (promoConditionPreview) promoConditionPreview.textContent = fragment;
   };
 
   const syncRewardBuilder = () => {
+    const dslVersion = getDslVersion();
     const rewardKind = promoRewardKind?.value || "POINTS";
     const isGift = rewardKind === "GIFT";
-    if (promoRewardValueField) promoRewardValueField.hidden = isGift;
+    const isDiscount = rewardKind === "DISCOUNT_PERCENT" || rewardKind === "DISCOUNT_RUB";
+    const isCheapest = rewardKind === "CHEAPEST_FREE_FROM_GROUP";
+    if (promoRewardValueField) promoRewardValueField.hidden = isGift || isCheapest;
     if (promoRewardGiftIdField) promoRewardGiftIdField.hidden = !isGift;
     if (promoRewardGiftQtyField) promoRewardGiftQtyField.hidden = !isGift;
+    if (promoRewardTargetField) promoRewardTargetField.hidden = !isDiscount || dslVersion !== 2;
+    const targetKind = promoRewardTarget?.value || "ORDER";
+    if (promoRewardTargetGroupField) {
+      promoRewardTargetGroupField.hidden = isGift || (!isCheapest && (!isDiscount || dslVersion !== 2 || targetKind !== "GROUP"));
+    }
     if (promoRewardPreview) promoRewardPreview.textContent = buildRewardFragment();
   };
 
@@ -1038,6 +1094,7 @@ if (promoForm) {
     promoText,
     promoLink,
     promoLore,
+    promoDslVersion,
     promoCondition,
     promoReward,
     promoNotify,
@@ -1065,6 +1122,7 @@ if (promoForm) {
       class_name: promoType?.value || "akciya",
       name: promoName?.value || "",
       lore: promoLore?.value || "",
+      dsl_version: promoDslVersion?.value || "",
       condition: promoCondition?.value || "",
       reward: promoReward?.value || "",
       notify: promoNotify?.value || "",
@@ -1091,11 +1149,12 @@ if (promoForm) {
         throw new Error(data.error || "DSL не прошёл проверку.");
       }
       const rewardKindLabel = data.summary?.reward_kind || "неизвестно";
+      const dslVersionLabel = data.summary?.dsl_version || "1";
       const rewardModeRaw = data.summary?.reward_mode || "";
       const rewardModeLabel =
         rewardModeRaw === "per_match" ? "за каждое совпадение" : rewardModeRaw === "once" ? "один раз" : "нет";
       setPromoValidationState(
-        `DSL валиден. Награда: ${rewardKindLabel}. Режим: ${rewardModeLabel}.`,
+        `DSL валиден (v${dslVersionLabel}). Награда: ${rewardKindLabel}. Режим: ${rewardModeLabel}.`,
         "success"
       );
     } catch (error) {
@@ -1103,12 +1162,12 @@ if (promoForm) {
     }
   });
 
-  [promoConditionSource, promoConditionItemId, promoConditionType, promoConditionGroupIds, promoConditionMetric, promoConditionOperator, promoConditionValue].forEach((input) => {
+  [promoDslVersion, promoConditionSource, promoConditionItemId, promoConditionType, promoConditionGroupIds, promoConditionMetric, promoConditionOperator, promoConditionValue].forEach((input) => {
     input?.addEventListener("input", syncConditionBuilder);
     input?.addEventListener("change", syncConditionBuilder);
   });
 
-  [promoRewardKind, promoRewardValue, promoRewardGiftId, promoRewardGiftQty].forEach((input) => {
+  [promoDslVersion, promoRewardKind, promoRewardValue, promoRewardGiftId, promoRewardGiftQty, promoRewardTarget, promoRewardTargetGroupIds].forEach((input) => {
     input?.addEventListener("input", syncRewardBuilder);
     input?.addEventListener("change", syncRewardBuilder);
   });

@@ -46,8 +46,9 @@ def parse_and_validate_promo_source(promo_item: dict, *, menu_items: list[dict])
 
 
 def build_dsl_text_from_promo_item(promo_item: dict) -> str:
+    promotion_class = str(promo_item.get("class") or promo_item.get("type") or "akciya").strip() or "akciya"
     lines = [
-        "type=akciya",
+        f"class={promotion_class}",
         f"name={str(promo_item.get('name') or '').strip()}",
         f"active={'true' if bool(promo_item.get('active', True)) else 'false'}",
         f"priority={_safe_int(promo_item.get('priority'), 0)}",
@@ -55,6 +56,7 @@ def build_dsl_text_from_promo_item(promo_item: dict) -> str:
         f"reward={str(promo_item.get('reward') or '').strip()}",
     ]
     optional_fields = (
+        "dsl_version",
         "notify",
         "reward_mode",
         "limit_per_order",

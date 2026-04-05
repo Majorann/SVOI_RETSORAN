@@ -2170,3 +2170,66 @@
 - Подправлены отступы и типографика блока «О нас» под общий ритм страницы профиля.
 - Добавлена подсказка в админке по синтаксису форматирования (`Enter` и `**текст**`).
 - Обновлена версия подключения `style.css` в `base.html` для принудительного сброса кэша статики.
+
+### Promo DSL V2 (CBO Script V2)
+
+- Реализовано расширение DSL акций до V2 без поломки V1:
+  - добавлена поддержка `dsl_version=2`;
+  - в `condition` добавлены `==`, `!=`, `NOT`;
+  - зафиксирован приоритет операторов `NOT > AND > OR`;
+  - сохранены скобки и базовые сравнения `> < >= <=`.
+- Расширены и нормализованы метрики условий:
+  - добавлен синтаксис `TYPE(<type>).QTY|SUM|UNIQUE_QTY`;
+  - для `GROUP(...)` добавлен `UNIQUE_QTY`;
+  - для агрегата `ID` добавлен `ID.UNIQUE_QTY`;
+  - `ORDER.SUBTOTAL` добавлен как целевой V2-алиас суммы заказа;
+  - `ORDER.SUM` сохранён как совместимый алиас.
+- Расширен синтаксис reward:
+  - сохранены совместимые награды V1 (`POINTS`, `DISCOUNT_PERCENT`, `DISCOUNT_RUB`, `GIFT`);
+  - добавлены таргетированные скидки:
+    - `DISCOUNT_PERCENT(value, TARGET=ORDER|GROUP(...))`
+    - `DISCOUNT_RUB(value, TARGET=ORDER|GROUP(...))`;
+  - добавлен reward:
+    - `CHEAPEST_FREE_FROM_GROUP(...)`.
+- Обновлён runtime применения акций:
+  - таргетированные скидки считаются по выбранной базе (`ORDER` или `GROUP`);
+  - для `CHEAPEST_FREE_FROM_GROUP(...)` применяется скидка по самой дешёвой позиции из группы;
+  - логика приоритета скидок между акциями сохранена.
+- Обновлены validator и ограничения:
+  - `CHEAPEST_FREE_FROM_GROUP` запрещён с `reward_mode=per_match`;
+  - в V2 запрещён legacy-синтаксис `ID.<type>...` (нужно `TYPE(...)...`);
+  - сохранена строгая проверка ссылок на существующие `item_id`/типы/группы.
+
+### Хранилище и схема БД для DSL V2
+
+- В модель `promotions` добавлено поле `dsl_version`:
+  - схема инициализации обновлена в `backend/sql/neon_init.sql`;
+  - SQL-скрипт промо обновлён в `backend/sql/task4_promotions.sql`.
+- В Postgres-слое добавлена авто-миграция:
+  - `ALTER TABLE promotions ADD COLUMN IF NOT EXISTS dsl_version INTEGER`;
+  - чтение/запись `dsl_version` включены в `load_promotions` и `upsert`.
+- В модель `PromoItem` и в pipeline `menu_content/admin_content_management` добавлена передача `dsl_version`.
+
+### Admin panel: helper для V2
+
+- В форме `admin/promo` добавлен выбор версии DSL (`dsl_version`).
+- DSL-helper обновлён под V2:
+  - источник типа переведён на `TYPE(<type>)`;
+  - добавлена метрика `UNIQUE_QTY`;
+  - добавлены операторы `==` и `!=`;
+  - добавлены настройки `TARGET` для `DISCOUNT_*`;
+  - добавлен конструктор `CHEAPEST_FREE_FROM_GROUP(...)`.
+- Улучшен текст результата проверки DSL:
+  - в ответе явно показывается версия (`v1`/`v2`) и тип награды.
+
+### Документация и тесты
+
+- Добавлена отдельная документация:
+  - `backend/doc/CBO_SCRIPT_V2.md`.
+- README обновлён ссылкой на документацию V2.
+- Расширены тесты promo DSL:
+  - добавлены кейсы на `NOT`, `!=`, `TYPE(...)`, `UNIQUE_QTY`,
+    `TARGET=GROUP(...)`, `CHEAPEST_FREE_FROM_GROUP(...)`,
+    а также regression для обратной совместимости V1.
+- Текущая адресная проверка:
+  - `backend/tests/test_promotion_dsl.py` -> `20 passed`.

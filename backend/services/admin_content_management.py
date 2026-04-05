@@ -35,6 +35,15 @@ def _normalize_reward_mode(value: Any, *, require_default: bool) -> str:
     return "once" if require_default else ""
 
 
+def _normalize_dsl_version(value: Any, *, require_default: bool) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return "1" if require_default else ""
+    if normalized in {"1", "2"}:
+        return normalized
+    return "1" if require_default else ""
+
+
 def list_menu_items(service, filters: dict, items: list[dict] | None = None):
     items = list(items) if items is not None else service.menu_content.load_menu_items_admin()
     search = str(filters.get("search") or "").strip().lower()
@@ -161,6 +170,7 @@ def save_promo_item(service, *, form: dict, photo: FileStorage | None, admin_use
             "priority": _safe_int(form.get("priority"), 100),
             "condition": payload["condition"],
             "reward": payload["reward"],
+            "dsl_version": payload["dsl_version"],
             "notify": payload["notify"],
             "reward_mode": payload["reward_mode"],
             "limit_per_order": payload["limit_per_order"],
@@ -194,6 +204,7 @@ def save_promo_item(service, *, form: dict, photo: FileStorage | None, admin_use
             "priority": _safe_int(form.get("priority"), 100),
             "condition": "",
             "reward": "",
+            "dsl_version": "",
             "notify": "",
             "reward_mode": "",
             "limit_per_order": None,
@@ -229,6 +240,10 @@ def validate_promo_form(service, form: dict):
         "priority": _safe_int(form.get("priority"), 100),
         "condition": str(form.get("condition") or "").strip(),
         "reward": str(form.get("reward") or "").strip(),
+        "dsl_version": _normalize_dsl_version(
+            form.get("dsl_version"),
+            require_default=bool(str(form.get("condition") or "").strip() or str(form.get("reward") or "").strip()),
+        ),
         "notify": str(form.get("notify") or "").strip(),
         "reward_mode": _normalize_reward_mode(
             form.get("reward_mode"),
@@ -256,6 +271,7 @@ def validate_promo_form(service, form: dict):
         "lore": promo_payload["lore"],
         "condition": promo_payload["condition"],
         "reward": promo_payload["reward"],
+        "dsl_version": promo_payload["dsl_version"],
         "notify": promo_payload["notify"],
         "reward_mode": promo_payload["reward_mode"],
         "limit_per_order": promo_payload["limit_per_order"],
@@ -281,6 +297,7 @@ def preview_promo_dsl(service, form: dict):
             "summary": {
                 "name": promo_payload["name"],
                 "reward_kind": "",
+                "dsl_version": promo_payload["dsl_version"] or "1",
                 "reward_mode": promo_payload["reward_mode"],
                 "priority": promo_payload["priority"],
                 "notify": promo_payload["notify"] or "",
@@ -296,6 +313,7 @@ def preview_promo_dsl(service, form: dict):
         "summary": {
             "name": definition.name,
             "reward_kind": definition.reward.kind,
+            "dsl_version": str(definition.dsl_version),
             "reward_mode": definition.reward_mode,
             "priority": definition.priority,
             "notify": definition.notify or "",

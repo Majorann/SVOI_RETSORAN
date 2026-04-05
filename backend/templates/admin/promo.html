@@ -15,7 +15,14 @@
         </label>
         <label class="admin-field"><span>Slug папки</span><input class="admin-input" type="text" name="slug" /></label>
         <label class="admin-field" data-promo-field="akciya"><span>Название акции</span><input class="admin-input" type="text" name="name" /></label>
-        <label class="admin-field" data-promo-field="akciya"><span>Условие</span><input class="admin-input" type="text" name="condition" placeholder="ID.QTY &gt;= 3" /></label>
+        <label class="admin-field" data-promo-field="akciya"><span>DSL версия</span>
+          <select class="admin-select" name="dsl_version">
+            <option value="">auto (V1)</option>
+            <option value="1">1</option>
+            <option value="2" selected>2</option>
+          </select>
+        </label>
+        <label class="admin-field" data-promo-field="akciya"><span>Условие</span><input class="admin-input" type="text" name="condition" placeholder="TYPE(закуски).QTY &gt;= 2 AND ORDER.SUBTOTAL &gt;= 900" /></label>
         <label class="admin-field" data-promo-field="akciya"><span>Награда</span><input class="admin-input" type="text" name="reward" placeholder="POINTS(100)" /></label>
         <label class="admin-field" data-promo-field="akciya"><span>Notify</span><input class="admin-input" type="text" name="notify" placeholder="Добавлен подарок" /></label>
         <label class="admin-field" data-promo-field="akciya"><span>Режим награды</span>
@@ -65,9 +72,9 @@
             <label class="admin-field"><span>Источник</span>
               <select class="admin-select" id="promoConditionSource">
                 <option value="item">ID(n)</option>
-                <option value="type">ID.&lt;type&gt;</option>
+                <option value="type">TYPE(&lt;type&gt;)</option>
                 <option value="group">GROUP(...)</option>
-                <option value="order">ORDER.SUM</option>
+                <option value="order">ORDER.SUBTOTAL</option>
               </select>
             </label>
             <label class="admin-field" id="promoConditionItemField"><span>ID</span>
@@ -87,10 +94,13 @@
               <select class="admin-select" id="promoConditionMetric">
                 <option value="QTY">QTY</option>
                 <option value="SUM">SUM</option>
+                <option value="UNIQUE_QTY">UNIQUE_QTY</option>
               </select>
             </label>
             <label class="admin-field"><span>Оператор</span>
               <select class="admin-select" id="promoConditionOperator">
+                <option value="==">==</option>
+                <option value="!=">!=</option>
                 <option value=">=">&gt;=</option>
                 <option value="=">=</option>
                 <option value=">">&gt;</option>
@@ -124,6 +134,7 @@
                 <option value="DISCOUNT_PERCENT">DISCOUNT_PERCENT</option>
                 <option value="DISCOUNT_RUB">DISCOUNT_RUB</option>
                 <option value="GIFT">GIFT</option>
+                <option value="CHEAPEST_FREE_FROM_GROUP">CHEAPEST_FREE_FROM_GROUP</option>
               </select>
             </label>
             <label class="admin-field" id="promoRewardValueField"><span>Значение</span>
@@ -134,6 +145,15 @@
             </label>
             <label class="admin-field" id="promoRewardGiftQtyField"><span>Количество подарка</span>
               <input class="admin-input" type="number" min="1" id="promoRewardGiftQty" value="1" />
+            </label>
+            <label class="admin-field" id="promoRewardTargetField"><span>Target</span>
+              <select class="admin-select" id="promoRewardTarget">
+                <option value="ORDER">ORDER</option>
+                <option value="GROUP">GROUP(...)</option>
+              </select>
+            </label>
+            <label class="admin-field" id="promoRewardTargetGroupField"><span>ID target-group</span>
+              <input class="admin-input" type="text" id="promoRewardTargetGroupIds" placeholder="101,205,309" />
             </label>
           </div>
           <div class="admin-actions-row">

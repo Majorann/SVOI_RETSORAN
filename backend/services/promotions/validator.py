@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .ast import Comparison, ConditionGroup, PromotionDefinition, PromotionDslError
+from .ast import Comparison, ConditionGroup, ConditionNot, PromotionDefinition, PromotionDslError
 from .parser import parse_promotion
 
 
@@ -47,6 +47,9 @@ def _validate_condition_refs(node, context: PromotionValidationContext):
         _validate_condition_refs(node.left, context)
         _validate_condition_refs(node.right, context)
         return
+    if isinstance(node, ConditionNot):
+        _validate_condition_refs(node.operand, context)
+        return
 
     metric = node.metric
     if metric.target == "item":
@@ -70,13 +73,15 @@ def _validate_reward(definition: PromotionDefinition, context: PromotionValidati
         if reward.amount is None or reward.amount <= 0:
             raise PromotionValidationError("POINTS reward must be greater than zero")
         return
-    if reward.kind == "DISCOUNT_PERCENT":
-        if reward.amount is None or reward.amount < 1 or reward.amount > 100:
-            raise PromotionValidationError("DISCOUNT_PERCENT reward must be between 1 and 100")
-        return
     if reward.kind == "DISCOUNT_RUB":
         if reward.amount is None or reward.amount <= 0:
             raise PromotionValidationError("DISCOUNT_RUB reward must be greater than zero")
+        _validate_discount_target(reward, context)
+        return
+    if reward.kind == "DISCOUNT_PERCENT":
+        if reward.amount is None or reward.amount < 1 or reward.amount > 100:
+            raise PromotionValidationError("DISCOUNT_PERCENT reward must be between 1 and 100")
+        _validate_discount_target(reward, context)
         return
     if reward.kind == "GIFT":
         if reward.item_id is None or reward.qty is None or reward.qty <= 0:
@@ -85,11 +90,38 @@ def _validate_reward(definition: PromotionDefinition, context: PromotionValidati
             raise PromotionValidationError(f"Unknown gift item id: {reward.item_id}")
         if context.active_item_ids and reward.item_id not in context.active_item_ids:
             raise PromotionValidationError(f"Gift item is not active: {reward.item_id}")
+        return
+    if reward.kind == "CHEAPEST_FREE_FROM_GROUP":
+        if not reward.target_group_ids:
+            raise PromotionValidationError("CHEAPEST_FREE_FROM_GROUP requires non-empty GROUP ids")
+        if context.known_item_ids:
+            missing = [item_id for item_id in reward.target_group_ids if item_id not in context.known_item_ids]
+            if missing:
+                raise PromotionValidationError(f"Unknown menu item ids in CHEAPEST_FREE_FROM_GROUP: {missing}")
+        return
+
+    raise PromotionValidationError(f"Unsupported reward kind: {reward.kind}")
+
+
+def _validate_discount_target(reward, context: PromotionValidationContext):
+    target_kind = (reward.target_kind or "ORDER").upper()
+    if target_kind == "ORDER":
+        return
+    if target_kind != "GROUP":
+        raise PromotionValidationError("Discount target must be ORDER or GROUP(...)")
+    if not reward.target_group_ids:
+        raise PromotionValidationError("Discount GROUP target must contain at least one id")
+    if context.known_item_ids:
+        missing = [item_id for item_id in reward.target_group_ids if item_id not in context.known_item_ids]
+        if missing:
+            raise PromotionValidationError(f"Unknown menu item ids in discount TARGET GROUP: {missing}")
 
 
 def _validate_per_match(definition: PromotionDefinition):
     if definition.reward_mode != "per_match":
         return
+    if definition.reward.kind == "CHEAPEST_FREE_FROM_GROUP":
+        raise PromotionValidationError("reward_mode=per_match is not supported for CHEAPEST_FREE_FROM_GROUP")
     node = definition.condition
     if not isinstance(node, Comparison):
         raise PromotionValidationError("reward_mode=per_match supports only a single comparison")

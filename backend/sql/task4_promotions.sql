@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS promotions (
     priority INTEGER NOT NULL DEFAULT 100,
     condition TEXT NOT NULL DEFAULT '',
     reward TEXT NOT NULL DEFAULT '',
+    dsl_version INTEGER,
     notify TEXT NOT NULL DEFAULT '',
     reward_mode TEXT NOT NULL DEFAULT 'once',
     limit_per_order INTEGER,

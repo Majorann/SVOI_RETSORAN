@@ -15,6 +15,7 @@ class PromoItem:
     lore: str = ""
     condition: str = ""
     reward: str = ""
+    dsl_version: str = ""
     notify: str = ""
     reward_mode: str = "once"
     limit_per_order: str = ""
@@ -49,6 +50,7 @@ class PromoItem:
             "photo": data["photo"],
             "condition": data["condition"],
             "reward": data["reward"],
+            "dsl_version": data["dsl_version"],
             "notify": data["notify"],
             "reward_mode": data["reward_mode"],
             "limit_per_order": data["limit_per_order"],

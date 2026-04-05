@@ -230,6 +230,7 @@ def _execute_schema(cur):
             priority INTEGER NOT NULL DEFAULT 100,
             condition TEXT NOT NULL DEFAULT '',
             reward TEXT NOT NULL DEFAULT '',
+            dsl_version INTEGER,
             notify TEXT NOT NULL DEFAULT '',
             reward_mode TEXT NOT NULL DEFAULT 'once',
             limit_per_order INTEGER,
@@ -283,6 +284,7 @@ def _execute_schema(cur):
     cur.execute("ALTER TABLE orders ALTER COLUMN cancelled_at DROP NOT NULL")
     cur.execute("ALTER TABLE promotions ADD COLUMN IF NOT EXISTS text TEXT NOT NULL DEFAULT ''")
     cur.execute("ALTER TABLE promotions ADD COLUMN IF NOT EXISTS link TEXT NOT NULL DEFAULT ''")
+    cur.execute("ALTER TABLE promotions ADD COLUMN IF NOT EXISTS dsl_version INTEGER")
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_user_cards_user_id ON user_cards(user_id);"
     )
@@ -1036,6 +1038,7 @@ def _legacy_promotion_rows():
                     "priority": _coerce_int(meta.get("priority"), 100),
                     "condition": "",
                     "reward": "",
+                    "dsl_version": None,
                     "notify": "",
                     "reward_mode": "",
                     "limit_per_order": None,
@@ -1063,6 +1066,7 @@ def _legacy_promotion_rows():
                 "priority": _coerce_int(meta.get("priority"), 100),
                 "condition": _coerce_text(meta.get("condition")).strip(),
                 "reward": _coerce_text(meta.get("reward")).strip(),
+                "dsl_version": (_coerce_int(meta.get("dsl_version"), 0) or None),
                 "notify": _coerce_text(meta.get("notify")).strip(),
                 "reward_mode": _coerce_text(meta.get("reward_mode"), "once").strip() or "once",
                 "limit_per_order": _coerce_int(meta.get("limit_per_order"), 0) or None,
@@ -1195,6 +1199,7 @@ def _upsert_promotions_in_tx(cur, promotions):
                 _coerce_int(promotion.get("priority"), 100),
                 _coerce_text(promotion.get("condition")).strip(),
                 _coerce_text(promotion.get("reward")).strip(),
+                (_coerce_int(promotion.get("dsl_version"), 0) or None),
                 _coerce_text(promotion.get("notify")).strip(),
                 _coerce_text(promotion.get("reward_mode"), "once").strip() or "once",
                 (_coerce_int(promotion.get("limit_per_order"), 0) or None),
@@ -1227,6 +1232,7 @@ def _upsert_promotions_in_tx(cur, promotions):
             priority,
             condition,
             reward,
+            dsl_version,
             notify,
             reward_mode,
             limit_per_order,
@@ -1238,7 +1244,7 @@ def _upsert_promotions_in_tx(cur, promotions):
             updated_by_admin_user_id
         )
         VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON CONFLICT (id)
         DO UPDATE SET
@@ -1252,6 +1258,7 @@ def _upsert_promotions_in_tx(cur, promotions):
             priority = EXCLUDED.priority,
             condition = EXCLUDED.condition,
             reward = EXCLUDED.reward,
+            dsl_version = EXCLUDED.dsl_version,
             notify = EXCLUDED.notify,
             reward_mode = EXCLUDED.reward_mode,
             limit_per_order = EXCLUDED.limit_per_order,
@@ -2560,6 +2567,7 @@ def load_promotions():
                     priority,
                     condition,
                     reward,
+                    dsl_version,
                     notify,
                     reward_mode,
                     limit_per_order,
@@ -2586,13 +2594,14 @@ def load_promotions():
                 "priority": _coerce_int(row[8], 100),
                 "condition": _coerce_text(row[9]),
                 "reward": _coerce_text(row[10]),
-                "notify": _coerce_text(row[11]),
-                "reward_mode": _coerce_text(row[12], "once") or "once",
-                "limit_per_order": "" if row[13] is None else str(row[13]),
-                "limit_per_user_per_day": "" if row[14] is None else str(row[14]),
-                "start_at": row[15].isoformat() if isinstance(row[15], datetime) else _coerce_text(row[15]),
-                "end_at": row[16].isoformat() if isinstance(row[16], datetime) else _coerce_text(row[16]),
-                "photo": _coerce_text(row[17]) or None,
+                "dsl_version": "" if row[11] is None else str(row[11]),
+                "notify": _coerce_text(row[12]),
+                "reward_mode": _coerce_text(row[13], "once") or "once",
+                "limit_per_order": "" if row[14] is None else str(row[14]),
+                "limit_per_user_per_day": "" if row[15] is None else str(row[15]),
+                "start_at": row[16].isoformat() if isinstance(row[16], datetime) else _coerce_text(row[16]),
+                "end_at": row[17].isoformat() if isinstance(row[17], datetime) else _coerce_text(row[17]),
+                "photo": _coerce_text(row[18]) or None,
             }
             for row in rows
         ]

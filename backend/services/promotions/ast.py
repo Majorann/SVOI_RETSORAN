@@ -12,7 +12,7 @@ class PromotionDslError(ValueError):
 @dataclass(frozen=True)
 class MetricRef:
     target: Literal["item", "all_items", "type", "group", "order"]
-    field: Literal["QTY", "SUM"]
+    field: Literal["QTY", "SUM", "UNIQUE_QTY", "SUBTOTAL"]
     item_id: int | None = None
     item_type: str | None = None
     group_ids: tuple[int, ...] = ()
@@ -21,7 +21,7 @@ class MetricRef:
 @dataclass(frozen=True)
 class Comparison:
     metric: MetricRef
-    operator: Literal["=", ">", "<", ">=", "<="]
+    operator: Literal["=", "==", "!=", ">", "<", ">=", "<="]
     value: int
 
 
@@ -32,21 +32,29 @@ class ConditionGroup:
     right: "ConditionNode"
 
 
-ConditionNode = Comparison | ConditionGroup
+@dataclass(frozen=True)
+class ConditionNot:
+    operand: "ConditionNode"
+
+
+ConditionNode = Comparison | ConditionGroup | ConditionNot
 
 
 @dataclass(frozen=True)
 class Reward:
-    kind: Literal["POINTS", "DISCOUNT_PERCENT", "DISCOUNT_RUB", "GIFT"]
+    kind: Literal["POINTS", "DISCOUNT_PERCENT", "DISCOUNT_RUB", "GIFT", "CHEAPEST_FREE_FROM_GROUP"]
     amount: int | None = None
     item_id: int | None = None
     qty: int | None = None
+    target_kind: Literal["ORDER", "GROUP"] | None = None
+    target_group_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
 class PromotionDefinition:
     promotion_type: str
     name: str
+    dsl_version: Literal[1, 2]
     active: bool
     priority: int
     condition: ConditionNode

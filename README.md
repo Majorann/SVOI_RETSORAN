@@ -206,7 +206,10 @@ reward=POINTS(100)
 reward_mode=once
 ```
 
-Полная DSL-документация: `backend/doc/CBO_SCRIPT_V1.md`
+Полная DSL-документация:
+
+- `backend/doc/CBO_SCRIPT_V1.md`
+- `backend/doc/CBO_SCRIPT_V2.md`
 
 ## Admin panel
 
