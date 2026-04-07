@@ -608,6 +608,23 @@ const setupMenuCatalog = ({
     }
   };
 
+  const applyRevealAnimation = (card, index) => {
+    card.style.animationDelay = `${index * 28}ms`;
+    card.classList.add("menu-card--reveal");
+
+    let revealCleared = false;
+    const clearRevealClass = (event) => {
+      if (revealCleared) return;
+      if (event && event.animationName !== "menuReveal") return;
+      revealCleared = true;
+      card.classList.remove("menu-card--reveal");
+      card.style.animationDelay = "";
+    };
+
+    card.addEventListener("animationend", clearRevealClass, { once: true });
+    window.setTimeout(clearRevealClass, 260);
+  };
+
   const renderMenuCards = (cards, animate = true) => {
     menuCards.forEach((card) => {
       card.hidden = true;
@@ -621,8 +638,7 @@ const setupMenuCatalog = ({
       card.style.display = "";
       menuList.appendChild(card);
       if (animate) {
-        card.style.animationDelay = `${index * 28}ms`;
-        card.classList.add("menu-card--reveal");
+        applyRevealAnimation(card, index);
       }
     });
     if (emptyState) {
