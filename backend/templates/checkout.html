@@ -151,11 +151,11 @@
           <span class="checkout-total__amount"><span id="checkoutPayable">0</span> <span class="checkout-total__currency">₽</span></span>
         </p>
         <button class="primary-action" type="submit" id="goToPayment"{% if not active_card %} disabled{% endif %}>Перейти к оплате</button>
-        <p class="checkout-total__hint">Оплата картой из профиля</p>
+        <p class="checkout-total__hint">Оплата через учебный привязанный метод</p>
         {% if active_card %}
-          <p class="checkout-total__hint">Активная карта: {{ active_card.brand }} •••• {{ active_card.last4 }}</p>
+          <p class="checkout-total__hint">Активный метод: {{ active_card.brand }} •••• {{ active_card.last4 }}</p>
         {% else %}
-          <p class="notice notice--error">Нет активной карты. Добавьте карту в профиле.</p>
+          <p class="notice notice--error">Нет активного метода оплаты. Подключите демо-метод в профиле.</p>
         {% endif %}
       </div>
     </section>

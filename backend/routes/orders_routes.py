@@ -178,7 +178,7 @@ def payment_route(
         payment_error_text = "Корзина пуста. Добавьте блюда в меню."
     elif not active_card:
         payment_error_code = "no_card"
-        payment_error_text = "Карта не привязана. Перейдите в профиль и добавьте карту."
+        payment_error_text = "Нет активного способа оплаты. Перейдите в профиль и подключите демо-метод."
 
     can_pay = payment_error_code is None
     preview = {
@@ -203,9 +203,8 @@ def payment_route(
             "status": "Активна" if booking_state == "active" else "Неактивна",
         },
         "payment_card": {
-            "brand": (active_card or {}).get("brand", "Карта"),
+            "brand": (active_card or {}).get("brand", "Способ оплаты"),
             "last4": (active_card or {}).get("last4", "0000"),
-            "expiry": (active_card or {}).get("expiry"),
         },
     }
     preview_token = issue_checkout_preview_token(preview, user_id=user_id) if can_pay else ""
@@ -326,7 +325,7 @@ def payment_confirm_route(
     active_card = next((card for card in user.get("cards", []) if card.get("active")), None)
     if active_card is None:
         session.pop("checkout_preview", None)
-        return _payment_error_response("Нет активной карты для оплаты.", status_code=409)
+        return _payment_error_response("Нет активного способа оплаты.", status_code=409)
 
     preview_items = preview.get("items")
     if not isinstance(preview_items, list):
@@ -392,9 +391,8 @@ def payment_confirm_route(
                 "status": "Active",
             },
             "payment_card": {
-                "brand": active_card.get("brand", "Card"),
+                "brand": active_card.get("brand", "Payment method"),
                 "last4": active_card.get("last4", "0000"),
-                "expiry": active_card.get("expiry"),
             },
         }
     )

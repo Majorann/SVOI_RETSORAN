@@ -73,7 +73,7 @@
           <div class="payment-card__content">
             <div class="payment-card__brand">{{ card.brand }}</div>
             <div class="payment-card__number">•••• {{ card.last4 }}</div>
-            <div class="payment-card__status">{% if card.active %}Активна{% else %}Не активна{% endif %}</div>
+            <div class="payment-card__status">{% if card.active %}Демо-метод активен{% else %}Не активен{% endif %}</div>
           </div>
           <form class="payment-card__delete-form" method="post" action="{{ url_for('delete_card') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -88,29 +88,24 @@
       <details class="payment-add">
         <summary class="payment-card payment-card--add" aria-expanded="false">
           <span class="payment-add__label-wrap" aria-hidden="true">
-            <span class="payment-add__label payment-add__label--default">+ Привязать новую карту</span>
+            <span class="payment-add__label payment-add__label--default">+ Подключить демо-оплату</span>
             <span class="payment-add__label payment-add__label--cancel">Отмена</span>
           </span>
         </summary>
         <div class="payment-add__content">
           <form class="payment-form" method="post" action="{{ url_for('add_card') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-            <input type="hidden" name="card_last4" value="" />
-            <label class="payment-form__field">
-              <span>Номер карты</span>
-              <input type="text" name="card_number_display" placeholder="0000 0000 0000 0000" inputmode="numeric" autocomplete="cc-number" required />
-            </label>
-            <div class="payment-form__row">
-              <label class="payment-form__field">
-                <span>Срок</span>
-                <input type="text" name="expiry" placeholder="MM/YY" inputmode="numeric" autocomplete="cc-exp" />
-              </label>
-              <label class="payment-form__field">
-                <span>Имя</span>
-                <input type="text" name="holder" placeholder="NAME SURNAME" autocomplete="cc-name" maxlength="26" />
-              </label>
+            <div class="notice notice--empty">
+              Учебный режим: сайт не принимает реальные номера карт. Выберите безопасный демо-способ оплаты.
             </div>
-            <button class="primary-action hero__cta payment-form__submit" type="submit">Сохранить</button>
+            <label class="payment-form__field">
+              <span>Способ оплаты</span>
+              <select name="payment_method" required>
+                <option value="demo_mir">Демо MIR •••• 4242</option>
+                <option value="demo_visa">Демо VISA •••• 1111</option>
+              </select>
+            </label>
+            <button class="primary-action hero__cta payment-form__submit" type="submit">Подключить демо-метод</button>
           </form>
         </div>
       </details>
