@@ -7,7 +7,7 @@
         <p class="admin-topbar__eyebrow">Профиль</p>
         <h2>{{ user.name }}</h2>
       </div>
-      {% if user.is_admin %}<span class="admin-badge admin-badge--accent">Администратор</span>{% endif %}
+      {% if user.is_admin %}<span class="admin-badge admin-badge--accent">Администратор / менеджер</span>{% endif %}
     </div>
     <div class="admin-detail-grid">
       <div><span>ID</span><strong>{{ user.id }}</strong></div>
@@ -22,18 +22,18 @@
   </article>
 
   <article class="admin-card">
-    <div class="admin-section-head"><h2>Карты</h2></div>
+    <div class="admin-section-head"><h2>Способы оплаты</h2></div>
     {% if user.cards %}
       <div class="admin-list">
         {% for card in user.cards %}
           <div class="admin-list__item">
             <strong>{{ card.brand }} •••• {{ card.last4 }}</strong>
-            <span>{{ card.holder or "—" }} · {{ card.expiry or "—" }} {% if card.active %}· Активна{% endif %}</span>
+            <span>{% if card.active %}Демо-метод активен{% else %}Демо-метод отключён{% endif %}{% if card.created_at %} · {{ card.created_at|ru_datetime }}{% endif %}</span>
           </div>
         {% endfor %}
       </div>
     {% else %}
-      <div class="admin-empty">Привязанных карт нет.</div>
+      <div class="admin-empty">Подключённых способов оплаты нет.</div>
     {% endif %}
   </article>
 </section>
@@ -86,7 +86,7 @@
           <p>
             Было: {{ action.payload.get("previous_balance", 0) }} ₽ ·
             Стало: {{ action.payload.get("new_balance", 0) }} ₽ ·
-            Администратор: {{ action.admin_name or "Администратор" }}
+            Администратор: {{ action.admin_name or "Администратор / менеджер" }}
           </p>
         </details>
       {% endfor %}
