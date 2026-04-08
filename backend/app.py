@@ -6,6 +6,7 @@ Restaurant demo app (Flask).
 
 from flask import Flask, g, render_template, request, jsonify, session, redirect, send_from_directory, url_for
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 import os
 import threading
@@ -62,6 +63,37 @@ if _DATABASE_URL:
         from storage import pg_store as _pg_store_module
     except Exception as exc:
         raise RuntimeError(f"Postgres storage import failed: {exc}") from exc
+
+
+@lru_cache(maxsize=1)
+def _load_user_agreement_blocks():
+    agreement_path = Path(__file__).resolve().parent / "doc" / "Пользовательское соглашение.docx"
+    if not agreement_path.exists():
+        return []
+
+    try:
+        from docx import Document
+    except Exception:
+        return []
+
+    doc = Document(str(agreement_path))
+    blocks = []
+    for index, paragraph in enumerate(doc.paragraphs):
+        text = str(paragraph.text or "").strip()
+        if not text:
+            continue
+        if index == 0:
+            kind = "title"
+        elif index == 1:
+            kind = "subtitle"
+        elif index == 2:
+            kind = "meta"
+        elif text[:2].isdigit() and ". " in text and text.count(".") == 1:
+            kind = "heading"
+        else:
+            kind = "paragraph"
+        blocks.append({"kind": kind, "text": text})
+    return blocks
 
 
 def _empty_promo_application_counts(**_kwargs):
@@ -540,6 +572,18 @@ def favicon():
         Path(app.static_folder) / "img",
         "bell.png",
         mimetype="image/png",
+    )
+
+
+@app.get("/user-agreement")
+def user_agreement():
+    agreement_blocks = _load_user_agreement_blocks()
+    if not agreement_blocks:
+        return render_template("placeholder.html", title="Соглашение недоступно"), 404
+    return render_template(
+        "user_agreement.html",
+        title="Пользовательское соглашение",
+        agreement_blocks=agreement_blocks,
     )
 
 

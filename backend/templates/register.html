@@ -1,4 +1,23 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/payments.css', v='20260402g') }}" />
+<style>
+  .auth-agreement {
+    margin-top: 4px;
+    line-height: 1.45;
+    align-items: flex-start;
+  }
+
+  .auth-agreement input[type="checkbox"] {
+    flex: 0 0 auto;
+    margin-top: 1px;
+  }
+
+  .auth-agreement__text {
+    display: inline;
+  }
+</style>
+{% endblock %}
 {% block content %}
 <header class="top">
   <div class="brand">
@@ -27,6 +46,12 @@
     <label class="field">
       <span>Пароль</span>
       <input type="password" name="password" placeholder="Придумайте пароль" required />
+    </label>
+    <label class="checkout-points auth-agreement" for="acceptUserAgreement">
+      <input type="checkbox" name="accept_user_agreement" id="acceptUserAgreement" value="1" {% if agreement_checked %}checked{% endif %} required />
+      <span class="auth-agreement__text">
+        Я принимаю <a class="link" href="{{ url_for('user_agreement') }}" target="_blank" rel="noopener noreferrer">пользовательское соглашение</a>
+      </span>
     </label>
     <button class="primary-action" type="submit">Зарегистрироваться</button>
     <p class="auth__hint">
@@ -59,4 +84,3 @@
 {% block extra_scripts %}
 <script type="module" src="{{ url_for('static', filename='js/pages/auth.js', v='20260402f') }}"></script>
 {% endblock %}
-

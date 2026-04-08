@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block extra_head %}
+<style>
+  .legal-page {
+    padding-bottom: 32px;
+  }
+
+  .legal-card {
+    display: grid;
+    gap: 12px;
+    padding: 18px 18px 20px;
+  }
+
+  .legal-card__title {
+    margin: 0;
+    font-size: 24px;
+    line-height: 1.15;
+  }
+
+  .legal-card__subtitle,
+  .legal-card__meta {
+    margin: 0;
+    color: var(--text-muted);
+    white-space: pre-line;
+  }
+
+  .legal-card__heading {
+    margin: 14px 0 2px;
+    font-size: 16px;
+    line-height: 1.3;
+  }
+
+  .legal-card__paragraph {
+    margin: 0;
+    line-height: 1.6;
+    white-space: pre-line;
+  }
+</style>
+{% endblock %}
+{% block content %}
+<header class="top">
+  <div class="brand">
+    <div class="brand__mark"><img class="brand__mark-img" src="{{ url_for('static', filename='img/orelll.svg') }}" alt="" aria-hidden="true" /></div>
+    <div>
+      <p class="brand__name">Документы</p>
+      <p class="brand__tag">Пользовательское соглашение</p>
+    </div>
+  </div>
+</header>
+
+<section class="section legal-page">
+  <article class="card legal-card">
+    {% for block in agreement_blocks %}
+      {% if block.kind == "title" %}
+        <h1 class="legal-card__title">{{ block.text }}</h1>
+      {% elif block.kind == "subtitle" %}
+        <p class="legal-card__subtitle">{{ block.text }}</p>
+      {% elif block.kind == "meta" %}
+        <p class="legal-card__meta">{{ block.text }}</p>
+      {% elif block.kind == "heading" %}
+        <h2 class="legal-card__heading">{{ block.text }}</h2>
+      {% else %}
+        <p class="legal-card__paragraph">{{ block.text }}</p>
+      {% endif %}
+    {% endfor %}
+  </article>
+</section>
+{% endblock %}

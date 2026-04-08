@@ -142,12 +142,22 @@ def register_route(
         phone_raw = (request.form.get("phone") or "").strip()
         phone = normalize_phone(phone_raw)
         password = request.form.get("password") or ""
+        agreement_accepted = str(request.form.get("accept_user_agreement") or "").strip().lower() in {"1", "true", "on", "yes"}
         if not name or not phone or not password:
             return render_template(
                 "register.html",
                 error="Заполните все поля. Телефон должен быть в формате +7.",
                 form_name=name,
                 form_phone=phone_raw,
+                agreement_checked=agreement_accepted,
+            )
+        if not agreement_accepted:
+            return render_template(
+                "register.html",
+                error="Подтвердите согласие с пользовательским соглашением.",
+                form_name=name,
+                form_phone=phone_raw,
+                agreement_checked=False,
             )
         if get_user_by_phone(phone) is not None:
             return render_template(
@@ -155,6 +165,7 @@ def register_route(
                 error="Этот номер уже зарегистрирован.",
                 form_name=name,
                 form_phone=phone_raw,
+                agreement_checked=agreement_accepted,
             )
         new_user = create_user(
             name=name,
@@ -174,7 +185,7 @@ def register_route(
             redirect_url=url_for("index"),
             title_text="Регистрация завершена",
         )
-    return render_template("register.html", error=None, form_name="", form_phone="")
+    return render_template("register.html", error=None, form_name="", form_phone="", agreement_checked=False)
 
 
 def logout_route():

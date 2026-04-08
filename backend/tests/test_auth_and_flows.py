@@ -59,6 +59,7 @@ def test_register_stores_modern_password_hash(app_module, client):
             "name": "Новый пользователь",
             "phone": "+79991234567",
             "password": "1234",
+            "accept_user_agreement": "1",
         },
     )
 
@@ -68,6 +69,34 @@ def test_register_stores_modern_password_hash(app_module, client):
     stored_hash = users[0]["password_hash"]
     assert stored_hash.startswith("pbkdf2:sha256:")
     assert app_module.verify_password("1234", stored_hash) == (True, False)
+
+
+def test_register_requires_user_agreement(app_module, client):
+    csrf_token = get_csrf_token(client)
+
+    response = client.post(
+        "/register",
+        data={
+            "csrf_token": csrf_token,
+            "name": "Новый пользователь",
+            "phone": "+79991234567",
+            "password": "1234",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Подтвердите согласие с пользовательским соглашением." in response.get_data(as_text=True)
+    users = read_json(app_module.USERS_PATH)
+    assert users == []
+
+
+def test_user_agreement_page_renders_current_document(client):
+    response = client.get("/user-agreement")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Пользовательское соглашение" in html
+    assert "Администратор/менеджер" in html
 
 
 def test_login_upgrades_legacy_sha256_hash(app_module, client):
