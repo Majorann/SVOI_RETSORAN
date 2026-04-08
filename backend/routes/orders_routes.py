@@ -1,4 +1,5 @@
 import json
+import secrets
 from datetime import datetime, timedelta
 
 from flask import g, jsonify, redirect, render_template, request, session, url_for
@@ -181,6 +182,7 @@ def payment_route(
 
     can_pay = payment_error_code is None
     preview = {
+        "preview_id": secrets.token_urlsafe(24),
         "items": pricing["items"],
         "items_total": totals["items_total"],
         "items_count": sum(item["qty"] for item in pricing["items"]),
@@ -286,6 +288,7 @@ def payment_confirm_route(
     create_order,
     apply_user_balance_delta,
     verify_checkout_preview_token,
+    consume_checkout_preview,
     load_promo_application_counts,
     save_promotion_applications,
     load_promo_items,
@@ -358,6 +361,13 @@ def payment_confirm_route(
     )
     totals = pricing["totals"]
     priced_items = pricing["items"]
+    preview_id = str(preview.get("preview_id") or "").strip()
+    if not preview_id:
+        session.pop("checkout_preview", None)
+        return _payment_error_response("Сессия оплаты истекла. Повторите оформление.", status_code=409)
+    if not consume_checkout_preview(preview_id):
+        session.pop("checkout_preview", None)
+        return _payment_error_response("Оплата уже была подтверждена. Проверьте историю заказов.", status_code=409)
 
     new_order = create_order(
         {

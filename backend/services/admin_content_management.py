@@ -8,6 +8,7 @@ from services.path_naming import ascii_slug, canonical_menu_photo_path, canonica
 from services.promotions import build_dsl_text_from_promo_item, parse_and_validate_promo_source
 from services.promotions.ast import PromotionDslError
 from services.promotions.validator import PromotionValidationError
+from services.url_safety import normalize_public_link
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -188,6 +189,10 @@ def save_promo_item(service, *, form: dict, photo: FileStorage | None, admin_use
         text = str(form.get("text") or "").strip()
         if not text:
             raise ValueError("Укажите текст рекламы.")
+        link = normalize_public_link(form.get("link") or "")
+        raw_link = str(form.get("link") or "").strip()
+        if raw_link and not link:
+            raise ValueError("Ссылка рекламы должна быть http(s) URL или относительным путём сайта.")
         current_photo = str((existing or {}).get("photo") or "").strip()
         photo_path = current_photo
         if saved_photo and photo is not None and photo.filename:
@@ -199,7 +204,7 @@ def save_promo_item(service, *, form: dict, photo: FileStorage | None, admin_use
             "name": str((existing or {}).get("name") or f"reklama-{item_id}").strip() or f"reklama-{item_id}",
             "lore": "",
             "text": text,
-            "link": str(form.get("link") or "").strip(),
+            "link": link,
             "active": _safe_bool(form.get("active"), True),
             "priority": _safe_int(form.get("priority"), 100),
             "condition": "",

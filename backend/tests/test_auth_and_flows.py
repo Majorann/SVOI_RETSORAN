@@ -212,6 +212,85 @@ def test_static_assets_do_not_refresh_logged_in_session_cookie(app_module, clien
     assert response.headers.get("Set-Cookie") is None
 
 
+def test_login_rate_limit_blocks_after_repeated_failures(app_module, client):
+    user = build_user(app_module)
+    write_json(app_module.USERS_PATH, [user])
+    csrf_token = get_csrf_token(client)
+
+    for _ in range(5):
+        response = client.post(
+            "/login",
+            data={
+                "csrf_token": csrf_token,
+                "phone": user["phone"],
+                "password": "wrong-password",
+            },
+        )
+        assert response.status_code == 200
+
+    blocked = client.post(
+        "/login",
+        data={
+            "csrf_token": csrf_token,
+            "phone": user["phone"],
+            "password": "wrong-password",
+        },
+    )
+
+    assert blocked.status_code == 200
+    assert "Слишком много попыток входа" in blocked.get_data(as_text=True)
+
+
+def test_profile_card_binding_accepts_only_prepared_last4(app_module, client):
+    user = build_user(app_module)
+    write_json(app_module.USERS_PATH, [user])
+    csrf_token = get_csrf_token(client)
+    client.post(
+        "/login",
+        data={"csrf_token": csrf_token, "phone": user["phone"], "password": "1234"},
+    )
+
+    response = client.post(
+        "/cards/add",
+        data={
+            "csrf_token": csrf_token,
+            "card_last4": "4242",
+            "expiry": "12/30",
+            "holder": "TEST USER",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    users = read_json(app_module.USERS_PATH)
+    assert users[0]["cards"] == [
+        {
+            "brand": "MIR",
+            "last4": "4242",
+            "active": True,
+            "holder": "TEST USER",
+            "expiry": "12/30",
+            "created_at": users[0]["cards"][0]["created_at"],
+        }
+    ]
+
+
+def test_index_drops_unsafe_promo_links(app_module, client, monkeypatch):
+    monkeypatch.setattr(app_module, "load_promo_items", lambda: [{"id": 1, "class": "reklama", "text": "Promo", "link": "javascript:alert(1)"}])
+    monkeypatch.setattr(
+        app_module,
+        "promo_items_to_news_cards",
+        lambda _items: [{"title": "Реклама", "text": "Promo", "accent": "Реклама", "photo": "", "link": "javascript:alert(1)"}],
+    )
+
+    response = client.get("/")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "javascript:alert(1)" not in html
+    assert 'data-link="' not in html
+
+
 def test_booking_payment_and_delivery_flows(app_module, client):
     user = build_user(
         app_module,
@@ -275,19 +354,30 @@ def test_booking_payment_and_delivery_flows(app_module, client):
     payment_html = payment_response.get_data(as_text=True)
     preview_token_marker = 'name="preview_token" value="'
     assert preview_token_marker in payment_html
-    preview_token = payment_html.split(preview_token_marker, 1)[1].split('"', 1)[0]
-    assert preview_token
+    payment_preview_token = payment_html.split(preview_token_marker, 1)[1].split('"', 1)[0]
+    assert payment_preview_token
 
     payment_confirm_response = client.post(
         "/payment/confirm",
         data={
             "csrf_token": csrf_token,
-            "preview_token": preview_token,
+            "preview_token": payment_preview_token,
         },
         follow_redirects=False,
     )
     assert payment_confirm_response.status_code == 302
     assert "/orders/1" in payment_confirm_response.headers["Location"]
+
+    duplicate_payment = client.post(
+        "/payment/confirm",
+        data={
+            "csrf_token": csrf_token,
+            "preview_token": payment_preview_token,
+        },
+        follow_redirects=False,
+    )
+    assert duplicate_payment.status_code == 302
+    assert len(read_json(app_module.ORDERS_PATH)) == 1
 
     orders = read_json(app_module.ORDERS_PATH)
     assert len(orders) == 1
@@ -313,13 +403,13 @@ def test_booking_payment_and_delivery_flows(app_module, client):
     )
     assert delivery_response.status_code == 302
     delivery_location = delivery_response.headers["Location"]
-    preview_token = parse_qs(urlparse(delivery_location).query)["preview_token"][0]
+    delivery_preview_token = parse_qs(urlparse(delivery_location).query)["preview_token"][0]
 
     delivery_confirm_response = client.post(
         "/delivery/confirm",
         data={
             "csrf_token": csrf_token,
-            "preview_token": preview_token,
+            "preview_token": delivery_preview_token,
         },
         follow_redirects=False,
     )
@@ -332,6 +422,17 @@ def test_booking_payment_and_delivery_flows(app_module, client):
     assert orders_after_delivery[1]["service_fee"] == 42
     assert orders_after_delivery[1]["payable_total"] == menu_item["price"] + 42
     assert orders_after_delivery[1]["bonus_earned"] == int((menu_item["price"] + 42) * 0.05)
+
+    duplicate_delivery = client.post(
+        "/delivery/confirm",
+        data={
+            "csrf_token": csrf_token,
+            "preview_token": delivery_preview_token,
+        },
+        follow_redirects=False,
+    )
+    assert duplicate_delivery.status_code == 302
+    assert len(read_json(app_module.ORDERS_PATH)) == 2
 
 
 def test_order_totals_helper_reuses_same_rules_for_points_and_delivery(app_module):

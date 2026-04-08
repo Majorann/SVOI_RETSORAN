@@ -1,6 +1,7 @@
 from flask import g, redirect, render_template, url_for
 import secrets
 from services.order_totals import summarize_saved_order_totals
+from services.url_safety import normalize_public_link
 
 
 def _format_date_ddmmyy(value):
@@ -44,6 +45,7 @@ def _sanitize_news_cards(cards):
     for card in cards or []:
         item = dict(card or {})
         item["photo"] = _sanitize_static_filename(item.get("photo"))
+        item["link"] = normalize_public_link(item.get("link"))
         sanitized_cards.append(item)
     return sanitized_cards
 

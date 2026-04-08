@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime
 
 from flask import g, jsonify, redirect, render_template, request, session, url_for
@@ -180,6 +181,7 @@ def delivery_payment_route(
     )
     totals = pricing["totals"]
     preview = {
+        "preview_id": secrets.token_urlsafe(24),
         "items": pricing["items"],
         "items_total": totals["items_total"],
         "service_fee": totals["service_fee"],
@@ -244,6 +246,7 @@ def delivery_confirm_route(
     create_order,
     apply_user_balance_delta,
     verify_checkout_preview_token,
+    consume_checkout_preview,
     load_promo_application_counts,
     save_promotion_applications,
     load_promo_items,
@@ -289,6 +292,17 @@ def delivery_confirm_route(
     totals = pricing["totals"]
     priced_items = pricing["items"]
     eta_minutes = int(preview.get("delivery_eta_minutes", 20) or 20)
+    preview_id = str(preview.get("preview_id") or "").strip()
+    if not preview_id:
+        session.pop("delivery_checkout_preview", None)
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"ok": False, "error": "Сессия оформления истекла. Повторите заказ."}), 409
+        return redirect(url_for("delivery_checkout", error="Сессия оформления истекла. Повторите заказ."))
+    if not consume_checkout_preview(preview_id):
+        session.pop("delivery_checkout_preview", None)
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"ok": False, "error": "Заказ уже был подтверждён. Проверьте историю заказов."}), 409
+        return redirect(url_for("orders"))
 
     new_order = create_order(
         {

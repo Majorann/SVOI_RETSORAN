@@ -99,6 +99,7 @@ from services.business_logic import (
 )
 from services.auth_session import AuthSessionService
 from services.menu_content import MenuContentService
+from services.one_time_tokens import OneTimeTokenStore
 from services.passwords import (
     hash_password as hash_password_value,
     verify_password as verify_password_value,
@@ -262,11 +263,10 @@ app = Flask(__name__)
 app.permanent_session_lifetime = timedelta(days=30)
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = max(300, env_int("STATIC_CACHE_MAX_AGE_SECONDS", 3600))
 app.config["SESSION_REFRESH_EACH_REQUEST"] = False
-# Секрет для сессий (в проде заменить)
-app.secret_key = os.getenv(
-    "FLASK_SECRET_KEY",
-    "ueW2Td8Y-PNMoNazTFEkVLUDxqIEoyzN66MtcjACM5d7AxkZYaYDL9RtFEF5F2vedmzvzJ-P6vGflZYxfzu7EA",
-)
+app_secret_key = (os.getenv("FLASK_SECRET_KEY") or "").strip()
+if not app_secret_key:
+    raise RuntimeError("FLASK_SECRET_KEY is required")
+app.secret_key = app_secret_key
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 # На hosted-платформах (в т.ч. HF Spaces в iframe) Lax может блокировать сессию.
 is_hf_space = bool(os.getenv("SPACE_ID") or os.getenv("HF_SPACE_ID"))
@@ -351,6 +351,14 @@ PASSWORD_HASH_METHOD = env_str("PASSWORD_HASH_METHOD", "pbkdf2:sha256:600000")
 _AUTH_SESSION_SERIALIZER = URLSafeTimedSerializer(app.secret_key, salt="auth-session-v1")
 CHECKOUT_PREVIEW_MAX_AGE_SECONDS = max(300, env_int("CHECKOUT_PREVIEW_MAX_AGE_SECONDS", 30 * 60))
 _CHECKOUT_PREVIEW_SERIALIZER = URLSafeTimedSerializer(app.secret_key, salt="checkout-preview-v1")
+CHECKOUT_PREVIEW_IDEMPOTENCY_TTL_SECONDS = max(
+    24 * 60 * 60,
+    CHECKOUT_PREVIEW_MAX_AGE_SECONDS * 2,
+)
+checkout_preview_token_store = OneTimeTokenStore(
+    DATA_DIR / "used_checkout_previews.json",
+    ttl_seconds=CHECKOUT_PREVIEW_IDEMPOTENCY_TTL_SECONDS,
+)
 ORDER_RETENTION_DAYS = max(0, env_int("ORDER_RETENTION_DAYS", 7))
 ORDER_PRUNE_INTERVAL_SECONDS = max(15, env_int("ORDER_PRUNE_INTERVAL_SECONDS", 60))
 LOGIN_DEBUG_ENABLED = env_bool("LOGIN_DEBUG_ENABLED", False)
@@ -704,6 +712,7 @@ def delivery_confirm():
         create_order,
         apply_user_balance_delta,
         verify_checkout_preview_token,
+        consume_checkout_preview,
         load_promo_application_counts,
         save_promotion_applications,
         load_promo_items,
@@ -850,6 +859,7 @@ def payment_confirm():
         create_order,
         apply_user_balance_delta,
         verify_checkout_preview_token,
+        consume_checkout_preview,
         load_promo_application_counts,
         save_promotion_applications,
         load_promo_items,
@@ -964,6 +974,10 @@ def verify_password(password, password_hash):
 
 def verify_and_upgrade_password(user, password):
     return verify_and_upgrade_password_value(user, password, PASSWORD_HASH_METHOD)
+
+
+def consume_checkout_preview(preview_id):
+    return checkout_preview_token_store.consume(str(preview_id or ""))
 
 
 auth_session = AuthSessionService(

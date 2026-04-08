@@ -19,6 +19,7 @@ def app_module(tmp_path, monkeypatch):
     data_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("FLASK_SECRET_KEY", "test-secret-key")
     monkeypatch.setenv("SESSION_COOKIE_SECURE", "0")
     monkeypatch.setenv("SESSION_COOKIE_SAMESITE", "Lax")
     monkeypatch.setenv("SESSION_COOKIE_PARTITIONED", "0")
@@ -33,8 +34,11 @@ def app_module(tmp_path, monkeypatch):
 
     sys.modules.pop("app", None)
     sys.modules.pop("config", None)
+    sys.modules.pop("routes.auth_routes", None)
     app_module = importlib.import_module("app")
     app_module.app.config["TESTING"] = True
+    auth_routes = importlib.import_module("routes.auth_routes")
+    auth_routes._LOGIN_ATTEMPTS.clear()
     return app_module
 
 

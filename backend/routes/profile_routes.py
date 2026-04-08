@@ -147,14 +147,13 @@ def add_card_route(add_user_card):
     if not user_id:
         return redirect(url_for("login"))
 
-    number = (request.form.get("card_number") or "").strip()
+    last4 = "".join(ch for ch in str(request.form.get("card_last4") or "") if ch.isdigit())
     expiry_input = (request.form.get("expiry") or "").strip()
     holder_raw = (request.form.get("holder") or "").strip()
     holder = normalize_card_holder(holder_raw) if holder_raw else None
 
-    digits = "".join(ch for ch in number if ch.isdigit())
-    if len(digits) < 12:
-        return redirect(url_for("profile", error="Введите корректный номер карты."))
+    if len(last4) != 4:
+        return redirect(url_for("profile", error="Номер карты не был безопасно подготовлен. Повторите ввод."))
 
     expiry, expiry_error = normalize_and_validate_expiry(expiry_input)
     if expiry_error:
@@ -168,7 +167,7 @@ def add_card_route(add_user_card):
         user_id,
         {
             "brand": brand,
-            "last4": digits[-4:],
+            "last4": last4,
             "active": True,
             "holder": holder,
             "expiry": expiry or None,

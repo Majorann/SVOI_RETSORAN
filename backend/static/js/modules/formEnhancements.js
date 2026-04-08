@@ -51,6 +51,7 @@ const formatPhone = (value) => {
 };
 
 const setupFormEnhancements = ({
+  cardForm,
   cardNumberInput,
   expiryInput,
   holderInput,
@@ -77,6 +78,24 @@ const setupFormEnhancements = ({
       validateCardNumber();
     });
     cardNumberInput.addEventListener("blur", validateCardNumber);
+  }
+
+  if (cardForm && cardNumberInput) {
+    cardForm.addEventListener("submit", (event) => {
+      const hiddenLast4Input = cardForm.querySelector('input[name="card_last4"]');
+      const digits = cardNumberInput.value.replace(/\D/g, "");
+      const isValid = digits.length === 16;
+      syncCardVisualState(cardNumberInput, isValid, digits.length > 0);
+      if (!isValid || !(hiddenLast4Input instanceof HTMLInputElement)) {
+        event.preventDefault();
+        cardNumberInput.setCustomValidity("Введите корректный номер карты");
+        cardNumberInput.reportValidity();
+        return;
+      }
+      cardNumberInput.setCustomValidity("");
+      hiddenLast4Input.value = digits.slice(-4);
+      cardNumberInput.value = "";
+    });
   }
 
   if (expiryInput) {
