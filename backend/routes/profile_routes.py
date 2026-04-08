@@ -135,7 +135,7 @@ def profile_route(
         is_authenticated=bool(user_id),
         is_admin=is_admin,
         payment_error=error,
-        payment_success="Демо-метод оплаты подключён" if card_added else "",
+        payment_success="Карта успешно добавлена" if card_added else "",
         booking_duration_minutes=booking_duration_minutes,
         profile_about_text=profile_about_text,
         profile_about_html=format_profile_about_html(profile_about_text),
@@ -147,21 +147,30 @@ def add_card_route(add_user_card):
     if not user_id:
         return redirect(url_for("login"))
 
-    payment_method = (request.form.get("payment_method") or "").strip().lower()
-    demo_methods = {
-        "demo_mir": {"brand": "MIR", "last4": "4242"},
-        "demo_visa": {"brand": "VISA", "last4": "1111"},
-    }
-    selected_method = demo_methods.get(payment_method)
-    if selected_method is None:
-        return redirect(url_for("profile", error="Выберите доступный демо-способ оплаты."))
+    last4 = "".join(ch for ch in str(request.form.get("card_last4") or "") if ch.isdigit())
+    expiry_input = (request.form.get("expiry") or "").strip()
+    holder_raw = (request.form.get("holder") or "").strip()
+    holder = normalize_card_holder(holder_raw) if holder_raw else None
+
+    if len(last4) != 4:
+        return redirect(url_for("profile", error="Номер карты не был безопасно подготовлен. Повторите ввод."))
+
+    expiry, expiry_error = normalize_and_validate_expiry(expiry_input)
+    if expiry_error:
+        return redirect(url_for("profile", error=expiry_error))
+    if holder_raw and not holder:
+        return redirect(url_for("profile", error="Используйте только английские буквы в имени держателя карты."))
+
+    brand = "MIR"
 
     user_record = add_user_card(
         user_id,
         {
-            "brand": selected_method["brand"],
-            "last4": selected_method["last4"],
+            "brand": brand,
+            "last4": last4,
             "active": True,
+            "holder": holder,
+            "expiry": expiry or None,
             "created_at": current_timestamp_value(),
         },
     )
@@ -190,7 +199,7 @@ def delete_card_route(remove_user_card):
         session.clear()
         return redirect(url_for("login", error="Сессия устарела. Войдите снова."))
     if not bool((removal_result or {}).get("removed")):
-        return redirect(url_for("profile", error="Способ оплаты не найден."))
+        return redirect(url_for("profile", error="Карта не найдена."))
     g.current_user = user_record
     g.current_user_id = user_id
     g.current_user_loaded = True

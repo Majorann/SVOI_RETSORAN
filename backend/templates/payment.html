@@ -47,14 +47,16 @@
       {% endif %}
     </section>
 
-    <section class="payment-block payment-block--card">
-      <h2>Способ оплаты</h2>
-      {% if not has_card_issue %}
-        <div class="payment-card-inline">
-          <span>{{ preview.get("payment_card", {}).get("brand") }} •••• {{ preview.get("payment_card", {}).get("last4") }}</span>
-          <span class="pill">Учебный метод</span>
-        </div>
-        <p>Реальные платёжные реквизиты сайту не передаются.</p>
+      <section class="payment-block payment-block--card">
+        <h2>Привязанная карта</h2>
+        {% if not has_card_issue %}
+          <div class="payment-card-inline">
+            <span>{{ preview.get("payment_card", {}).get("brand") }} •••• {{ preview.get("payment_card", {}).get("last4") }}</span>
+            <span class="pill">Активна</span>
+          </div>
+          {% if preview.get("payment_card", {}).get("expiry") %}
+            <p>Срок действия: {{ preview.get("payment_card", {}).get("expiry") }}</p>
+          {% endif %}
       {% else %}
         <div class="notice notice--error">{{ payment_error_text }}</div>
         <a class="booking-card__action" href="{{ url_for('profile') }}">Перейти в профиль</a>

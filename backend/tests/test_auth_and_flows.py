@@ -283,7 +283,9 @@ def test_profile_card_binding_accepts_only_prepared_last4(app_module, client):
         "/cards/add",
         data={
             "csrf_token": csrf_token,
-            "payment_method": "demo_mir",
+            "card_last4": "4242",
+            "expiry": "12/30",
+            "holder": "Test User",
         },
         follow_redirects=False,
     )
@@ -294,8 +296,8 @@ def test_profile_card_binding_accepts_only_prepared_last4(app_module, client):
     assert users[0]["cards"][0]["brand"] == "MIR"
     assert users[0]["cards"][0]["last4"] == "4242"
     assert users[0]["cards"][0]["active"] is True
-    assert "holder" not in users[0]["cards"][0]
-    assert "expiry" not in users[0]["cards"][0]
+    assert users[0]["cards"][0]["holder"] == "TEST USER"
+    assert users[0]["cards"][0]["expiry"] == "12/30"
 
 
 def test_index_drops_unsafe_promo_links(app_module, client, monkeypatch):
