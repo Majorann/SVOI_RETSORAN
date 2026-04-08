@@ -95,10 +95,9 @@
         <div class="payment-add__content">
           <form class="payment-form" method="post" action="{{ url_for('add_card') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-            <input type="hidden" name="card_last4" value="" />
             <label class="payment-form__field">
               <span>Номер карты</span>
-              <input type="text" name="card_number_display" placeholder="0000 0000 0000 0000" inputmode="numeric" autocomplete="cc-number" required />
+              <input type="text" name="card_number" placeholder="0000 0000 0000 0000" inputmode="numeric" autocomplete="cc-number" required />
             </label>
             <div class="payment-form__row">
               <label class="payment-form__field">

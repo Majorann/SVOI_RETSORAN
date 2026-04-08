@@ -270,7 +270,7 @@ def test_login_rate_limit_blocks_after_repeated_failures(app_module, client):
     assert "Слишком много попыток входа" in blocked.get_data(as_text=True)
 
 
-def test_profile_card_binding_accepts_only_prepared_last4(app_module, client):
+def test_profile_card_binding_accepts_card_number_flow(app_module, client):
     user = build_user(app_module)
     write_json(app_module.USERS_PATH, [user])
     csrf_token = get_csrf_token(client)
@@ -283,7 +283,7 @@ def test_profile_card_binding_accepts_only_prepared_last4(app_module, client):
         "/cards/add",
         data={
             "csrf_token": csrf_token,
-            "card_last4": "4242",
+            "card_number": "2200 7000 1234 4242",
             "expiry": "12/30",
             "holder": "Test User",
         },
