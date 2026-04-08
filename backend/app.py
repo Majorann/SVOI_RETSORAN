@@ -67,7 +67,26 @@ if _DATABASE_URL:
 
 @lru_cache(maxsize=1)
 def _load_user_agreement_blocks():
-    agreement_path = Path(__file__).resolve().parent / "doc" / "Пользовательское соглашение.docx"
+    doc_dir = Path(__file__).resolve().parent / "doc"
+    text_path = doc_dir / "user_agreement.txt"
+    if text_path.exists():
+        raw_text = text_path.read_text(encoding="utf-8")
+        blocks = []
+        for index, chunk in enumerate(part.strip() for part in raw_text.split("\n\n") if part.strip()):
+            if index == 0:
+                kind = "title"
+            elif index == 1:
+                kind = "subtitle"
+            elif index == 2:
+                kind = "meta"
+            elif chunk[:2].isdigit() and ". " in chunk and chunk.count(".") == 1:
+                kind = "heading"
+            else:
+                kind = "paragraph"
+            blocks.append({"kind": kind, "text": chunk})
+        return blocks
+
+    agreement_path = doc_dir / "Пользовательское соглашение.docx"
     if not agreement_path.exists():
         return []
 
