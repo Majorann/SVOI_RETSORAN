@@ -1,11 +1,13 @@
 import json
 import os
+import re
 import threading
 import time
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 
 import psycopg
+from psycopg import sql
 from config import MENU_ITEMS_PATH, MENU_PHOTO_NAMES, PROMO_ITEMS_PATH
 from services.business_logic import current_time_value
 from services.path_naming import ascii_slug, canonical_menu_photo_path, canonical_promo_photo_path, image_extension
@@ -16,6 +18,23 @@ _SCHEMA_READY = False
 _SCHEMA_LOCK = threading.Lock()
 _LOCAL = threading.local()
 _IS_HF_SPACE = bool(os.getenv("SPACE_ID") or os.getenv("HF_SPACE_ID"))
+_ROW_COUNT_TABLES = frozenset({"users", "bookings", "orders", "menu_items", "promotions"})
+_INTEGER_ID_TABLES = frozenset({"users", "orders"})
+_TIMESTAMPTZ_COLUMN_ALLOWLIST = {
+    "users": frozenset({"created_at"}),
+    "user_cards": frozenset({"created_at"}),
+    "bookings": frozenset({"created_at"}),
+    "orders": frozenset({"created_at", "cancelled_at", "effective_status_updated_at"}),
+    "admin_users": frozenset({"created_at"}),
+    "admin_actions": frozenset({"created_at"}),
+    "menu_items": frozenset({"created_at", "updated_at"}),
+    "promotions": frozenset({"start_at", "end_at", "created_at", "updated_at"}),
+    "promotion_applications": frozenset({"applied_at"}),
+}
+_TIMESTAMPTZ_DEFAULT_SQL = {
+    None: None,
+    "NOW()": sql.SQL("NOW()"),
+}
 
 
 def _env_int(name, default):
@@ -373,8 +392,59 @@ def _execute_schema(cur):
     )
 
 
+def _sql_table_identifier(table_name, *, allowed_tables):
+    normalized_name = _coerce_text(table_name).strip()
+    if normalized_name not in allowed_tables:
+        raise ValueError(f"Unsupported table identifier: {table_name}")
+    return normalized_name, sql.Identifier(normalized_name)
+
+
+def _sql_column_identifier(table_name, column_name, *, allowed_columns_by_table):
+    normalized_table, table_identifier = _sql_table_identifier(
+        table_name,
+        allowed_tables=set(allowed_columns_by_table),
+    )
+    normalized_column = _coerce_text(column_name).strip()
+    allowed_columns = allowed_columns_by_table.get(normalized_table, frozenset())
+    if normalized_column not in allowed_columns:
+        raise ValueError(f"Unsupported column identifier: {table_name}.{column_name}")
+    return normalized_table, table_identifier, sql.Identifier(normalized_column)
+
+
+def _sql_timestamptz_default(default_sql):
+    normalized_default = _coerce_text(default_sql).strip() if default_sql is not None else None
+    if normalized_default not in _TIMESTAMPTZ_DEFAULT_SQL:
+        raise ValueError(f"Unsupported SQL default expression: {default_sql}")
+    return _TIMESTAMPTZ_DEFAULT_SQL[normalized_default]
+
+
+def _render_sql_composable(statement):
+    if isinstance(statement, sql.Composed):
+        return "".join(_render_sql_composable(part) for part in statement._obj)
+    if isinstance(statement, sql.Identifier):
+        rendered_parts = []
+        for part in statement._obj:
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part):
+                rendered_parts.append(part)
+            else:
+                rendered_parts.append(f'"{part.replace("\"", "\"\"")}"')
+        return ".".join(rendered_parts)
+    if isinstance(statement, sql.SQL):
+        return statement._obj
+    raise TypeError(f"Unsupported SQL composable: {type(statement)!r}")
+
+
+def _execute_sql(cur, statement, params=None):
+    rendered_statement = _render_sql_composable(statement) if isinstance(statement, sql.Composable) else statement
+    if params is None:
+        cur.execute(rendered_statement)
+    else:
+        cur.execute(rendered_statement, params)
+
+
 def _count_rows(cur, table_name):
-    cur.execute(f"SELECT COUNT(*) FROM {table_name}")
+    _, table_identifier = _sql_table_identifier(table_name, allowed_tables=_ROW_COUNT_TABLES)
+    _execute_sql(cur, sql.SQL("SELECT COUNT(*) FROM {}").format(table_identifier))
     row = cur.fetchone()
     return int(row[0] or 0) if row else 0
 
@@ -434,57 +504,140 @@ def _normalize_timestamptz_column(cur, table_name, column_name, *, nullable: boo
     if not _column_exists(cur, table_name, column_name):
         return
 
+    _, table_identifier, column_identifier = _sql_column_identifier(
+        table_name,
+        column_name,
+        allowed_columns_by_table=_TIMESTAMPTZ_COLUMN_ALLOWLIST,
+    )
+    default_expression = _sql_timestamptz_default(default_sql)
     _, udt_name = _column_type_info(cur, table_name, column_name)
     if udt_name == "timestamptz":
-        if default_sql:
-            cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} SET DEFAULT {default_sql}")
+        if default_expression is not None:
+            _execute_sql(
+                cur,
+                sql.SQL("ALTER TABLE {} ALTER COLUMN {} SET DEFAULT {}").format(
+                    table_identifier,
+                    column_identifier,
+                    default_expression,
+                )
+            )
         else:
-            cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} DROP DEFAULT")
+            _execute_sql(
+                cur,
+                sql.SQL("ALTER TABLE {} ALTER COLUMN {} DROP DEFAULT").format(
+                    table_identifier,
+                    column_identifier,
+                )
+            )
         if nullable:
-            cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} DROP NOT NULL")
+            _execute_sql(
+                cur,
+                sql.SQL("ALTER TABLE {} ALTER COLUMN {} DROP NOT NULL").format(
+                    table_identifier,
+                    column_identifier,
+                )
+            )
         else:
-            cur.execute(f"UPDATE {table_name} SET {column_name} = NOW() WHERE {column_name} IS NULL")
-            cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} SET NOT NULL")
+            _execute_sql(
+                cur,
+                sql.SQL("UPDATE {} SET {} = NOW() WHERE {} IS NULL").format(
+                    table_identifier,
+                    column_identifier,
+                    column_identifier,
+                )
+            )
+            _execute_sql(
+                cur,
+                sql.SQL("ALTER TABLE {} ALTER COLUMN {} SET NOT NULL").format(
+                    table_identifier,
+                    column_identifier,
+                )
+            )
         return
 
-    cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} DROP DEFAULT")
+    _execute_sql(
+        cur,
+        sql.SQL("ALTER TABLE {} ALTER COLUMN {} DROP DEFAULT").format(
+            table_identifier,
+            column_identifier,
+        )
+    )
 
     if udt_name == "timestamp":
-        cur.execute(
-            f"""
-            ALTER TABLE {table_name}
-            ALTER COLUMN {column_name} TYPE TIMESTAMPTZ
-            USING {column_name} AT TIME ZONE 'UTC'
-            """
+        _execute_sql(
+            cur,
+            sql.SQL(
+                """
+                ALTER TABLE {table}
+                ALTER COLUMN {column} TYPE TIMESTAMPTZ
+                USING {column} AT TIME ZONE 'UTC'
+                """
+            ).format(
+                table=table_identifier,
+                column=column_identifier,
+            )
         )
     else:
-        fallback_sql = "NULL" if nullable else "NOW()"
-        cur.execute(
-            f"""
-            ALTER TABLE {table_name}
-            ALTER COLUMN {column_name} TYPE TIMESTAMPTZ
-            USING (
-                CASE
-                    WHEN NULLIF(BTRIM({column_name}::text), '') IS NULL THEN {fallback_sql}
-                    WHEN BTRIM({column_name}::text) ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}(?:[ T][0-9]{{2}}:[0-9]{{2}}(?::[0-9]{{2}}(?:\\.[0-9]+)?)?)?(?:Z|[+-][0-9]{{2}}:[0-9]{{2}})?$'
-                        THEN CASE
-                            WHEN BTRIM({column_name}::text) ~ '(?:Z|[+-][0-9]{{2}}:[0-9]{{2}})$'
-                                THEN BTRIM({column_name}::text)::TIMESTAMPTZ
-                            ELSE BTRIM({column_name}::text)::TIMESTAMP AT TIME ZONE 'UTC'
-                        END
-                    ELSE {fallback_sql}
-                END
+        fallback_expression = sql.SQL("NULL") if nullable else sql.SQL("NOW()")
+        _execute_sql(
+            cur,
+            sql.SQL(
+                """
+                ALTER TABLE {table}
+                ALTER COLUMN {column} TYPE TIMESTAMPTZ
+                USING (
+                    CASE
+                        WHEN NULLIF(BTRIM({column}::text), '') IS NULL THEN {fallback}
+                        WHEN BTRIM({column}::text) ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}(?:[ T][0-9]{{2}}:[0-9]{{2}}(?::[0-9]{{2}}(?:\\.[0-9]+)?)?)?(?:Z|[+-][0-9]{{2}}:[0-9]{{2}})?$'
+                            THEN CASE
+                                WHEN BTRIM({column}::text) ~ '(?:Z|[+-][0-9]{{2}}:[0-9]{{2}})$'
+                                    THEN BTRIM({column}::text)::TIMESTAMPTZ
+                                ELSE BTRIM({column}::text)::TIMESTAMP AT TIME ZONE 'UTC'
+                            END
+                        ELSE {fallback}
+                    END
+                )
+                """
+            ).format(
+                table=table_identifier,
+                column=column_identifier,
+                fallback=fallback_expression,
             )
-            """
         )
 
-    if default_sql:
-        cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} SET DEFAULT {default_sql}")
+    if default_expression is not None:
+        _execute_sql(
+            cur,
+            sql.SQL("ALTER TABLE {} ALTER COLUMN {} SET DEFAULT {}").format(
+                table_identifier,
+                column_identifier,
+                default_expression,
+            )
+        )
     if nullable:
-        cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} DROP NOT NULL")
+        _execute_sql(
+            cur,
+            sql.SQL("ALTER TABLE {} ALTER COLUMN {} DROP NOT NULL").format(
+                table_identifier,
+                column_identifier,
+            )
+        )
     else:
-        cur.execute(f"UPDATE {table_name} SET {column_name} = NOW() WHERE {column_name} IS NULL")
-        cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} SET NOT NULL")
+        _execute_sql(
+            cur,
+            sql.SQL("UPDATE {} SET {} = NOW() WHERE {} IS NULL").format(
+                table_identifier,
+                column_identifier,
+                column_identifier,
+            )
+        )
+        _execute_sql(
+            cur,
+            sql.SQL("ALTER TABLE {} ALTER COLUMN {} SET NOT NULL").format(
+                table_identifier,
+                column_identifier,
+            )
+        )
 
 
 def _normalize_legacy_temporal_columns(cur):
@@ -1467,10 +1620,9 @@ def _parse_booking_datetime(booking: dict):
 
 
 def _next_integer_id(cur, table_name: str):
-    if table_name not in {"users", "orders"}:
-        raise ValueError(f"Unsupported table for integer id allocation: {table_name}")
-    cur.execute(f"LOCK TABLE {table_name} IN EXCLUSIVE MODE")
-    cur.execute(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {table_name}")
+    _, table_identifier = _sql_table_identifier(table_name, allowed_tables=_INTEGER_ID_TABLES)
+    _execute_sql(cur, sql.SQL("LOCK TABLE {} IN EXCLUSIVE MODE").format(table_identifier))
+    _execute_sql(cur, sql.SQL("SELECT COALESCE(MAX(id), 0) + 1 FROM {}").format(table_identifier))
     row = cur.fetchone()
     return _coerce_int(row[0], 1) if row else 1
 
