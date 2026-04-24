@@ -1,5 +1,5 @@
 import { setupAuthTokenBridge } from "../modules/authToken.js";
-import { setupBottomNavMotion } from "../modules/bottomNavMotion.js";
+import { setupBottomNavMotion } from "../modules/bottomNavMotion.js?v=20260424a";
 
 const runWhenDomReady = (callback) => {
   if (document.readyState === "loading") {

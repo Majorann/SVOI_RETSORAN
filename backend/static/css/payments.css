@@ -61,6 +61,10 @@
   justify-content: flex-end;
 }
 
+.profile-top-actions form {
+  margin: 0;
+}
+
 .icon-button--admin {
   min-width: 92px;
   min-height: 36px;

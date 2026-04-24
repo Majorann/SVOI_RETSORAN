@@ -39,7 +39,10 @@
     {% if is_admin %}
       <a class="icon-button icon-button--admin" href="{{ url_for('admin.root') }}" aria-label="Перейти в админ-панель">Админ-панель</a>
     {% endif %}
-    <a class="icon-button icon-button--danger" href="{{ url_for('logout') }}" aria-label="Выйти">Выйти</a>
+    <form method="post" action="{{ url_for('logout') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button class="icon-button icon-button--danger" type="submit" aria-label="Выйти">Выйти</button>
+    </form>
   </div>
 </header>
 

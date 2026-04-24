@@ -27,13 +27,12 @@
     moveIndicator(target, instant);
   };
 
-  // Trigger a stronger neon pulse on tab switch, even before page navigation.
   const pulseNavItem = (target) => {
     target.classList.remove("is-neon-pulse");
-    // Force reflow to restart animation on repeated quick clicks.
-    void target.offsetWidth;
-    target.classList.add("is-neon-pulse");
-    window.setTimeout(() => target.classList.remove("is-neon-pulse"), 1660);
+    window.requestAnimationFrame(() => {
+      target.classList.add("is-neon-pulse");
+      window.setTimeout(() => target.classList.remove("is-neon-pulse"), 360);
+    });
   };
 
   const path = window.location.pathname;
@@ -66,11 +65,6 @@
   setActive(active, true);
 
   items.forEach((item) => {
-    // Start pulse on press so effect is visible on the first tap.
-    item.addEventListener("pointerdown", () => {
-      pulseNavItem(item);
-    });
-
     item.addEventListener("click", (event) => {
       const isMainClick = event.button === 0;
       const hasModifier = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;

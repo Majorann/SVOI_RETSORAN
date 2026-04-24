@@ -10,6 +10,20 @@ LOGIN_ATTEMPT_COOLDOWN_SECONDS = 15 * 60
 LOGIN_ATTEMPT_MAX = 5
 _LOGIN_ATTEMPTS_LOCK = threading.RLock()
 _LOGIN_ATTEMPTS = {}
+MIN_PASSWORD_LENGTH = 10
+COMMON_PASSWORDS = {
+    "123456",
+    "123456789",
+    "1234567890",
+    "12345678",
+    "password",
+    "qwerty",
+    "qwerty123",
+    "admin",
+    "admin123",
+    "пароль",
+    "йцукен",
+}
 
 
 def _login_attempt_key(phone: str | None, remote_addr: str | None):
@@ -72,6 +86,20 @@ def normalize_phone(phone_raw):
     else:
         return None
     return f"+{digits}"
+
+
+def validate_registration_password(password: str):
+    normalized = str(password or "")
+    compact = normalized.strip().lower()
+    if len(normalized) < MIN_PASSWORD_LENGTH:
+        return f"Пароль должен быть не короче {MIN_PASSWORD_LENGTH} символов."
+    if compact in COMMON_PASSWORDS:
+        return "Этот пароль слишком распространён. Придумайте более надёжный пароль."
+    if normalized.isdigit():
+        return "Пароль не должен состоять только из цифр."
+    if normalized.isalpha():
+        return "Добавьте в пароль хотя бы одну цифру."
+    return None
 
 
 def login_route(
@@ -158,6 +186,15 @@ def register_route(
                 form_name=name,
                 form_phone=phone_raw,
                 agreement_checked=False,
+            )
+        password_error = validate_registration_password(password)
+        if password_error:
+            return render_template(
+                "register.html",
+                error=password_error,
+                form_name=name,
+                form_phone=phone_raw,
+                agreement_checked=agreement_accepted,
             )
         if get_user_by_phone(phone) is not None:
             return render_template(

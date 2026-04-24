@@ -1,258 +1,169 @@
 # SVOI_RETSORAN
 
-Учебный Flask-проект ресторана с бронированием, меню, корзиной, заказами, доставкой, бонусами и desktop-first admin panel.
+Учебный Flask-проект ресторана: публичный сайт, бронирование столов, меню, корзина, заказы, доставка, бонусы и служебная админ-панель.
 
-## Что есть
-
-- главная страница, уведомления, профиль и история заказов;
-- бронирование столов со схемой зала;
-- меню и доставка с корзиной;
-- checkout и экран оплаты;
-- популярные блюда на главной с hover-overlay;
-- promo-система для `reklama` и `akciya`;
-- admin panel на `/admin`;
-- работа через JSON или Postgres.
-
-## Хранилище
-
-- Без `DATABASE_URL` приложение работает на JSON:
-  - `backend/users.json`
-  - `backend/bookings.json`
-  - `backend/orders.json`
-- С `DATABASE_URL` приложение работает через Postgres.
-
-В Postgres-режиме:
-
-- пользователи, брони, заказы и карты лежат в БД;
-- `menu_items` и `promotions` тоже лежат в БД;
-- изображения блюд и акций остаются в `backend/static/...`, в БД хранится только путь;
-- при старте backend выполняется автосогласование контента с хоста:
-  - меню и акции читаются из файлов;
-  - записи в БД обновляются через `upsert`;
-  - если записи больше нет среди файлов, она не удаляется, а отключается через `active = false`.
-
-`reklama` и `akciya` в Postgres-режиме читаются из БД. Файлы на диске используются как источник для sync/import и для медиа.
+Проект можно запускать локально на JSON-файлах или на деплое с Postgres. JSON-режим удобен для разработки и демонстрации, Postgres-режим нужен для админки и более полноценного хранения данных.
 
 ## Быстрый запуск
 
-Из корня репозитория:
+Из корня проекта:
 
 ```powershell
 python run_local.py
 ```
 
-На macOS/Linux:
+Скрипт сам создаёт `backend/.venv`, ставит зависимости, читает `backend/.env.local`, генерирует `FLASK_SECRET_KEY`, если его нет, и запускает сайт на `http://127.0.0.1:5000`.
 
-```bash
-python3 run_local.py
+Полезные варианты:
+
+```powershell
+python run_local.py --port 8000
+python run_local.py --install-deps
+python run_local.py --install-only
 ```
 
-`run_local.py` сам:
-
-- создаёт `backend/.venv`, если нужно;
-- ставит зависимости;
-- подхватывает `backend/.env.local`;
-- генерирует `FLASK_SECRET_KEY`, если его нет;
-- запускает backend локально.
-- использует UTF-8 при работе с локальными служебными файлами.
-
 ## Ручной запуск
-
-Windows:
 
 ```powershell
 cd backend
 python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-python -m waitress --host 127.0.0.1 --port 5000 app:app
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m waitress --host 127.0.0.1 --port 5000 app:app
 ```
 
-macOS/Linux:
+Для Linux/macOS команды такие же по смыслу, но путь к Python внутри окружения будет `.venv/bin/python`.
 
-```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m waitress --host 127.0.0.1 --port 5000 app:app
-```
+## Основные возможности
+
+- публичный сайт ресторана с главной страницей, меню и профилем пользователя;
+- бронирование столов со схемой зала;
+- оформление заказов и доставки;
+- история заказов, уведомления и бонусные баллы;
+- промо-система для рекламы и акций;
+- админ-панель для заказов, броней, доставки, меню, акций, пользователей, аналитики и audit log;
+- два режима хранения: JSON для локальной разработки, Postgres для полноценного режима.
+
+## Хранилище
+
+Без `DATABASE_URL` приложение работает в JSON-режиме. Данные пишутся в файлы внутри `backend` или в папку из `APP_DATA_DIR`.
+
+С `DATABASE_URL` приложение использует Postgres. В этом режиме хранятся пользователи, брони, заказы, меню, акции и служебные данные админки. Изображения остаются в `backend/static`, в БД хранится путь к файлу.
+
+Админ-панель рассчитана на Postgres. В JSON-режиме публичная часть может работать, но админка будет ограничена или недоступна.
 
 ## Переменные окружения
 
-Минимально:
+Минимально нужна:
 
-- `FLASK_SECRET_KEY`
+- `FLASK_SECRET_KEY` - секрет Flask-сессий. Для локального запуска `run_local.py` создаёт его автоматически.
 
-Для Postgres:
+Часто используемые:
 
-- `DATABASE_URL`
+- `APP_DATA_DIR` - папка для JSON-данных;
+- `DATABASE_URL` - включает Postgres-режим;
+- `REDIS_URL` - включает Redis-кэш меню, если Redis доступен;
+- `PUBLIC_BASE_URL` - публичный URL деплоя;
+- `TRUST_PROXY_HEADERS` - учитывать proxy-заголовки на хостинге;
+- `SESSION_COOKIE_SECURE`, `SESSION_COOKIE_SAMESITE`, `SESSION_COOKIE_PARTITIONED` - настройки cookie;
+- `SECURITY_ALLOW_EMBEDDED_PREVIEW` - разрешить iframe-предпросмотр сайта на хостинге;
+- `DEBUG_STORAGE_ENABLED`, `SESSION_DEBUG_ENABLED`, `LOGIN_DEBUG_ENABLED` - диагностические режимы, не включать публично без необходимости.
 
-Полезные дополнительные:
+Шаблон находится в `backend/.env.example`.
 
-- `APP_DATA_DIR`
-- `PUBLIC_BASE_URL`
-- `SESSION_COOKIE_SAMESITE`
-- `SESSION_COOKIE_SECURE`
-- `SESSION_COOKIE_PARTITIONED`
-- `TRUST_PROXY_HEADERS`
-- `APP_TIMEZONE`
-- `REDIS_URL`
-- `MENU_CACHE_ENABLED`
+## Безопасность
 
-Шаблон: `backend/.env.example`
+В проекте уже включены базовые меры:
 
-## Автотесты
+- CSRF-защита для POST-запросов;
+- logout работает только через `POST`;
+- современные password hashes через Werkzeug;
+- минимальная проверка сложности пароля при регистрации;
+- rate limit входа в память процесса;
+- security headers: CSP, Referrer-Policy, Permissions-Policy, X-Content-Type-Options, X-Frame-Options, HSTS для HTTPS;
+- debug-роуты закрыты флагами и дополнительно требуют админ-доступ.
+
+Ограничения учебного проекта:
+
+- rate limit хранится в памяти процесса, поэтому сбрасывается после рестарта и не общий для нескольких инстансов;
+- демо-оплата не является реальной платёжной интеграцией;
+- для production-уровня лучше вынести rate limit в Redis и отдельно проверить CSP под реальные внешние домены.
+
+## Тесты
 
 Установка dev-зависимостей:
 
 ```powershell
 cd backend
-.\.venv\Scripts\python -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 ```
 
-Запуск:
+Адресная проверка публичных auth/user-flow сценариев:
 
 ```powershell
 cd backend
-.\.venv\Scripts\python -m pytest tests -q
+.\.venv\Scripts\python.exe -m pytest tests\test_auth_and_flows.py
 ```
 
-Из корня репозитория:
+Последний адресный прогон в рабочей копии:
+
+```text
+29 passed
+```
+
+Полный набор тестов:
 
 ```powershell
-$env:PYTHONPATH = (Resolve-Path .\backend)
-backend\.venv\Scripts\python -m pytest backend\tests -q
+cd backend
+.\.venv\Scripts\python.exe -m pytest
 ```
 
-Последний адресный regression-check в рабочей копии: `16 passed`.
+Часть админских тестов завязана на Postgres-режим и тестовые заглушки. Если полного окружения нет, для быстрой проверки пользовательских сценариев используйте адресный прогон выше.
 
-## Основные пути
+## Деплой
 
-- `/` - главная
-- `/reserve` - бронирование
-- `/menu` - меню
-- `/menu/<id>` - отдельный preview блюда отключён, route редиректит обратно в `/menu`
-- `/delivery` - меню доставки
-- `/checkout` - оформление заказа
-- `/delivery/checkout` - оформление доставки
-- `/orders` - история заказов
-- `/notifications` - уведомления
-- `/profile` - профиль
-- `/admin` - админка
+В репозитории есть `render.yaml` для Render:
+
+- `rootDir: backend`;
+- build: `pip install -r requirements.txt`;
+- start: `gunicorn app:app`;
+- `FLASK_SECRET_KEY` генерируется на стороне Render.
+
+Для деплоя с полноценной админкой добавьте `DATABASE_URL`. Для iframe-предпросмотров хостинга включите:
+
+```env
+SECURITY_ALLOW_EMBEDDED_PREVIEW=1
+```
 
 ## Контент
 
-### Блюда
+Файловый контент лежит в `backend/static`:
 
-Файлы-источник:
+- `menu_items` - блюда;
+- `promo_items` - реклама и акции;
+- `img`, `css`, `js` - интерфейсные ассеты.
 
-- `backend/static/menu_items/<slug>/item.txt`
-- `backend/static/menu_items/<slug>/<photo>`
+В Postgres-режиме меню и акции синхронизируются в БД. Файлы на диске остаются источником для импорта и местом хранения изображений.
 
-Минимальный формат:
+Документация по DSL акций:
 
-```txt
-id=101
-name=Брускетта
-type=Закуски
-price=390
-lore=Описание
-featured=true
-active=true
-weight=250 г
-```
+- `backend/doc/CBO_SCRIPT_V1.md`;
+- `backend/doc/CBO_SCRIPT_V2.md`.
 
-Примечание:
+## Структура
 
-- значение `weight` / `portion` нормализуется в `portion_label` и используется в интерфейсе как граммовка или объём блюда.
+- `backend/app.py` - точка входа Flask;
+- `backend/config.py` - конфигурация и константы;
+- `backend/routes/` - HTTP-маршруты;
+- `backend/services/` - бизнес-логика;
+- `backend/storage/` - JSON/Postgres слой хранения;
+- `backend/templates/` - Jinja-шаблоны;
+- `backend/static/` - CSS, JS, изображения и файловый контент;
+- `backend/sql/` - SQL-скрипты;
+- `backend/tests/` - pytest-тесты;
+- `backend/doc/CHANGELOG.md` - история изменений.
 
-### Промо
+## Правила проекта
 
-Файлы-источник:
-
-- `backend/static/promo_items/reklama/...`
-- `backend/static/promo_items/akciya/...`
-
-Поддерживаются:
-
-- `reklama`:
-
-```txt
-id=1
-class=reklama
-text=Текст рекламы
-link=https://example.com
-```
-
-- `akciya` как информационная акция:
-
-```txt
-id=2
-class=akciya
-name=Пройди опрос
-lore=Описание акции
-```
-
-- `akciya` как исполняемая акция:
-
-```txt
-id=3
-class=akciya
-name=FPV бонус
-lore=За 2 блюда начислим баллы
-condition=ID(74).QTY >= 2
-reward=POINTS(100)
-reward_mode=once
-```
-
-Полная DSL-документация:
-
-- `backend/doc/CBO_SCRIPT_V1.md`
-- `backend/doc/CBO_SCRIPT_V2.md`
-
-## Admin panel
-
-Admin panel доступна только при работе через Postgres.
-
-Основные разделы:
-
-- dashboard;
-- заказы, брони и доставка;
-- меню;
-- акции и реклама;
-- пользователи;
-- аналитика;
-- audit log.
-
-На dashboard есть кнопка `Автосогласование`, которая вручную запускает синхронизацию меню и акций с хоста в БД без перезапуска сайта.
-
-После последних правок:
-
-- detail-страница брони после отмены возвращает в общий список броней;
-- в `Заказах` и `Доставке` выровнены toolbar-фильтры и `per_page`;
-- автосогласование отключает отсутствующие блюда и акции, а не удаляет их.
-
-## UI и UX
-
-- логин и регистрация используют единый телефонный формат с маской `+7`;
-- checkout устойчив к длинным promo-блокам и различиям рендера между локалкой и хостом;
-- фон страницы `reserve` усилен для сценариев с маленькой высотой окна и сильным zoom;
-- detail-preview блюда по маршруту `/menu/<id>` больше не используется в пользовательском потоке.
-
-## Структура проекта
-
-- `backend/app.py` - точка входа Flask
-- `backend/config.py` - конфиг и константы
-- `backend/routes/` - маршруты
-- `backend/services/` - бизнес-логика
-- `backend/storage/` - JSON/Postgres storage
-- `backend/templates/` - Jinja-шаблоны
-- `backend/static/` - CSS, JS, изображения и файловый контент
-- `backend/sql/` - SQL-файлы для Postgres
-- `backend/doc/CHANGELOG.md` - история изменений
-
-## Примечания
-
-- Все файлы проекта должны быть в UTF-8.
+- Все текстовые файлы должны быть UTF-8.
+- Секреты и реальные пользовательские данные не должны попадать в репозиторий.
 - История изменений ведётся в `backend/doc/CHANGELOG.md`.

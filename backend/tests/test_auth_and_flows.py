@@ -1,9 +1,11 @@
 import hashlib
+import importlib
 import json
+import sys
 from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
-from conftest import write_json
+from conftest import BACKEND_DIR, write_json
 
 
 def get_csrf_token(client):
@@ -58,7 +60,7 @@ def test_register_stores_modern_password_hash(app_module, client):
             "csrf_token": csrf_token,
             "name": "Новый пользователь",
             "phone": "+79991234567",
-            "password": "1234",
+            "password": "StrongPass123",
             "accept_user_agreement": "1",
         },
     )
@@ -68,7 +70,7 @@ def test_register_stores_modern_password_hash(app_module, client):
     assert len(users) == 1
     stored_hash = users[0]["password_hash"]
     assert stored_hash.startswith("pbkdf2:sha256:")
-    assert app_module.verify_password("1234", stored_hash) == (True, False)
+    assert app_module.verify_password("StrongPass123", stored_hash) == (True, False)
 
 
 def test_register_requires_user_agreement(app_module, client):
@@ -80,7 +82,7 @@ def test_register_requires_user_agreement(app_module, client):
             "csrf_token": csrf_token,
             "name": "Новый пользователь",
             "phone": "+79991234567",
-            "password": "1234",
+            "password": "StrongPass123",
         },
     )
 
@@ -88,6 +90,106 @@ def test_register_requires_user_agreement(app_module, client):
     assert "Подтвердите согласие с пользовательским соглашением." in response.get_data(as_text=True)
     users = read_json(app_module.USERS_PATH)
     assert users == []
+
+
+def test_register_rejects_weak_password(app_module, client):
+    csrf_token = get_csrf_token(client)
+
+    response = client.post(
+        "/register",
+        data={
+            "csrf_token": csrf_token,
+            "name": "Новый пользователь",
+            "phone": "+79991234567",
+            "password": "1234",
+            "accept_user_agreement": "1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Пароль должен быть не короче 10 символов." in response.get_data(as_text=True)
+    users = read_json(app_module.USERS_PATH)
+    assert users == []
+
+
+def test_logout_requires_post_and_csrf(app_module, client):
+    user = build_user(app_module)
+    write_json(app_module.USERS_PATH, [user])
+    csrf_token = get_csrf_token(client)
+    client.post(
+        "/login",
+        data={"csrf_token": csrf_token, "phone": user["phone"], "password": "1234"},
+    )
+
+    get_response = client.get("/logout")
+    assert get_response.status_code == 405
+    with client.session_transaction() as session_state:
+        assert session_state["user_id"] == user["id"]
+
+    post_without_csrf = client.post("/logout")
+    assert post_without_csrf.status_code == 302
+    with client.session_transaction() as session_state:
+        assert session_state["user_id"] == user["id"]
+
+    post_with_csrf = client.post("/logout", data={"csrf_token": csrf_token})
+    assert post_with_csrf.status_code == 200
+    with client.session_transaction() as session_state:
+        assert "user_id" not in session_state
+
+
+def test_security_headers_are_set(client):
+    response = client.get("/login")
+
+    assert response.headers["Content-Security-Policy"].startswith("default-src 'self';")
+    assert "frame-ancestors 'self'" in response.headers["Content-Security-Policy"]
+    assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
+    assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+    assert response.headers["Permissions-Policy"] == "camera=(), microphone=(), geolocation=(), payment=()"
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_security_headers_can_allow_embedded_preview(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("APP_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("FLASK_SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "0")
+    monkeypatch.setenv("SESSION_COOKIE_SAMESITE", "Lax")
+    monkeypatch.setenv("SESSION_COOKIE_PARTITIONED", "0")
+    monkeypatch.setenv("TRUST_PROXY_HEADERS", "0")
+    monkeypatch.setenv("LOGIN_DEBUG_ENABLED", "0")
+    monkeypatch.setenv("SESSION_DEBUG_ENABLED", "0")
+    monkeypatch.setenv("MENU_CACHE_ENABLED", "0")
+    monkeypatch.setenv("DB_KEEPALIVE_ENABLED", "0")
+    monkeypatch.setenv("SECURITY_ALLOW_EMBEDDED_PREVIEW", "1")
+    monkeypatch.delenv("SECURITY_FRAME_ANCESTORS", raising=False)
+    monkeypatch.delenv("SECURITY_X_FRAME_OPTIONS", raising=False)
+
+    if str(BACKEND_DIR) not in sys.path:
+        sys.path.insert(0, str(BACKEND_DIR))
+
+    sys.modules.pop("app", None)
+    sys.modules.pop("config", None)
+    sys.modules.pop("routes.auth_routes", None)
+    preview_app_module = importlib.import_module("app")
+    preview_app_module.app.config["TESTING"] = True
+    write_json(preview_app_module.USERS_PATH, [])
+    write_json(preview_app_module.BOOKINGS_PATH, [])
+    write_json(preview_app_module.ORDERS_PATH, [])
+
+    response = preview_app_module.app.test_client().get("/login")
+
+    assert "frame-ancestors *" in response.headers["Content-Security-Policy"]
+    assert "X-Frame-Options" not in response.headers
+
+
+def test_debug_storage_requires_admin_when_enabled(app_module, client):
+    app_module.DEBUG_STORAGE_ENABLED = True
+
+    response = client.get("/debug/storage")
+
+    assert response.status_code == 401
+    assert response.get_json()["ok"] is False
 
 
 def test_user_agreement_page_renders_current_document(client):

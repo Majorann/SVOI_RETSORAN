@@ -4887,6 +4887,7 @@ body.mood-night { --mood-tint: rgba(70, 56, 46, 0.24); }
   background-position: center;
   opacity: 0.9;
   transition: opacity 0.24s ease, transform 0.24s ease;
+  will-change: transform, opacity;
 }
 
 .bottom-nav__item:nth-of-type(1)::before {
@@ -4915,8 +4916,7 @@ body.mood-night { --mood-tint: rgba(70, 56, 46, 0.24); }
   transform: translate(-50%, calc(-50% - 1px)) scale(3.15);
 }
 .bottom-nav__item.is-neon-pulse::before {
-  /* Extra pulse used only on active tab switch interaction. */
-  animation: navNeonPulse 1600ms cubic-bezier(0.16, 0.84, 0.28, 1);
+  animation: navTapPulse 340ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .nav-badge {
@@ -4956,32 +4956,15 @@ body.mood-night { --mood-tint: rgba(70, 56, 46, 0.24); }
 }
 
 
-/* Strong neon pulse with smooth fade-out for bottom navigation icon tabs. */
-@keyframes navNeonPulse {
+@keyframes navTapPulse {
   0% {
-    filter: drop-shadow(0 0 0 rgba(218, 119, 86, 0));
+    opacity: 0.88;
   }
-  24% {
-    filter:
-      drop-shadow(0 0 12px rgba(218, 119, 86, 1))
-      drop-shadow(0 0 22px rgba(218, 119, 86, 0.92))
-      drop-shadow(0 0 34px rgba(218, 119, 86, 0.74))
-      drop-shadow(0 0 48px rgba(218, 119, 86, 0.5));
-  }
-  55% {
-    filter:
-      drop-shadow(0 0 9px rgba(218, 119, 86, 0.82))
-      drop-shadow(0 0 18px rgba(218, 119, 86, 0.62))
-      drop-shadow(0 0 30px rgba(218, 119, 86, 0.42));
-  }
-  78% {
-    filter:
-      drop-shadow(0 0 6px rgba(218, 119, 86, 0.48))
-      drop-shadow(0 0 12px rgba(218, 119, 86, 0.32))
-      drop-shadow(0 0 20px rgba(218, 119, 86, 0.2));
+  45% {
+    opacity: 1;
   }
   100% {
-    filter: drop-shadow(0 0 0 rgba(218, 119, 86, 0));
+    opacity: 0.96;
   }
 }
 

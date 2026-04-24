@@ -6,7 +6,7 @@
     <meta name="csrf-token" content="{{ csrf_token }}" />
     <meta name="referrer" content="origin" />
     <title>{{ title or "Свои — ресторан" }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260405c') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260424a') }}" />
     {% block extra_head %}{% endblock %}
     <style>
       body.auth-sync-pending .page {
@@ -22,7 +22,7 @@
     <script>
       window.__SESSION_USER_ID = {{ current_user_id|tojson }};
     </script>
-    <script type="module" src="{{ url_for('static', filename='js/base.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='js/base.js', v='20260424a') }}"></script>
     {% block extra_scripts %}{% endblock %}
   </body>
 </html>

@@ -1,7 +1,7 @@
 import { stagger } from "./modules/core.js";
 import { navigateWithAuth, setupAuthTokenBridge } from "./modules/authToken.js";
 import { setupMenuHoverMood } from "./modules/menuHoverMood.js";
-import { setupBottomNavMotion } from "./modules/bottomNavMotion.js";
+import { setupBottomNavMotion } from "./modules/bottomNavMotion.js?v=20260424a";
 import { setupTableTooltip } from "./modules/tableTooltip.js";
 import { setupOrderStatusBar } from "./modules/orderStatusBar.js";
 import { setupPointsBalanceCard } from "./modules/pointsBalanceCard.js";

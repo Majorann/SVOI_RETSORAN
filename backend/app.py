@@ -332,6 +332,30 @@ app.config["SESSION_COOKIE_SAMESITE"] = session_samesite
 app.config["SESSION_COOKIE_SECURE"] = env_bool("SESSION_COOKIE_SECURE", default_secure_cookie)
 app.config["SESSION_COOKIE_PARTITIONED"] = env_bool("SESSION_COOKIE_PARTITIONED", is_hf_space)
 app.config["PREFERRED_URL_SCHEME"] = "https" if app.config["SESSION_COOKIE_SECURE"] else "http"
+SECURITY_ALLOW_EMBEDDED_PREVIEW = env_bool("SECURITY_ALLOW_EMBEDDED_PREVIEW", is_hf_space)
+SECURITY_FRAME_ANCESTORS_DEFAULT = "*" if SECURITY_ALLOW_EMBEDDED_PREVIEW else "'self'"
+SECURITY_FRAME_ANCESTORS = env_str("SECURITY_FRAME_ANCESTORS", SECURITY_FRAME_ANCESTORS_DEFAULT)
+SECURITY_X_FRAME_OPTIONS = env_str(
+    "SECURITY_X_FRAME_OPTIONS",
+    "" if SECURITY_ALLOW_EMBEDDED_PREVIEW or SECURITY_FRAME_ANCESTORS != "'self'" else "SAMEORIGIN",
+)
+SECURITY_PERMISSIONS_POLICY = env_str(
+    "SECURITY_PERMISSIONS_POLICY",
+    "camera=(), microphone=(), geolocation=(), payment=()",
+)
+SECURITY_CSP = env_str(
+    "SECURITY_CSP",
+    (
+        "default-src 'self'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        f"frame-ancestors {SECURITY_FRAME_ANCESTORS}; "
+        "img-src 'self' data:; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'"
+    ),
+)
 if env_bool("TRUST_PROXY_HEADERS", True):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
@@ -350,6 +374,19 @@ def append_server_timing_headers(response):
     elapsed_ms = max(0.0, (time.perf_counter() - started_at) * 1000.0)
     response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.1f}"
     response.headers["X-Render-Time-Ms"] = f"{elapsed_ms:.1f}"
+    return response
+
+
+@app.after_request
+def append_security_headers(response):
+    response.headers.setdefault("Content-Security-Policy", SECURITY_CSP)
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", SECURITY_PERMISSIONS_POLICY)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    if SECURITY_X_FRAME_OPTIONS:
+        response.headers.setdefault("X-Frame-Options", SECURITY_X_FRAME_OPTIONS)
+    if request.is_secure:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
 
 
@@ -427,6 +464,7 @@ DB_KEEPALIVE_INTERVAL_SECONDS = max(60, env_int("DB_KEEPALIVE_INTERVAL_SECONDS",
 _DB_KEEPALIVE_STARTED = False
 _DB_KEEPALIVE_LOCK = threading.Lock()
 DEBUG_STORAGE_ENABLED = env_bool("DEBUG_STORAGE_ENABLED", False)
+DEBUG_ROUTES_REQUIRE_ADMIN = env_bool("DEBUG_ROUTES_REQUIRE_ADMIN", True)
 MENU_CACHE_ENABLED = env_bool("MENU_CACHE_ENABLED", True)
 MENU_CACHE_TTL_SECONDS = max(30, env_int("MENU_CACHE_TTL_SECONDS", 600))
 MENU_CACHE_KEY = env_str("MENU_CACHE_KEY", "menu:items:v1")
@@ -513,6 +551,15 @@ if AdminService is not None and create_admin_blueprint is not None:
     app.register_blueprint(create_admin_blueprint(admin_service))
 elif _ADMIN_IMPORT_ERROR is not None:
     print(f"[admin] admin panel disabled during startup ({_ADMIN_IMPORT_ERROR})")
+
+
+def require_debug_route_admin():
+    if not DEBUG_ROUTES_REQUIRE_ADMIN:
+        return None
+    if admin_service is None:
+        return jsonify({"ok": False, "error": "Debug routes require admin access."}), 403
+    return admin_service.require_admin(is_api=True)
+
 
 load_bookings = storage.load_bookings
 load_bookings_raw = storage.load_bookings_raw
@@ -669,6 +716,9 @@ def api_index_summary():
 def debug_storage():
     if not DEBUG_STORAGE_ENABLED:
         return render_template("placeholder.html", title="Страница не найдена"), 404
+    blocked = require_debug_route_admin()
+    if blocked is not None:
+        return blocked
     users = load_users()
     bookings = load_bookings_raw()
     orders = load_orders()
@@ -692,6 +742,9 @@ def debug_storage():
 def debug_session():
     if not SESSION_DEBUG_ENABLED:
         return render_template("placeholder.html", title="Страница не найдена"), 404
+    blocked = require_debug_route_admin()
+    if blocked is not None:
+        return blocked
     return jsonify(
         {
             "ok": True,
@@ -825,7 +878,7 @@ def register():
         hash_password,
     )
 
-@app.route("/logout")
+@app.post("/logout")
 def logout():
     return logout_route()
 
