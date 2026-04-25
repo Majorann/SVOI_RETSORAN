@@ -436,24 +436,6 @@ class MenuContentService:
             items.extend(self._load_disk_promo_items(include_inactive=include_inactive, allowed_classes={"akciya"}))
 
         items.sort(key=lambda item: (-int(item.get("priority", 100) or 100), int(item["id"])))
-        try:
-            print(
-                "[promo] load include_inactive={0} ids={1}".format(
-                    include_inactive,
-                    [
-                        {
-                            "id": item.get("id"),
-                            "class": item.get("class"),
-                            "name": item.get("name") or item.get("text") or "",
-                            "priority": item.get("priority"),
-                            "dsl_valid": item.get("dsl_valid"),
-                        }
-                        for item in items
-                    ],
-                )
-            )
-        except Exception:
-            pass
         return self._memory_cache_set(memory_key, items)
 
     def _load_disk_promo_items(self, *, include_inactive: bool, allowed_classes: set[str]):

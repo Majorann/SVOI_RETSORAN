@@ -339,6 +339,34 @@ def create_admin_blueprint(admin_service):
             query_params=current_query_params(),
         )
 
+    @admin.get("/app-events")
+    def app_events():
+        blocked = guard()
+        if blocked is not None:
+            return blocked
+        filters = {
+            "user_id": request.args.get("user_id", ""),
+            "event_type": request.args.get("event_type", ""),
+            "entity_type": request.args.get("entity_type", ""),
+            "method": request.args.get("method", ""),
+            "status_code": request.args.get("status_code", ""),
+            "path": request.args.get("path", ""),
+            "date_from": request.args.get("date_from", ""),
+            "date_to": request.args.get("date_to", ""),
+            "per_page": request.args.get("per_page", "25"),
+        }
+        events, pagination = admin_service.list_app_events(filters=filters, limit=query_per_page(), page=query_page())
+        return render_template(
+            "admin/app_events.html",
+            title="Журнал сайта",
+            admin_section="app-events",
+            events=events,
+            options=admin_service.app_event_filter_options(),
+            filters=filters,
+            pagination=pagination,
+            query_params=current_query_params(),
+        )
+
     @admin.post("/api/orders/<int:order_id>/status")
     def api_order_status(order_id: int):
         blocked = guard(is_api=True)

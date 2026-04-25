@@ -2375,3 +2375,37 @@
 
 - Адресная проверка после изменений:
   - `backend/tests/test_auth_and_flows.py` -> `29 passed`.
+
+## 25.04.2026
+
+### Журнал сайта в админке
+
+- Добавлен общий журнал событий сайта в админ-панели:
+  - новый раздел `/admin/app-events`;
+  - фильтры по пользователю, типу события, сущности, HTTP-методу, статусу, пути и датам;
+  - пагинация и подробный просмотр payload, IP, referrer и user-agent.
+- Добавлена таблица `app_events` в Postgres:
+  - индексы для быстрых фильтров;
+  - автоочистка записей старше 30 дней;
+  - нормализация `created_at` для старых схем.
+- Автоматическое логирование не-админских запросов сайта:
+  - админка, статические файлы и debug-роуты исключены;
+  - пароли, номера карт, CSRF и payment preview token не записываются.
+
+### Исправления 500 и логов
+
+- Исправлена ошибка импорта `pg_store.py` на Python 3.11:
+  - убран backslash внутри f-string при экранировании SQL identifier.
+- Добавлен fallback для Postgres-подключения при ошибке доступа к `/root/.postgresql/postgresql.crt`:
+  - повтор подключения с `sslcertmode=disable`;
+  - резервный вариант с безопасным `HOME`.
+- Логирование событий защищено от падения страницы:
+  - ошибка записи события больше не может вернуть пользователю 500.
+- Убран debug-print `[promo] load...`, который попадал в WSGI `error_log` и выглядел как ошибка.
+
+### Проверка
+
+- Адресные проверки после изменений:
+  - `py_compile` для изменённых Python-файлов -> успешно;
+  - `backend/tests/test_admin_panel.py -k "app_event or audit_filter or pg_schema"` -> `7 passed`;
+  - `backend/tests/test_admin_panel.py -k "menu_content_admin_and_promo_use_memory_cache or menu_content_loads_promo or app_event"` -> `4 passed`.

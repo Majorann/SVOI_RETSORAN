@@ -27,6 +27,7 @@ _TIMESTAMPTZ_COLUMN_ALLOWLIST = {
     "orders": frozenset({"created_at", "cancelled_at", "effective_status_updated_at"}),
     "admin_users": frozenset({"created_at"}),
     "admin_actions": frozenset({"created_at"}),
+    "app_events": frozenset({"created_at"}),
     "menu_items": frozenset({"created_at", "updated_at"}),
     "promotions": frozenset({"start_at", "end_at", "created_at", "updated_at"}),
     "promotion_applications": frozenset({"applied_at"}),
@@ -63,11 +64,38 @@ def _database_url():
 
 
 def _connect():
-    return psycopg.connect(
-        _database_url(),
-        autocommit=True,
-        connect_timeout=PG_CONNECT_TIMEOUT_SECONDS,
-    )
+    url = _database_url()
+    try:
+        return psycopg.connect(
+            url,
+            autocommit=True,
+            connect_timeout=PG_CONNECT_TIMEOUT_SECONDS,
+        )
+    except psycopg.OperationalError as exc:
+        message = str(exc)
+        if "postgresql.crt" not in message or "Permission denied" not in message:
+            raise
+        try:
+            return psycopg.connect(
+                url,
+                autocommit=True,
+                connect_timeout=PG_CONNECT_TIMEOUT_SECONDS,
+                sslcertmode="disable",
+            )
+        except psycopg.ProgrammingError:
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(Path(__file__).resolve().parents[1])
+            try:
+                return psycopg.connect(
+                    url,
+                    autocommit=True,
+                    connect_timeout=PG_CONNECT_TIMEOUT_SECONDS,
+                )
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
 
 
 def _get_conn():
@@ -237,6 +265,26 @@ def _execute_schema(cur):
     )
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS app_events (
+            id BIGSERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            event_type TEXT NOT NULL,
+            entity_type TEXT NOT NULL DEFAULT '',
+            entity_id TEXT NOT NULL DEFAULT '',
+            method TEXT NOT NULL DEFAULT '',
+            path TEXT NOT NULL DEFAULT '',
+            status_code INTEGER NOT NULL DEFAULT 0,
+            ip_address TEXT NOT NULL DEFAULT '',
+            user_agent TEXT NOT NULL DEFAULT '',
+            referrer TEXT NOT NULL DEFAULT '',
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            payload_json TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """
+    )
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS promotions (
             id BIGSERIAL PRIMARY KEY,
             slug TEXT NOT NULL UNIQUE,
@@ -356,6 +404,18 @@ def _execute_schema(cur):
         "CREATE INDEX IF NOT EXISTS idx_admin_actions_entity ON admin_actions(entity_type, entity_id);"
     )
     cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_app_events_created_at ON app_events(created_at DESC);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_app_events_user_created ON app_events(user_id, created_at DESC);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_app_events_type_created ON app_events(event_type, created_at DESC);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_app_events_entity ON app_events(entity_type, entity_id);"
+    )
+    cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_promotions_active_priority ON promotions(active, priority DESC, id ASC);"
     )
     cur.execute(
@@ -388,6 +448,29 @@ def _execute_schema(cur):
         AFTER INSERT ON admin_actions
         FOR EACH STATEMENT
         EXECUTE FUNCTION prune_admin_actions_30d();
+        """
+    )
+    cur.execute(
+        """
+        CREATE OR REPLACE FUNCTION prune_app_events_30d()
+        RETURNS TRIGGER
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            DELETE FROM app_events
+            WHERE created_at < NOW() - INTERVAL '30 days';
+            RETURN NEW;
+        END;
+        $$;
+        """
+    )
+    cur.execute("DROP TRIGGER IF EXISTS trg_prune_app_events_30d ON app_events;")
+    cur.execute(
+        """
+        CREATE TRIGGER trg_prune_app_events_30d
+        AFTER INSERT ON app_events
+        FOR EACH STATEMENT
+        EXECUTE FUNCTION prune_app_events_30d();
         """
     )
 
@@ -427,7 +510,8 @@ def _render_sql_composable(statement):
             if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part):
                 rendered_parts.append(part)
             else:
-                rendered_parts.append(f'"{part.replace("\"", "\"\"")}"')
+                escaped_part = part.replace('"', '""')
+                rendered_parts.append(f'"{escaped_part}"')
         return ".".join(rendered_parts)
     if isinstance(statement, sql.SQL):
         return statement._obj
@@ -650,6 +734,7 @@ def _normalize_legacy_temporal_columns(cur):
         ("orders", "effective_status_updated_at", True, None),
         ("admin_users", "created_at", False, "NOW()"),
         ("admin_actions", "created_at", False, "NOW()"),
+        ("app_events", "created_at", False, "NOW()"),
         ("menu_items", "created_at", False, "NOW()"),
         ("menu_items", "updated_at", False, "NOW()"),
         ("promotions", "start_at", True, None),

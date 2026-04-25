@@ -531,6 +531,116 @@ def test_admin_audit_filter_options_are_cached():
     assert calls["count"] == 3
 
 
+def test_admin_app_event_filter_options_are_cached():
+    service = AdminService(active_storage="postgres", menu_content=None)
+    calls = {"count": 0}
+
+    def fake_fetch_all(query, params=()):
+        calls["count"] += 1
+        if "SELECT DISTINCT u.id, u.name, u.phone" in query:
+            return [{"id": 1, "name": "Пользователь", "phone": "+79990000001"}]
+        if "SELECT DISTINCT event_type" in query:
+            return [{"event_type": "payment_confirm"}]
+        if "SELECT DISTINCT entity_type" in query:
+            return [{"entity_type": "order"}]
+        if "SELECT DISTINCT method" in query:
+            return [{"method": "POST"}]
+        if "SELECT DISTINCT status_code" in query:
+            return [{"status_code": 200}]
+        return []
+
+    service._fetch_all = fake_fetch_all
+
+    first = service.app_event_filter_options()
+    second = service.app_event_filter_options()
+
+    assert first == second
+    assert calls["count"] == 5
+
+
+def test_admin_app_events_route_renders_filters(app_module, client, monkeypatch):
+    seed_logged_in_session(client)
+    app_module.admin_service.active_storage = "postgres"
+    monkeypatch.setattr(app_module.admin_service, "is_admin_user", lambda user_id: True)
+    monkeypatch.setattr(
+        app_module.admin_service,
+        "list_app_events",
+        lambda filters, limit=25, page=1: (
+            [
+                {
+                    "id": 1,
+                    "user_id": 1,
+                    "user_name": "Пользователь",
+                    "user_phone": "+79990000001",
+                    "event_type": "payment_confirm",
+                    "entity_type": "order",
+                    "entity_id": "7",
+                    "method": "POST",
+                    "path": "/payment/confirm",
+                    "status_code": 200,
+                    "duration_ms": 31,
+                    "ip_address": "127.0.0.1",
+                    "referrer": "",
+                    "user_agent": "pytest",
+                    "created_at": "2026-03-20T10:00:00",
+                    "payload": {"endpoint": "payment_confirm"},
+                }
+            ],
+            {"page": 1, "per_page": limit, "total": 1, "total_pages": 1, "has_prev": False, "has_next": False, "prev_page": 1, "next_page": 1, "offset": 0},
+        ),
+    )
+    monkeypatch.setattr(
+        app_module.admin_service,
+        "app_event_filter_options",
+        lambda: {
+            "users": [{"id": 1, "name": "Пользователь", "phone": "+79990000001"}],
+            "event_types": [{"event_type": "payment_confirm"}],
+            "entity_types": [{"entity_type": "order"}],
+            "methods": [{"method": "POST"}],
+            "status_codes": [{"status_code": 200}],
+        },
+    )
+
+    response = client.get("/admin/app-events?event_type=payment_confirm")
+
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "Журнал сайта" in html
+    assert "payment_confirm" in html
+    assert "/payment/confirm" in html
+
+
+def test_log_app_event_filters_cache_and_payload(monkeypatch):
+    service = AdminService(active_storage="postgres", menu_content=None)
+    service._app_event_filter_options_cache = {"event_types": []}
+    captured = {}
+    monkeypatch.setattr(
+        service,
+        "_execute",
+        lambda query, params=(): captured.update({"query": query, "params": params}),
+    )
+
+    service.log_app_event(
+        user_id=5,
+        event_type="payment_confirm",
+        entity_type="order",
+        entity_id=9,
+        method="post",
+        path="/payment/confirm",
+        status_code=200,
+        duration_ms=17,
+        payload={"ok": True},
+    )
+
+    assert "INSERT INTO app_events" in captured["query"]
+    assert captured["params"][0] == 5
+    assert captured["params"][1] == "payment_confirm"
+    assert captured["params"][3] == "9"
+    assert captured["params"][4] == "POST"
+    assert captured["params"][10] == 17
+    assert service._app_event_filter_options_cache is None
+
+
 def test_admin_api_validates_promo_dsl(app_module, client, monkeypatch):
     seed_logged_in_session(client)
     csrf_token = get_csrf_token(client)

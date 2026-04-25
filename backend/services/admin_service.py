@@ -9,7 +9,7 @@ from flask import jsonify, redirect, render_template, session, url_for
 from werkzeug.datastructures import FileStorage
 
 from config import MENU_ITEMS_PATH, ORDER_STATUS_STEPS, PROMO_ITEMS_PATH
-from services import admin_audit_queries, admin_command_ops, admin_content_management, admin_dashboard_queries, admin_directory_queries, admin_order_queries
+from services import admin_audit_queries, admin_command_ops, admin_content_management, admin_dashboard_queries, admin_directory_queries, admin_order_queries, app_event_queries
 from services.business_logic import UTC, build_order_status_timeline_value, current_time_value, parse_iso_datetime_value
 from services.order_status import (
     runtime_delivery_overdue_value,
@@ -116,6 +116,7 @@ class AdminService:
         self.active_storage = active_storage
         self.menu_content = menu_content
         self._audit_filter_options_cache = None
+        self._app_event_filter_options_cache = None
 
     @property
     def postgres_ready(self) -> bool:
@@ -210,6 +211,50 @@ class AdminService:
             ),
         )
         self._audit_filter_options_cache = None
+
+    def log_app_event(
+        self,
+        *,
+        user_id: int | None,
+        event_type: str,
+        entity_type: str = "",
+        entity_id: str | int = "",
+        method: str = "",
+        path: str = "",
+        status_code: int = 0,
+        ip_address: str = "",
+        user_agent: str = "",
+        referrer: str = "",
+        duration_ms: int = 0,
+        payload: dict | None = None,
+    ):
+        if not self.postgres_ready:
+            return
+        payload_json = json.dumps(payload or {}, ensure_ascii=False)
+        self._execute(
+            """
+            INSERT INTO app_events (
+                user_id, event_type, entity_type, entity_id, method, path,
+                status_code, ip_address, user_agent, referrer, duration_ms, payload_json
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                int(user_id) if user_id else None,
+                str(event_type or "").strip()[:120] or "request",
+                str(entity_type or "").strip()[:80],
+                str(entity_id or "").strip()[:120],
+                str(method or "").strip().upper()[:12],
+                str(path or "").strip()[:500],
+                int(status_code or 0),
+                str(ip_address or "").strip()[:80],
+                str(user_agent or "").strip()[:500],
+                str(referrer or "").strip()[:500],
+                max(0, int(duration_ms or 0)),
+                payload_json,
+            ),
+        )
+        self._app_event_filter_options_cache = None
 
     def _build_order_filters(self, filters: dict, *, delivery_only: bool = False):
         return admin_order_queries.build_order_filters(filters, delivery_only=delivery_only)
@@ -419,6 +464,12 @@ class AdminService:
 
     def audit_filter_options(self):
         return admin_audit_queries.audit_filter_options(self)
+
+    def list_app_events(self, *, filters: dict | None = None, limit: int = 50, page: int = 1):
+        return app_event_queries.list_app_events(self, filters=filters, limit=limit, page=page)
+
+    def app_event_filter_options(self):
+        return app_event_queries.app_event_filter_options(self)
 
     def table_occupancy_for_date(self, booking_date: str):
         return admin_directory_queries.table_occupancy_for_date(self, booking_date)

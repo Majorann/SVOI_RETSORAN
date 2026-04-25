@@ -359,6 +359,75 @@ SECURITY_CSP = env_str(
 if env_bool("TRUST_PROXY_HEADERS", True):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
+APP_EVENT_LOGGING_ENABLED = env_bool("APP_EVENT_LOGGING_ENABLED", True)
+APP_EVENT_LOGGING_SKIP_GET = env_bool("APP_EVENT_LOGGING_SKIP_GET", False)
+_EVENT_SENSITIVE_KEYS = {
+    "password",
+    "card_number",
+    "number",
+    "csrf_token",
+    "preview_token",
+    "items_json",
+    "accept_user_agreement",
+}
+
+
+def _safe_event_values(values):
+    safe = {}
+    for key, value in values.items():
+        key_text = str(key)
+        if key_text.lower() in _EVENT_SENSITIVE_KEYS:
+            safe[key_text] = "[filtered]"
+            continue
+        safe[key_text] = str(value)[:300]
+    return safe
+
+
+def _request_event_payload():
+    payload = {"endpoint": request.endpoint or ""}
+    if request.args:
+        payload["query"] = _safe_event_values(request.args.to_dict(flat=True))
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        if request.form:
+            payload["form"] = _safe_event_values(request.form.to_dict(flat=True))
+        json_payload = request.get_json(silent=True)
+        if isinstance(json_payload, dict):
+            payload["json"] = _safe_event_values(json_payload)
+    return payload
+
+
+def _request_entity():
+    view_args = request.view_args or {}
+    if "order_id" in view_args:
+        return "order", view_args["order_id"]
+    if "booking_id" in view_args:
+        return "booking", view_args["booking_id"]
+    if "user_id" in view_args:
+        return "user", view_args["user_id"]
+    if "item_id" in view_args:
+        return "menu_item", view_args["item_id"]
+    endpoint = request.endpoint or "request"
+    if "." in endpoint:
+        endpoint = endpoint.split(".", 1)[1]
+    return endpoint.split("_", 1)[0], ""
+
+
+def _should_log_app_event(response):
+    if not APP_EVENT_LOGGING_ENABLED:
+        return False
+    if admin_service is None or ACTIVE_STORAGE != "postgres":
+        return False
+    endpoint = request.endpoint or ""
+    if endpoint == "static" or endpoint.startswith("admin."):
+        return False
+    if request.path.startswith(("/static/", "/admin/", "/debug/")):
+        return False
+    if request.path in {"/favicon.ico", "/robots.txt"}:
+        return False
+    if APP_EVENT_LOGGING_SKIP_GET and request.method == "GET" and response.status_code < 400:
+        return False
+    return True
+
 
 @app.before_request
 def start_request_timer():
@@ -387,6 +456,35 @@ def append_security_headers(response):
         response.headers.setdefault("X-Frame-Options", SECURITY_X_FRAME_OPTIONS)
     if request.is_secure:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
+
+@app.after_request
+def log_app_event_request(response):
+    try:
+        if not _should_log_app_event(response):
+            return response
+        started_at = getattr(g, "request_started_at", None)
+        duration_ms = 0
+        if started_at is not None:
+            duration_ms = int(max(0.0, (time.perf_counter() - started_at) * 1000.0))
+        entity_type, entity_id = _request_entity()
+        admin_service.log_app_event(
+            user_id=session.get("user_id"),
+            event_type=request.endpoint or "request",
+            entity_type=entity_type,
+            entity_id=entity_id,
+            method=request.method,
+            path=request.full_path.rstrip("?"),
+            status_code=response.status_code,
+            ip_address=request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr or "",
+            user_agent=request.headers.get("User-Agent", ""),
+            referrer=request.referrer or "",
+            duration_ms=duration_ms,
+            payload=_request_event_payload(),
+        )
+    except Exception as exc:
+        print(f"[app-events] log failed ({exc})", flush=True)
     return response
 
 

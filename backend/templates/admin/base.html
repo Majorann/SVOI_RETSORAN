@@ -27,6 +27,7 @@
       <a class="admin-nav__link {% if admin_section == 'users' %}is-active{% endif %}" href="{{ url_for('admin.users') }}" data-admin-loader-nav data-admin-loader-label="пользователей">Пользователи</a>
       <a class="admin-nav__link {% if admin_section == 'content' %}is-active{% endif %}" href="{{ url_for('admin.content') }}" data-admin-loader-nav data-admin-loader-label="контент">Контент</a>
       <a class="admin-nav__link {% if admin_section == 'audit-log' %}is-active{% endif %}" href="{{ url_for('admin.audit_log') }}" data-admin-loader-nav data-admin-loader-label="журнал действий">Журнал действий</a>
+      <a class="admin-nav__link {% if admin_section == 'app-events' %}is-active{% endif %}" href="/admin/app-events" data-admin-loader-nav data-admin-loader-label="журнал сайта">Журнал сайта</a>
     </nav>
     <div class="admin-sidebar__footer">
       <a class="admin-nav__link admin-nav__link--footer" href="{{ url_for('index') }}" data-admin-loader-nav data-admin-loader-label="сайт">Вернуться на сайт</a>

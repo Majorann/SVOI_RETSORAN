@@ -1,0 +1,130 @@
+{% extends "admin/base.html" %}
+{% block admin_content %}
+<section class="admin-card admin-toolbar">
+  <form class="admin-filters" method="get">
+    <select class="admin-select" name="user_id">
+      <option value="">Все пользователи</option>
+      {% for user in options.users %}
+        <option value="{{ user.id }}" {% if filters.user_id == user.id|string %}selected{% endif %}>{{ user.name or ("#" ~ user.id) }}{% if user.phone %} · {{ user.phone }}{% endif %}</option>
+      {% endfor %}
+    </select>
+    <select class="admin-select" name="event_type">
+      <option value="">Все события</option>
+      {% for event_type in options.event_types %}
+        <option value="{{ event_type.event_type }}" {% if filters.event_type == event_type.event_type %}selected{% endif %}>{{ event_type.event_type }}</option>
+      {% endfor %}
+    </select>
+    <select class="admin-select" name="entity_type">
+      <option value="">Все разделы</option>
+      {% for entity_type in options.entity_types %}
+        <option value="{{ entity_type.entity_type }}" {% if filters.entity_type == entity_type.entity_type %}selected{% endif %}>{{ entity_type.entity_type }}</option>
+      {% endfor %}
+    </select>
+    <select class="admin-select" name="method">
+      <option value="">Все методы</option>
+      {% for method in options.methods %}
+        <option value="{{ method.method }}" {% if filters.method == method.method %}selected{% endif %}>{{ method.method }}</option>
+      {% endfor %}
+    </select>
+    <select class="admin-select" name="status_code">
+      <option value="">Все статусы</option>
+      {% for status in options.status_codes %}
+        <option value="{{ status.status_code }}" {% if filters.status_code == status.status_code|string %}selected{% endif %}>{{ status.status_code }}</option>
+      {% endfor %}
+    </select>
+    <input class="admin-input" type="search" name="path" value="{{ filters.path }}" placeholder="Путь страницы" />
+    <input class="admin-input" type="date" name="date_from" value="{{ filters.date_from }}" />
+    <input class="admin-input" type="date" name="date_to" value="{{ filters.date_to }}" />
+    <select class="admin-select" name="per_page">
+      {% for size in [10, 25, 50, 100] %}
+        <option value="{{ size }}" {% if filters.per_page == size|string %}selected{% endif %}>{{ size }} на странице</option>
+      {% endfor %}
+    </select>
+    <button class="admin-button" type="submit">Фильтр</button>
+  </form>
+  <div class="admin-note">Журнал хранит последние 30 дней. Пароли, номера карт и служебные cookie не записываются.</div>
+</section>
+
+<section class="admin-card">
+  {% if events %}
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Время</th>
+            <th>Пользователь</th>
+            <th>Событие</th>
+            <th>Запрос</th>
+            <th>Ответ</th>
+            <th>Детали</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for event in events %}
+            <tr>
+              <td>{{ event.created_at|ru_datetime }}</td>
+              <td>
+                {% if event.user_id %}
+                  {{ event.user_name or ("#" ~ event.user_id) }}
+                  {% if event.user_phone %}<small class="admin-table-subtext">{{ event.user_phone }}</small>{% endif %}
+                {% else %}
+                  Гость
+                {% endif %}
+              </td>
+              <td>
+                <strong>{{ event.event_type }}</strong>
+                {% if event.entity_type %}
+                  <small class="admin-table-subtext">{{ event.entity_type }}{% if event.entity_id %} #{{ event.entity_id }}{% endif %}</small>
+                {% endif %}
+              </td>
+              <td>
+                <span class="admin-badge">{{ event.method }}</span>
+                <small class="admin-table-subtext">{{ event.path }}</small>
+              </td>
+              <td>
+                <span class="admin-badge {% if event.status_code >= 500 %}admin-badge--danger{% elif event.status_code >= 400 %}admin-badge--warning{% elif event.status_code < 400 %}admin-badge--success{% endif %}">{{ event.status_code }}</span>
+                <small class="admin-table-subtext">{{ event.duration_ms }} мс</small>
+              </td>
+              <td>
+                <details class="admin-log-item">
+                  <summary>Открыть</summary>
+                  <p><strong>IP:</strong> {{ event.ip_address or "—" }}</p>
+                  <p><strong>Источник:</strong> {{ event.referrer or "—" }}</p>
+                  <p><strong>User-Agent:</strong> {{ event.user_agent or "—" }}</p>
+                  <pre>{{ event.payload | tojson(indent=2) }}</pre>
+                </details>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="admin-empty">Событий не найдено.</div>
+  {% endif %}
+</section>
+
+{% if pagination and pagination.total_pages > 1 %}
+<section class="admin-card">
+  <div class="admin-toolbar__actions admin-toolbar__actions--filters">
+    <span class="admin-note">Страница {{ pagination.page }} из {{ pagination.total_pages }} · Всего записей: {{ pagination.total }}</span>
+    <div class="admin-chip-row">
+      {% if pagination.has_prev %}
+        <a class="admin-chip" href="{{ url_for('admin.app_events', page=pagination.prev_page, **query_params) }}">Назад</a>
+      {% endif %}
+      <span class="admin-chip">{{ pagination.page }}</span>
+      {% if pagination.has_next %}
+        <a class="admin-chip is-active" href="{{ url_for('admin.app_events', page=pagination.next_page, **query_params) }}">Дальше</a>
+      {% endif %}
+    </div>
+    <form class="admin-inline-form admin-inline-form--jump" method="get">
+      {% for key, value in query_params.items() %}
+        <input type="hidden" name="{{ key }}" value="{{ value }}" />
+      {% endfor %}
+      <input class="admin-input admin-input--jump" type="number" name="page" min="1" max="{{ pagination.total_pages }}" value="{{ pagination.page }}" />
+      <button class="admin-button admin-button--compact" type="submit">Перейти</button>
+    </form>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
