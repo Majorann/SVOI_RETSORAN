@@ -1,0 +1,6 @@
+id=5
+class=reklama
+text=«Алиса ИИ: отвечает так уверенно, что ты начинаешь сомневаться в своей биографии.»
+link=https://alice.yandex.ru/
+priority=10
+active=true

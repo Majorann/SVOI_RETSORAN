@@ -50,6 +50,24 @@ def _sanitize_news_cards(cards):
     return sanitized_cards
 
 
+def _promo_items_to_gallery_cards(items):
+    cards = []
+    for item in items or []:
+        if str(item.get("class") or "").strip().lower() != "akciya":
+            continue
+        cards.append(
+            {
+                "title": item.get("name") or "Акция",
+                "text": item.get("lore") or "",
+                "accent": "Акция",
+                "photo": item.get("photo"),
+                "link": "",
+                "priority": item.get("priority"),
+            }
+        )
+    return _sanitize_news_cards(cards)
+
+
 def _sanitize_menu_items(items):
     sanitized_items = []
     for item in items or []:
@@ -163,6 +181,7 @@ def index_route(
     promo_items = load_promo_items()
     promo_news = promo_items_to_news_cards(promo_items)
     news_cards = _sanitize_news_cards(promo_news or news_cards_fallback)
+    promo_gallery_cards = _promo_items_to_gallery_cards(promo_items)
     all_menu_items = load_menu_items()
     limit = max(1, int(popular_menu_limit or 3))
     popular_menu = _pick_popular_items_from_analytics(get_popular_analytics, all_menu_items, limit)
@@ -197,6 +216,7 @@ def index_route(
     return render_template(
         "index.html",
         news=news_cards,
+        promo_gallery=promo_gallery_cards,
         menu=popular_menu,
         bookings=bookings_view,
         preparing_orders=preparing_orders,
@@ -265,20 +285,14 @@ def notifications_route(list_user_bookings, get_user_preparing_orders, load_prom
     for promo in load_promo_items() or []:
         promo_item = dict(promo)
         promo_class = str(promo_item.get("class") or "").strip().lower()
-        if promo_class == "reklama":
-            promo_item["badge"] = "Реклама"
-            promo_item["title"] = "Реклама"
-            promo_item["text"] = promo_item.get("text") or "Актуальное предложение."
-        elif promo_class == "akciya":
-            promo_item["badge"] = "Акция"
-            promo_item["title"] = promo_item.get("name") or "Акция"
-            promo_item["text"] = promo_item.get("lore") or ""
-            promo_item["is_highlighted"] = True
-        else:
+        if promo_class != "reklama":
             continue
+        promo_item["badge"] = "Реклама"
+        promo_item["title"] = "Реклама"
+        promo_item["text"] = promo_item.get("text") or "Актуальное предложение."
         promo_candidates.append(promo_item)
     if promo_candidates:
-        promo_notifications = _pick_random_items(promo_candidates, 1)
+        promo_notifications = _pick_random_items(promo_candidates, 2)
 
     return render_template(
         "notifications.html",

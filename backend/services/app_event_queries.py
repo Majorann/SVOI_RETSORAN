@@ -112,6 +112,15 @@ def list_app_events(service, *, filters: dict | None = None, limit: int = 50, pa
             row["payload"] = json.loads(payload_text)
         except json.JSONDecodeError:
             row["payload"] = {"raw": payload_text}
+        action = row["payload"].get("action") if isinstance(row["payload"], dict) else None
+        if isinstance(action, dict):
+            row["action_label"] = str(action.get("label") or row.get("event_type") or "request")
+            row["action_summary"] = str(action.get("summary") or row["action_label"])
+            row["action_success"] = bool(action.get("success", int(row.get("status_code") or 0) < 400))
+        else:
+            row["action_label"] = str(row.get("event_type") or "request")
+            row["action_summary"] = row["action_label"]
+            row["action_success"] = int(row.get("status_code") or 0) < 400
     return rows, pagination
 
 

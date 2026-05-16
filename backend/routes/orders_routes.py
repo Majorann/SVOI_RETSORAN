@@ -156,14 +156,6 @@ def payment_route(
         promo_items=load_promo_items(),
         menu_items=load_menu_items(),
     )
-    print(
-        "[promo] payment preview user_id={0} items={1} promo_points={2} applied={3}".format(
-            user_id,
-            [{"id": item.get("id"), "qty": item.get("qty")} for item in pricing["items"]],
-            pricing["promo_points"],
-            pricing["promotions_applied"],
-        )
-    )
     totals = pricing["totals"]
     payment_error_code = None
     payment_error_text = None
@@ -350,14 +342,6 @@ def payment_confirm_route(
         load_promo_application_counts_fn=load_promo_application_counts,
         promo_items=load_promo_items(),
         menu_items=load_menu_items(),
-    )
-    print(
-        "[promo] payment confirm user_id={0} items={1} promo_points={2} applied={3}".format(
-            user_id,
-            [{"id": item.get("id"), "qty": item.get("qty")} for item in pricing["items"]],
-            pricing["promo_points"],
-            pricing["promotions_applied"],
-        )
     )
     totals = pricing["totals"]
     priced_items = pricing["items"]

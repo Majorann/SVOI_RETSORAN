@@ -857,6 +857,29 @@ if (menuForm) {
     reader.readAsDataURL(file);
   });
 
+  document.querySelectorAll("[data-admin-menu-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (idInput) idInput.value = button.dataset.id || "";
+      if (field("slug")) field("slug").value = "";
+      if (nameInput) nameInput.value = button.dataset.name || "";
+      if (typeInput) {
+        typeInput.value = button.dataset.type || "";
+        typeInput.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      if (priceInput) priceInput.value = button.dataset.price || "0";
+      if (weightInput) weightInput.value = button.dataset.weight || "";
+      if (loreInput) loreInput.value = button.dataset.lore || "";
+      if (popularityInput) popularityInput.value = button.dataset.popularity || "0";
+      if (featuredInput) featuredInput.checked = button.dataset.featured === "1";
+      if (activeInput) activeInput.checked = button.dataset.active !== "0";
+      if (field("reason")) field("reason").value = "";
+      updateMenuPreview();
+      menuForm.scrollIntoView({ behavior: "smooth", block: "start" });
+      nameInput?.focus();
+      showToast("Запись блюда загружена в форму. Укажите причину и сохраните.");
+    });
+  });
+
   updateMenuPreview();
 }
 
@@ -864,6 +887,8 @@ const promoForm = document.getElementById("adminPromoForm");
 
 if (promoForm) {
   const field = (name) => promoForm.querySelector(`[name="${name}"]`);
+  const promoId = field("id");
+  const promoSlug = field("slug");
   const promoType = field("class_name");
   const promoName = field("name");
   const promoText = field("text");
@@ -881,6 +906,7 @@ if (promoForm) {
   const promoEnd = field("end_at");
   const promoActive = field("active");
   const promoPhoto = field("photo");
+  const promoReason = field("reason");
   const promoValidateButton = document.getElementById("adminPromoValidateButton");
   const promoValidateResult = document.getElementById("adminPromoValidateResult");
   const promoHelper = document.getElementById("adminPromoDslHelper");
@@ -1110,6 +1136,46 @@ if (promoForm) {
     input?.addEventListener("change", () => {
       syncPromoFields();
       syncPromoPreview();
+    });
+  });
+
+  document.querySelectorAll("[data-admin-promo-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (promoId) promoId.value = button.dataset.id || "";
+      if (promoSlug) promoSlug.value = "";
+      if (promoType) {
+        promoType.value = button.dataset.className || "akciya";
+        promoType.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      if (promoName) promoName.value = button.dataset.name || "";
+      if (promoText) promoText.value = button.dataset.text || "";
+      if (promoLink) promoLink.value = button.dataset.link || "";
+      if (promoLore) promoLore.value = button.dataset.lore || "";
+      if (promoCondition) promoCondition.value = button.dataset.condition || "";
+      if (promoReward) promoReward.value = button.dataset.reward || "";
+      if (promoDslVersion) {
+        promoDslVersion.value = button.dataset.dslVersion || "";
+        promoDslVersion.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      if (promoNotify) promoNotify.value = button.dataset.notify || "";
+      if (promoRewardMode) {
+        promoRewardMode.value = button.dataset.rewardMode || "";
+        promoRewardMode.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      if (promoLimitPerOrder) promoLimitPerOrder.value = button.dataset.limitPerOrder || "";
+      if (promoLimitPerUserDay) promoLimitPerUserDay.value = button.dataset.limitPerUserPerDay || "";
+      if (promoPriority) promoPriority.value = button.dataset.priority || "100";
+      if (promoStart) promoStart.value = button.dataset.startAt || "";
+      if (promoEnd) promoEnd.value = button.dataset.endAt || "";
+      if (promoActive) promoActive.checked = button.dataset.active !== "0";
+      if (promoReason) promoReason.value = "";
+      syncPromoFields();
+      syncPromoPreview();
+      syncConditionBuilder();
+      syncRewardBuilder();
+      promoForm.scrollIntoView({ behavior: "smooth", block: "start" });
+      (button.dataset.className === "reklama" ? promoText : promoName)?.focus();
+      showToast("Запись промо загружена в форму. Укажите причину и сохраните.");
     });
   });
 

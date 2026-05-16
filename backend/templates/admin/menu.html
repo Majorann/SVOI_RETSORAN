@@ -1,5 +1,26 @@
 {% extends "admin/base.html" %}
 {% block admin_content %}
+<section class="admin-card admin-toolbar">
+  <div class="admin-section-head">
+    <h2>СУБД меню</h2>
+    <span class="admin-badge {% if storage_status.db_first %}admin-badge--success{% else %}admin-badge--warning{% endif %}">
+      {{ storage_status.backend }}
+    </span>
+  </div>
+  <div class="admin-chip-row">
+    <span class="admin-chip">Всего: {{ storage_status.total }}</span>
+    <span class="admin-chip">Активных: {{ storage_status.active }}</span>
+    <span class="admin-chip">Скрытых: {{ storage_status.hidden }}</span>
+  </div>
+  <div class="admin-note">
+    {% if storage_status.db_first %}
+      Блюда читаются и сохраняются через таблицу меню. Файлы изображений остаются в static, а метаданные редактируются из админки.
+    {% else %}
+      Сейчас используется файловое хранилище. Для полноценного управления через СУБД включите Postgres.
+    {% endif %}
+  </div>
+</section>
+
 <section class="admin-grid admin-grid--menu">
   <article class="admin-card admin-card--form">
     <div class="admin-section-head"><h2>Сохранить блюдо</h2></div>
@@ -76,5 +97,67 @@
       <div class="admin-note">Карточка обновляется по мере ввода полей и после загрузки фото.</div>
     </div>
   </article>
+</section>
+
+<section class="admin-card">
+  <div class="admin-section-head">
+    <h2>Блюда в СУБД</h2>
+    <span class="admin-badge">{{ menu_items|length }}</span>
+  </div>
+  {% if menu_items %}
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Блюдо</th>
+            <th>Категория</th>
+            <th>Цена</th>
+            <th>Статус</th>
+            <th>Управление</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in menu_items %}
+            <tr>
+              <td>#{{ item.id }}</td>
+              <td>
+                <strong>{{ item.name }}</strong>
+                <small class="admin-table-subtext">{{ item.portion_label or "Порция не задана" }}</small>
+              </td>
+              <td>{{ item.type }}</td>
+              <td>{{ item.price }} ₽</td>
+              <td>
+                {% if item.active %}
+                  <span class="admin-badge admin-badge--success">Активно</span>
+                {% else %}
+                  <span class="admin-badge admin-badge--danger">Скрыто</span>
+                {% endif %}
+                {% if item.featured %}<span class="admin-badge admin-badge--accent">Популярное</span>{% endif %}
+              </td>
+              <td>
+                <button
+                  class="admin-button admin-button--ghost admin-button--compact"
+                  type="button"
+                  data-admin-menu-edit
+                  data-id="{{ item.id }}"
+                  data-name="{{ item.name }}"
+                  data-type="{{ item.type }}"
+                  data-price="{{ item.price }}"
+                  data-weight="{{ item.portion_label }}"
+                  data-lore="{{ item.lore }}"
+                  data-popularity="{{ item.popularity or 0 }}"
+                  data-featured="{{ 1 if item.featured else 0 }}"
+                  data-active="{{ 1 if item.active else 0 }}"
+                >Править</button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="admin-empty">Блюда не найдены.</div>
+  {% endif %}
 </section>
 {% endblock %}

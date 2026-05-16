@@ -159,7 +159,19 @@
 <section class="section">
   <div class="section__title">
     <h2>Что нового</h2>
-    <span class="pill">Новости</span>
+    <button
+      class="pill promo-gallery-trigger"
+      type="button"
+      data-promo-gallery-open
+      {% if not promo_gallery %}disabled{% endif %}
+      aria-haspopup="dialog"
+      aria-controls="promoGalleryDialog"
+    >
+      Все акции
+      {% if promo_gallery %}
+        <span class="promo-gallery-trigger__count">{{ promo_gallery|length }}</span>
+      {% endif %}
+    </button>
   </div>
   <div class="news" role="list">
     {% for card in news %}
@@ -185,6 +197,41 @@
       </article>
     {% endfor %}
   </div>
+  <dialog class="promo-gallery-dialog" id="promoGalleryDialog" aria-labelledby="promoGalleryTitle">
+    <div class="promo-gallery-dialog__panel">
+      <div class="promo-gallery-dialog__head">
+        <div>
+          <p class="promo-gallery-dialog__eyebrow">Акции сайта</p>
+          <h3 id="promoGalleryTitle">Все действующие предложения</h3>
+        </div>
+        <button class="promo-gallery-dialog__close" type="button" data-promo-gallery-close aria-label="Закрыть акции">×</button>
+      </div>
+      {% if promo_gallery %}
+        <div class="promo-gallery" role="list">
+          {% for promo in promo_gallery %}
+            <article class="promo-gallery-card" role="listitem">
+              {% if promo.photo %}
+                <div class="promo-gallery-card__media">
+                  <img src="{{ url_for('static', filename=promo.photo) }}" alt="" loading="lazy" decoding="async" />
+                  <span>{{ promo.accent }}</span>
+                </div>
+              {% else %}
+                <div class="promo-gallery-card__media promo-gallery-card__media--empty">
+                  <span>{{ promo.accent }}</span>
+                </div>
+              {% endif %}
+              <div class="promo-gallery-card__body">
+                <h4>{{ promo.title }}</h4>
+                <p>{{ promo.text }}</p>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="promo-gallery-dialog__empty">Сейчас активных акций нет.</p>
+      {% endif %}
+    </div>
+  </dialog>
 </section>
 
 <section class="section">
@@ -253,6 +300,6 @@
 </nav>
 {% endblock %}
 {% block extra_scripts %}
-<script type="module" src="{{ url_for('static', filename='js/pages/index.js') }}"></script>
+<script type="module" src="{{ url_for('static', filename='js/pages/index.js', v='20260516b') }}"></script>
 {% endblock %}
 

@@ -641,6 +641,71 @@ def test_log_app_event_filters_cache_and_payload(monkeypatch):
     assert service._app_event_filter_options_cache is None
 
 
+def test_request_event_payload_adds_action_actor_and_safe_details(app_module):
+    with app_module.app.test_request_context(
+        "/payment",
+        method="POST",
+        data={
+            "items_json": '[{"id": 4, "qty": 2}, {"id": 7, "qty": 1}]',
+            "use_points": "1",
+            "preview_token": "secret-token",
+        },
+    ):
+        session["user_id"] = 5
+        session["user_name"] = "Пользователь"
+        response = app_module.app.response_class(status=200)
+
+        payload = app_module._request_event_payload(response)
+
+    assert payload["actor"] == {"type": "user", "user_id": 5, "name": "Пользователь"}
+    assert payload["action"]["label"] == "Перешёл к оплате"
+    assert payload["action"]["success"] is True
+    assert payload["details"]["items_count"] == 3
+    assert payload["details"]["items"] == [{"id": 4, "qty": 2}, {"id": 7, "qty": 1}]
+    assert payload["form"]["items_json"] == "[filtered]"
+    assert payload["form"]["preview_token"] == "[filtered]"
+
+
+def test_event_response_target_reads_order_url_from_json(app_module):
+    with app_module.app.test_request_context("/payment/confirm", method="POST"):
+        response = app_module.jsonify({"ok": True, "order_url": "/orders/42?paid=1"})
+
+        entity_type, entity_id = app_module._event_response_target(response)
+
+    assert entity_type == "order"
+    assert entity_id == "42"
+
+
+def test_list_app_events_derives_action_fields_from_payload(monkeypatch):
+    service = AdminService(active_storage="postgres", menu_content=None)
+
+    monkeypatch.setattr(service, "_fetch_one", lambda query, params=(): {"count": 1})
+    monkeypatch.setattr(
+        service,
+        "_fetch_all",
+        lambda query, params=(): [
+            {
+                "id": 1,
+                "user_id": 5,
+                "event_type": "payment",
+                "entity_type": "order",
+                "entity_id": "",
+                "method": "POST",
+                "path": "/payment",
+                "status_code": 200,
+                "duration_ms": 12,
+                "payload_json": '{"action": {"label": "Перешёл к оплате", "summary": "Перешёл к оплате: позиций 3", "success": true}}',
+            }
+        ],
+    )
+
+    events, _pagination = service.list_app_events(filters={}, limit=25, page=1)
+
+    assert events[0]["action_label"] == "Перешёл к оплате"
+    assert events[0]["action_summary"] == "Перешёл к оплате: позиций 3"
+    assert events[0]["action_success"] is True
+
+
 def test_admin_api_validates_promo_dsl(app_module, client, monkeypatch):
     seed_logged_in_session(client)
     csrf_token = get_csrf_token(client)

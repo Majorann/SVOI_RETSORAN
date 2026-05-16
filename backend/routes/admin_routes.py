@@ -218,6 +218,13 @@ def create_admin_blueprint(admin_service):
         items = admin_service.list_menu_items(filters, items=all_menu_items)
         categories = sorted({item.get("type") for item in all_menu_items if item.get("type")})
         next_menu_item_id = max([item.get("id", 0) for item in all_menu_items] or [0]) + 1
+        storage_status = {
+            "backend": admin_service.active_storage,
+            "db_first": admin_service.active_storage == "postgres",
+            "total": len(all_menu_items),
+            "active": len([item for item in all_menu_items if item.get("active", True)]),
+            "hidden": len([item for item in all_menu_items if not item.get("active", True)]),
+        }
         return render_template(
             "admin/menu.html",
             title="Меню",
@@ -226,6 +233,7 @@ def create_admin_blueprint(admin_service):
             categories=categories,
             filters=filters,
             next_menu_item_id=next_menu_item_id,
+            storage_status=storage_status,
         )
 
     @admin.get("/promo")
@@ -236,6 +244,16 @@ def create_admin_blueprint(admin_service):
         filters = {"class_name": request.args.get("class_name", "")}
         all_promo_items = admin_service.menu_content.load_promo_items(include_inactive=True)
         menu_items = admin_service.menu_content.load_menu_items_admin()
+        promo_items = admin_service.list_promo_items(filters, items=all_promo_items)
+        storage_status = {
+            "backend": admin_service.active_storage,
+            "db_first": admin_service.active_storage == "postgres",
+            "total": len(all_promo_items),
+            "akciya": len([item for item in all_promo_items if item.get("class") == "akciya"]),
+            "reklama": len([item for item in all_promo_items if item.get("class") == "reklama"]),
+            "active": len([item for item in all_promo_items if item.get("active", True)]),
+            "hidden": len([item for item in all_promo_items if not item.get("active", True)]),
+        }
         promo_builder_types = sorted({str(item.get("type") or "").strip() for item in menu_items if str(item.get("type") or "").strip()})
         promo_builder_ids = sorted(
             {
@@ -248,8 +266,9 @@ def create_admin_blueprint(admin_service):
             "admin/promo.html",
             title="Акции и реклама",
             admin_section="promo",
-            promo_items=admin_service.list_promo_items(filters, items=all_promo_items),
+            promo_items=promo_items,
             filters=filters,
+            storage_status=storage_status,
             promo_builder_types=promo_builder_types,
             promo_builder_ids=promo_builder_ids,
         )

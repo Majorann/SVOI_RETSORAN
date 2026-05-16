@@ -46,31 +46,35 @@
     </div>
   {% endif %}
 
-  {% for promo in promo_notifications %}
-    {% set promo_href = promo.get("link") %}
-    <article class="notice notice--promo{% if promo_href %} notice--promo-clickable{% endif %}">
-      {% if promo_href %}
-        <a class="notice__promo-overlay-link" href="{{ promo_href }}" target="_blank" rel="noopener noreferrer" aria-label="{{ promo.get('title') }}"></a>
-      {% endif %}
-      {% if promo.get("photo") %}
-        <div class="notice__promo-media">
-          <img
-            class="notice__promo-img"
-            src="{{ url_for('static', filename=promo.get('photo')) }}"
-            alt="{{ promo.get('title') }}"
-          />
-          <span class="notice__promo-badge">{{ promo.get("badge") }}</span>
-        </div>
-      {% endif %}
-      <div class="notice__promo-content">
-        {% if not promo.get("photo") %}
-          <span class="notice__promo-badge notice__promo-badge--inline">{{ promo.get("badge") }}</span>
-        {% endif %}
-        <div class="notice__title">{{ promo.get("title") }}</div>
-        <div class="notice__text">{{ promo.get("text") }}</div>
-      </div>
-    </article>
-  {% endfor %}
+  {% if promo_notifications %}
+    <div class="notice-promo-grid">
+      {% for promo in promo_notifications %}
+        {% set promo_href = promo.get("link") %}
+        <article class="notice notice--promo{% if promo_href %} notice--promo-clickable{% endif %}">
+          {% if promo_href %}
+            <a class="notice__promo-overlay-link" href="{{ promo_href }}" target="_blank" rel="noopener noreferrer" aria-label="{{ promo.get('title') }}"></a>
+          {% endif %}
+          {% if promo.get("photo") %}
+            <div class="notice__promo-media">
+              <img
+                class="notice__promo-img"
+                src="{{ url_for('static', filename=promo.get('photo')) }}"
+                alt="{{ promo.get('title') }}"
+              />
+              <span class="notice__promo-badge">{{ promo.get("badge") }}</span>
+            </div>
+          {% endif %}
+          <div class="notice__promo-content">
+            {% if not promo.get("photo") %}
+              <span class="notice__promo-badge notice__promo-badge--inline">{{ promo.get("badge") }}</span>
+            {% endif %}
+            <div class="notice__title">{{ promo.get("title") }}</div>
+            <div class="notice__text">{{ promo.get("text") }}</div>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% endif %}
 </section>
 
 <nav class="bottom-nav">

@@ -8,7 +8,9 @@ from flask import Flask, g, render_template, request, jsonify, session, redirect
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
+import json
 import os
+import re
 import threading
 import time
 from itsdangerous import URLSafeTimedSerializer
@@ -365,10 +367,58 @@ _EVENT_SENSITIVE_KEYS = {
     "password",
     "card_number",
     "number",
+    "token",
     "csrf_token",
     "preview_token",
+    "preview_id",
     "items_json",
     "accept_user_agreement",
+}
+
+_EVENT_ACTION_LABELS = {
+    "index": "Открыл главную",
+    "menu": "Открыл меню",
+    "menu_item": "Открыл блюдо",
+    "reserve": "Открыл бронирование",
+    "availability": "Проверил доступность столов",
+    "book_table": "Забронировал стол",
+    "release_table": "Освободил бронь",
+    "cancel_booking": "Отменил бронь",
+    "profile": "Открыл профиль",
+    "add_card": "Добавил карту",
+    "delete_card": "Удалил карту",
+    "orders": "Открыл заказы",
+    "order_detail": "Открыл заказ",
+    "checkout": "Открыл оформление заказа",
+    "checkout_promo_preview": "Проверил промо в корзине",
+    "payment": "Перешёл к оплате",
+    "payment_confirm": "Подтвердил оплату",
+    "delivery": "Открыл доставку",
+    "delivery_checkout": "Открыл оформление доставки",
+    "delivery_payment": "Перешёл к оплате доставки",
+    "delivery_payment_page": "Открыл оплату доставки",
+    "delivery_confirm": "Подтвердил доставку",
+    "notifications": "Открыл уведомления",
+    "login": "Вошёл в аккаунт",
+    "register": "Зарегистрировался",
+    "logout": "Вышел из аккаунта",
+    "points": "Открыл бонусы",
+    "reviews": "Открыл отзывы",
+    "user_agreement": "Открыл пользовательское соглашение",
+}
+
+_EVENT_ENTITY_BY_ENDPOINT = {
+    "book_table": "booking",
+    "release_table": "booking",
+    "cancel_booking": "booking",
+    "payment": "order",
+    "payment_confirm": "order",
+    "checkout_promo_preview": "order",
+    "delivery_confirm": "order",
+    "delivery_payment": "order",
+    "add_card": "payment_card",
+    "delete_card": "payment_card",
+    "availability": "booking",
 }
 
 
@@ -383,8 +433,130 @@ def _safe_event_values(values):
     return safe
 
 
-def _request_event_payload():
+def _event_endpoint():
+    return request.endpoint or "request"
+
+
+def _event_request_values():
+    values = {}
+    if request.args:
+        values.update(request.args.to_dict(flat=True))
+    if request.form:
+        values.update(request.form.to_dict(flat=True))
+    json_payload = request.get_json(silent=True)
+    if isinstance(json_payload, dict):
+        values.update(json_payload)
+    return values
+
+
+def _event_compact_items(raw_items):
+    if raw_items is None:
+        return None
+    if isinstance(raw_items, str):
+        try:
+            raw_items = json.loads(raw_items)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(raw_items, list):
+        return None
+    items = []
+    for item in raw_items[:20]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            item_id = int(item.get("id"))
+            qty = int(item.get("qty", 1))
+        except (TypeError, ValueError):
+            continue
+        if item_id > 0 and qty > 0:
+            items.append({"id": item_id, "qty": qty})
+    return items
+
+
+def _event_detail_values(values):
+    details = {}
+    allowed_keys = (
+        "table_id",
+        "date",
+        "time",
+        "serve_mode",
+        "serve_custom_time",
+        "use_points",
+        "status",
+        "last4",
+        "card_last4",
+        "class_name",
+        "item_id",
+    )
+    for key in allowed_keys:
+        if key in values and values.get(key) not in (None, ""):
+            details[key] = str(values.get(key))[:120]
+
+    if "card_number" in values:
+        card_digits = "".join(ch for ch in str(values.get("card_number") or "") if ch.isdigit())
+        if len(card_digits) >= 4:
+            details["card_last4"] = card_digits[-4:]
+
+    items = _event_compact_items(values.get("items_json") if "items_json" in values else values.get("items"))
+    if items:
+        details["items"] = items
+        details["items_count"] = sum(item["qty"] for item in items)
+        details["unique_items_count"] = len(items)
+
+    return details
+
+
+def _event_response_target(response):
+    location = response.headers.get("Location", "") or ""
+    if not location and response.is_json:
+        response_payload = response.get_json(silent=True)
+        if isinstance(response_payload, dict):
+            location = str(response_payload.get("order_url") or "")
+    match = re.search(r"/orders/(\d+)", location)
+    if match:
+        return "order", match.group(1)
+    return None, None
+
+
+def _event_actor_payload():
+    user_id = session.get("user_id")
+    user_name = session.get("user_name") or ""
+    return {
+        "type": "user" if user_id else "guest",
+        "user_id": user_id,
+        "name": str(user_name)[:120],
+    }
+
+
+def _event_action_payload(response, details):
+    endpoint = _event_endpoint()
+    label = _EVENT_ACTION_LABELS.get(endpoint, endpoint)
+    success = int(response.status_code or 0) < 400
+    status_text = "успешно" if success else f"ошибка {response.status_code}"
+    summary = f"{label} ({status_text})"
+    if endpoint in {"book_table", "availability"} and details.get("table_id"):
+        summary = f"{label}: стол #{details['table_id']} ({status_text})"
+    elif endpoint in {"add_card", "delete_card"} and details.get("card_last4"):
+        summary = f"{label}: карта **** {details['card_last4']} ({status_text})"
+    elif endpoint in {"payment", "payment_confirm", "delivery_payment", "delivery_confirm"} and details.get("items_count"):
+        summary = f"{label}: позиций {details['items_count']} ({status_text})"
+    return {
+        "label": label,
+        "summary": summary,
+        "success": success,
+        "status_code": int(response.status_code or 0),
+    }
+
+
+def _request_event_payload(response):
+    values = _event_request_values()
+    details = _event_detail_values(values)
+    action = _event_action_payload(response, details)
     payload = {"endpoint": request.endpoint or ""}
+    payload["actor"] = _event_actor_payload()
+    payload["action"] = action
+    if details:
+        payload["details"] = details
     if request.args:
         payload["query"] = _safe_event_values(request.args.to_dict(flat=True))
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
@@ -407,6 +579,17 @@ def _request_entity():
     if "item_id" in view_args:
         return "menu_item", view_args["item_id"]
     endpoint = request.endpoint or "request"
+    if endpoint in _EVENT_ENTITY_BY_ENDPOINT:
+        values = _event_request_values()
+        entity_id = ""
+        if endpoint in {"book_table", "availability", "release_table", "cancel_booking"}:
+            entity_id = values.get("table_id") or ""
+        elif endpoint == "delete_card":
+            entity_id = values.get("last4") or ""
+        elif endpoint == "add_card":
+            card_digits = "".join(ch for ch in str(values.get("card_number") or "") if ch.isdigit())
+            entity_id = card_digits[-4:] if len(card_digits) >= 4 else ""
+        return _EVENT_ENTITY_BY_ENDPOINT[endpoint], entity_id
     if "." in endpoint:
         endpoint = endpoint.split(".", 1)[1]
     return endpoint.split("_", 1)[0], ""
@@ -469,6 +652,10 @@ def log_app_event_request(response):
         if started_at is not None:
             duration_ms = int(max(0.0, (time.perf_counter() - started_at) * 1000.0))
         entity_type, entity_id = _request_entity()
+        response_entity_type, response_entity_id = _event_response_target(response)
+        if response_entity_type:
+            entity_type = response_entity_type
+            entity_id = response_entity_id
         admin_service.log_app_event(
             user_id=session.get("user_id"),
             event_type=request.endpoint or "request",
@@ -481,7 +668,7 @@ def log_app_event_request(response):
             user_agent=request.headers.get("User-Agent", ""),
             referrer=request.referrer or "",
             duration_ms=duration_ms,
-            payload=_request_event_payload(),
+            payload=_request_event_payload(response),
         )
     except Exception as exc:
         print(f"[app-events] log failed ({exc})", flush=True)

@@ -1,0 +1,6 @@
+id=9
+class=reklama
+text=«GigaChat: “как дела?” → PDF, диаграммы, и стратегия на 5 лет вперёд.»
+link=https://giga.chat/
+priority=10
+active=true

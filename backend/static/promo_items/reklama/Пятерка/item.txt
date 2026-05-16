@@ -1,0 +1,6 @@
+id=6
+class=reklama
+text=«Твич пятёрки: заходишь ради контента — остаёшься ради психотерапии.»
+link=https://m.twitch.tv/5opka/home?lang=ru
+priority=10
+active=true

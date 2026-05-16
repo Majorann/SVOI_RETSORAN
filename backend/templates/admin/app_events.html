@@ -72,10 +72,11 @@
                 {% endif %}
               </td>
               <td>
-                <strong>{{ event.event_type }}</strong>
+                <strong>{{ event.action_summary or event.action_label or event.event_type }}</strong>
                 {% if event.entity_type %}
                   <small class="admin-table-subtext">{{ event.entity_type }}{% if event.entity_id %} #{{ event.entity_id }}{% endif %}</small>
                 {% endif %}
+                <small class="admin-table-subtext">{{ event.event_type }}</small>
               </td>
               <td>
                 <span class="admin-badge">{{ event.method }}</span>

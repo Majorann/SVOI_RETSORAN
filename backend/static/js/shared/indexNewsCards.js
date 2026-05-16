@@ -235,4 +235,43 @@ const setupIndexFeaturedMenuCards = () => {
   window.addEventListener("resize", syncInteractionMode);
 };
 
-export { setupIndexFeaturedMenuCards, setupIndexNewsCards };
+const setupPromoGalleryDialog = () => {
+  const dialog = document.querySelector("#promoGalleryDialog");
+  const openButton = document.querySelector("[data-promo-gallery-open]");
+  const closeButtons = Array.from(document.querySelectorAll("[data-promo-gallery-close]"));
+  if (!dialog || !openButton) return;
+
+  const openDialog = () => {
+    if (openButton.disabled) return;
+    if (typeof dialog.showModal === "function") {
+      dialog.showModal();
+    } else {
+      dialog.setAttribute("open", "");
+    }
+    document.body.classList.add("is-promo-gallery-open");
+  };
+
+  const closeDialog = () => {
+    if (typeof dialog.close === "function") {
+      dialog.close();
+    } else {
+      dialog.removeAttribute("open");
+    }
+    document.body.classList.remove("is-promo-gallery-open");
+    openButton.focus({ preventScroll: true });
+  };
+
+  openButton.addEventListener("click", openDialog);
+  closeButtons.forEach((button) => button.addEventListener("click", closeDialog));
+
+  dialog.addEventListener("click", (event) => {
+    if (event.target !== dialog) return;
+    closeDialog();
+  });
+
+  dialog.addEventListener("cancel", () => {
+    document.body.classList.remove("is-promo-gallery-open");
+  });
+};
+
+export { setupIndexFeaturedMenuCards, setupIndexNewsCards, setupPromoGalleryDialog };

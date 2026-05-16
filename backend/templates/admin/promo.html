@@ -1,5 +1,36 @@
 {% extends "admin/base.html" %}
 {% block admin_content %}
+<section class="admin-card admin-toolbar">
+  <div class="admin-section-head">
+    <h2>СУБД акций и рекламы</h2>
+    <span class="admin-badge {% if storage_status.db_first %}admin-badge--success{% else %}admin-badge--warning{% endif %}">
+      {{ storage_status.backend }}
+    </span>
+  </div>
+  <div class="admin-chip-row">
+    <span class="admin-chip">Всего: {{ storage_status.total }}</span>
+    <span class="admin-chip">Акции: {{ storage_status.akciya }}</span>
+    <span class="admin-chip">Реклама: {{ storage_status.reklama }}</span>
+    <span class="admin-chip">Активных: {{ storage_status.active }}</span>
+    <span class="admin-chip">Скрытых: {{ storage_status.hidden }}</span>
+  </div>
+  <form class="admin-filters" method="get">
+    <select class="admin-select" name="class_name">
+      <option value="">Все записи</option>
+      <option value="akciya" {% if filters.class_name == "akciya" %}selected{% endif %}>Только акции</option>
+      <option value="reklama" {% if filters.class_name == "reklama" %}selected{% endif %}>Только реклама</option>
+    </select>
+    <button class="admin-button" type="submit">Фильтр</button>
+  </form>
+  <div class="admin-note">
+    {% if storage_status.db_first %}
+      Акции и рекламные блоки читаются и сохраняются через таблицу promotions. Изображения остаются в static.
+    {% else %}
+      Сейчас используется файловое хранилище. Для полноценного управления через СУБД включите Postgres.
+    {% endif %}
+  </div>
+</section>
+
 <section class="admin-grid admin-grid--promo">
   <article class="admin-card">
     <div class="admin-section-head"><h2>Сохранить промо</h2></div>
@@ -203,6 +234,30 @@
                 <p><code>{{ item.reward or "reward не задан" }}</code></p>
                 {% if item.dsl_error %}<p>{{ item.dsl_error }}</p>{% endif %}
               {% endif %}
+            </div>
+            <div class="admin-promo-row__form">
+              <button
+                class="admin-button admin-button--ghost"
+                type="button"
+                data-admin-promo-edit
+                data-id="{{ item.id }}"
+                data-class-name="{{ item.class }}"
+                data-name="{{ item.name or '' }}"
+                data-text="{{ item.text or '' }}"
+                data-link="{{ item.link or '' }}"
+                data-lore="{{ item.lore or '' }}"
+                data-condition="{{ item.condition or '' }}"
+                data-reward="{{ item.reward or '' }}"
+                data-dsl-version="{{ item.dsl_version or '' }}"
+                data-notify="{{ item.notify or '' }}"
+                data-reward-mode="{{ item.reward_mode or '' }}"
+                data-limit-per-order="{{ item.limit_per_order or '' }}"
+                data-limit-per-user-per-day="{{ item.limit_per_user_per_day or '' }}"
+                data-priority="{{ item.priority or 100 }}"
+                data-start-at="{{ item.start_at or '' }}"
+                data-end-at="{{ item.end_at or '' }}"
+                data-active="{{ 1 if item.active else 0 }}"
+              >Править</button>
             </div>
             <form class="admin-promo-row__form" method="post" action="{{ url_for('admin.promo_delete', class_name=item.class, item_id=item.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
